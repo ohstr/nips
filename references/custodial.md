@@ -1,6 +1,6 @@
 # Custodial Logic & Fallback Addresses
 
-A core differentiating mechanic of the Zap Protocol is its capacity to route value to users who do **not** have a Nostr keypair yet (Legacy Identity Providers / LIDPs).
+A core differentiating mechanic of AltZap (NIP-AZ) is its capacity to route value to users who do **not** have a Nostr keypair yet (Legacy Identity Providers / LIDPs).
 
 ## The "Pending" State (Fallback Escrow)
 When a ZSP (Zap Settlement Provider) settles a zap intended for a legacy user (e.g., an email address or Discord ID):
@@ -9,9 +9,9 @@ When a ZSP (Zap Settlement Provider) settles a zap intended for a legacy user (e
 2. **Fallback Holding:** If NO such link exists, the ZSP **cannot** successfully forward the funds because there is no endpoint. 
 3. The ZSP MUST hold the funds in an internal ledger known as the "Fallback Address."
 
-## The Universal Zap Receipt (Finality)
+## The Universal AltZap Receipt (Finality)
 Even when funds fall into a "Custodial" or "Pending" state where the recipient hasn't received them on-chain:
-- **The ZSP MUST publish the Kind 5521 Zap Receipt** to the network.
+- **The ZSP MUST publish the Kind 5521 AltZap Receipt** to the network.
 - *Why?* This informs the network (and the Sender) that the value has successfully moved from the Sender's wallet into the ZSP's secure escrow. From the perspective of the Sender, the payment is mathematically "Final".
 
 ## The Claim Flow Mandate

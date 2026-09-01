@@ -1,34 +1,34 @@
 ---
-name: zapf-protocol
-description: Use when building, debugging, or verifying components of the Zap Protocol (Kinds 5520, 5521, 5523). Invoke for LNURL webhooks, ZSP implementations, proxy agents, BOLT11 validations, and identity resolution.
+name: nip-az
+description: Use when building, debugging, or verifying components of AltZap / NIP-AZ (Kinds 5520, 5521, 5523). Invoke for LNURL webhooks, ZSP implementations, proxy agents, BOLT11 validations, and identity resolution.
 license: MIT
 metadata:
   version: "2026.1.0"
   domain: protocol
-  triggers: Zapf, Kind 5520, Kind 5521, Kind 5523, ZSP, proxy zap, fallback address, custodial receipt
+  triggers: Zapf, AltZap, NIP-AZ, Kind 5520, Kind 5521, Kind 5523, ZSP, proxy zap, fallback address, custodial receipt
   role: specialist
   scope: architecture
   output-format: markdown
 ---
 
-# Zap Protocol Core SKILL
+# NIP-AZ (AltZap) Core SKILL
 
-The Zap Protocol is a Non-Custodial Intent Layer built on Nostr and Lightning/Flokicoin. It bridges Legacy Identity Providers (LIDPs) to cryptographic value by decoupling Intent (Requests) from Proof of Settlement (Receipts).
+AltZap (NIP-AZ) is a Non-Custodial Intent Layer built on Nostr and Lightning/Flokicoin. It bridges Legacy Identity Providers (LIDPs) to cryptographic value by decoupling Intent (Requests) from Proof of Settlement (Receipts).
 
 ## Role Definition
 
-You are a strict, protocol-compliant ZSP (Zap Settlement Provider) engineer. You strictly enforce cryptographic constraints, identity resolution, and correct Event formatting. Precision in tags (`p`, `P`, `amount`, `chain`) is mandatory.
+You are a strict, protocol-compliant ZSP (AltZap Settlement Provider) engineer. You strictly enforce cryptographic constraints, identity resolution, and correct Event formatting. Precision in tags (`p`, `P`, `amount`, `chain`) is mandatory.
 
 ## When to Use This Skill
 
-- Whenever validating or creating a Zap Request (Kind 5520) or Proxy On-Behalf Request (Kind 5523).
-- When settling invoices and publishing Zap Receipts (Kind 5521).
+- Whenever validating or creating an AltZap Request (Kind 5520) or On-Behalf AltZap Request (Kind 5523).
+- When settling invoices and publishing AltZap Receipts (Kind 5521).
 - When bridging Legacy Identities (Discord, Email, X) via Identity Connections (Kind 35521).
 - When reasoning about custodial or fallback funds.
 
 ## Core Directives
 
-1. **Verify the Identity Tag Array Structure**: `["p/P", "<hex_or_ConnectionKey>", "<lidp_name>"]` is the standard format for identity mapping (Kind 5521 Zap Receipts can include an optional 4th element: `<handle>`).
+1. **Verify the Identity Tag Array Structure**: `["p/P", "<hex_or_ConnectionKey>", "<lidp_name>"]` is the standard format for identity mapping (Kind 5521 AltZap Receipts can include an optional 4th element: `<handle>`).
 2. **Obey Chain Gating**: A requested `chain` format must strictly match the network's liquidity capabilities.
 3. **Mandate Fallbacks**: Unresolved Nostr identities must result in Custodial ZSP states until claimed.
 4. **Clean #d Tags**: When querying or constructing `Identity Connection (35521)` filters with `#d`, the value MUST ONLY be the ConnectionKey. It must NEVER include the platform prefix (e.g., `["discord:<ConnectionKey>"]` is invalid; `["<ConnectionKey>"]` is correct).
@@ -50,6 +50,6 @@ Load the detailed architectural logic based on the context of the user's prompt:
 ## Knowledge Base Quick-Sheet
 
 - **LIDP**: Legacy Identity Provider (e.g., discord, email). **Nostr is NOT an LIDP.**
-- **ZSP**: Zap Settlement Provider (liquidity and receipt issuer).
+- **ZSP**: AltZap Settlement Provider (liquidity and receipt issuer).
 - **Milli-Units**: `mloki` (Flokicoin) or `msats` (Bitcoin). Valid denomination. No base units.
 - **ConnectionKey**: The unique SHA256 cryptographic hash used in the `p` or `P` tags when a Nostr pubkey is unknown (e.g., for LIDPs). Never hash native Nostr addresses.

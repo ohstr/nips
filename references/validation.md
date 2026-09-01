@@ -3,7 +3,7 @@
 A Zap Settlement Provider (ZSP) relies on strict logic to protect users from malicious operators or cross-network unit loss.
 
 ## Description Hash Binding (Kinds 5520 & 5523)
-For LNURL-Pay generated invoices, the ZSP MUST ensure that the `description_hash` (the `h` tag) in the generated BOLT11 invoice mathematically binds the exact Zap Request event.
+For LNURL-Pay generated invoices, the ZSP MUST ensure that the `description_hash` (the `h` tag) in the generated BOLT11 invoice mathematically binds the exact AltZap Request event.
 
 `BOLT11.h = SHA256(JSON.stringify(EventKind_5520_or_5523))`
 
@@ -14,7 +14,7 @@ Every single request (`5520`, `5522`, `5523`) MUST define its network context to
 
 1. Perform LNURL-PAY GET request to the target destination.
 2. Inspect the metadata array for a `chain/<name>` entry.
-3. If the user's Zap Request contains `["chain", "flokicoin"]`, but the endpoint's metadata only returns `chain/bitcoin`, the ZSP MUST REJECT the payment.
+3. If the user's AltZap Request contains `["chain", "flokicoin"]`, but the endpoint's metadata only returns `chain/bitcoin`, the ZSP MUST REJECT the payment.
 
 ## Receipt Mirroring (Kind 5521)
 To maintain logical, deterministic indexing for Nostr clients filtering via tags (`#p` or `#P`):

@@ -1,6 +1,6 @@
 # LNURL & LUD-16 Integration
 
-The Zap Protocol uses **LUD-06** and **LUD-16** to bridge traditional Lightning wallets to Nostr infrastructure and Legacy Identity Providers (LIDPs) via Zap Settlement Providers (ZSP).
+AltZap (NIP-AZ) uses **LUD-06** and **LUD-16** to bridge traditional Lightning wallets to Nostr infrastructure and Legacy Identity Providers (LIDPs) via AltZap Settlement Providers (ZSP).
 
 When modifying, debugging, or creating LNURL flows within Zapf, you **MUST** adhere to the following strict integration rules.
 
@@ -44,7 +44,7 @@ When the wallet requests the invoice:
 
 The backend MUST enforce these checks:
 1. **Amount Assertion**: If a `nostr` event (Kind 5520, 5522, 5523) is attached, extract the `amount` tag. It MUST exactly match the `amount` query parameter requested by the wallet. If there is a mismatch, reject the request with a 400 Error.
-2. **Chain Assertion**: The frontend generating the `nostr` Zap Request EVENT must explicitly include the `["chain", "flokicoin"]` tag in the event to prevent cross-chain replay attacks.
+2. **Chain Assertion**: The frontend generating the `nostr` AltZap Request EVENT must explicitly include the `["chain", "flokicoin"]` tag in the event to prevent cross-chain replay attacks.
 3. **Description Hash**: 
    - If a `nostr` event is provided, the invoice's description hash MUST be the SHA256 hash of the raw JSON string of the Nostr event.
    - If no `nostr` event is provided (a plain Lightning payment), the description hash MUST be the SHA256 hash of the LNURL `metadata` JSON array.

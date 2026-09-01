@@ -1,4 +1,4 @@
-# Zap Protocol: Event Kinds & Data Formats
+# NIP-AZ (AltZap): Event Kinds & Data Formats
 
 ## The 3-Element Tag Standard
 To ensure universal legacy identity resolution without a hard requirement for a Nostr wallet, all identity tags (`p` for Recipient, `P` for Sender) MUST use the following array structure:
@@ -8,7 +8,7 @@ To ensure universal legacy identity resolution without a hard requirement for a 
 - **[1] Identity**: 64-character hex pubkey OR ConnectionKey.
 - **[2] Provider**: The source. Used values: `nostr`, `discord`, `email`, `x`.
 
-## Kind 5520: Native Zap Request
+## Kind 5520: Native AltZap Request
 
 ```json
 {
@@ -45,7 +45,7 @@ Used by native Nostr users to zap another user or LNURL destination.
     * `a`: Target coordinate if zapping a replaceable event.
     * `k`: Stringified kind of the target event.
 
-## Kind 5523: On-Behalf Request (Proxy)
+## Kind 5523: On-Behalf AltZap Request (Proxy)
 
 ```json
 {
@@ -79,7 +79,7 @@ Used by bots (Proxy Agents) to represent users on legacy platforms.
 **Validation / Identity Resolution (via Kind 35521):**
 When parsing a `5523` event (or its resultant `5521`), the ConnectionKey is the primary identifier. To display a "Verified" UI experience, clients MUST query for a **Kind 35521 (Identity Connection)** where the `#d` tag matches the ConnectionKey. If no 35521 exists, display the fallback LIDP identity (e.g., Provider Avatar).
 
-## Kind 5521: Universal Zap Receipt
+## Kind 5521: Universal AltZap Receipt
 
 ```json
 {
@@ -116,14 +116,14 @@ The final proof of settlement issued by the ZSP.
     * `description`: Stringified JSON of the Request event (5520/5523).
     * `preimage`: Cryptographic proof (32-byte hex).
 * **Optional Tags:**
-    * `e`: Used if the Zap is in response to a specific Nostr event (copied from request).
-    * `a`: Used if the Zap is in response to a parameterized replaceable event (copied from request).
+    * `e`: Used if the AltZap is in response to a specific Nostr event (copied from request).
+    * `a`: Used if the AltZap is in response to a parameterized replaceable event (copied from request).
     * `r`: Resolved Recipient (Used to map a `p` ConnectionKey back to a native pubkey if the ZSP knows the 35521 connection).
     * `R`: Resolved Sender (Used to map a `P` ConnectionKey back to a native pubkey if the ZSP knows the 35521 connection). Enables "Social Bridge" UX.
 
 ### Identity Tag Matrix for Agents (5521 Generation)
 
-When generating a 5521 Zap Receipt, use this matrix to correctly populate identity tags based on the parent intent kind:
+When generating a 5521 AltZap Receipt, use this matrix to correctly populate identity tags based on the parent intent kind:
 
 | Intent Kind | Sender (`P`) | Recipient (`p`) | Resolved Recipient (`r`) | Resolved Sender (`R`) |
 | --- | --- | --- | --- | --- |
