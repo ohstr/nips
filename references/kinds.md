@@ -108,7 +108,7 @@ When parsing a `5523` event (or its resultant `5521`), the ConnectionKey is the 
 The final proof of settlement issued by the ZSP.
 * **Initiator:** Signed by ZSP's Private Key.
 * **Required Tags:**
-    * `p`: Mirror Recipient. The optional 4th element is the stable provider handle. May be appended post-settlement for Direct Payments.
+    * `p`: Mirror Recipient. The optional 4th element is the stable provider handle.
     * `P`: Mirror Sender. The optional 4th element is the stable provider handle. This structure supports proxy/anonymous routing.
     * `amount`: Settled milli-units extracted from the BOLT11.
     * `chain`: Settled network.
