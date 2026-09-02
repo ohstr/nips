@@ -1,5 +1,5 @@
 ---
-name: nip-az
+name: zapf-nips
 description: Use when building, debugging, or verifying components of AltZap / NIP-AZ (Kinds 5520, 5521, 5523). Invoke for LNURL webhooks, ZSP implementations, proxy agents, BOLT11 validations, and identity resolution.
 license: MIT
 metadata:
