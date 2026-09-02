@@ -2,7 +2,7 @@
 
 ## The 3-Element Tag Standard
 To ensure universal legacy identity resolution without a hard requirement for a Nostr wallet, all identity tags (`p` for Recipient, `P` for Sender) MUST use the following array structure:
-`["p/P", "<hex_or_ConnectionKey>", "<lidp_name>"]`
+`["p/P", "<hex_or_ConnectionKey>", "<platform_name>"]`
 
 - **[0] Key**: `p` (Recipient), `P` (Sender)
 - **[1] Identity**: 64-character hex pubkey OR ConnectionKey.
@@ -18,7 +18,7 @@ To ensure universal legacy identity resolution without a hard requirement for a 
     ["e", "<optional_target_event_id>"],
     ["a", "<optional_kind:pubkey:d_tag>"],
     ["k", "<optional_target_event_kind>"],
-    ["p", "<recipient_pubkey_or_ConnectionKey>", "<optional_lidp_name>"],
+    ["p", "<recipient_pubkey_or_ConnectionKey>", "<optional_platform_name>"],
     ["amount", "1000000"],
     ["chain", "flokicoin"],
     ["lnurl", "lnurl1..."],
@@ -35,7 +35,7 @@ Used by native Nostr users to zap another user or LNURL destination.
 * **Initiator:** Signed by Sender's Private Key.
 * **Mechanism:** LNURL-Pay.
 * **Required Tags:**
-    * `p`: Recipient identity (e.g., `["p", "<recipient_pubkey_or_ConnectionKey>", "<optional_lidp_name>"]`). If the 3rd parameter is omitted or empty, it defaults to `nostr` (pubkey).
+    * `p`: Recipient identity (e.g., `["p", "<recipient_pubkey_or_ConnectionKey>", "<optional_platform_name>"]`). If the 3rd parameter is omitted or empty, it defaults to `nostr` (pubkey).
     * `amount`: Total value in milli-units.
     * `lnurl`: Bech32 LNURL of the recipient.
     * `relays`: Target relays.
@@ -52,8 +52,8 @@ Used by native Nostr users to zap another user or LNURL destination.
   "kind": 5523,
   "content": "Sent via Proxy Application",
   "tags": [
-    ["p", "<recipient_ConnectionKey>", "<lidp_name>"],
-    ["P", "<sender_ConnectionKey>", "<lidp_name>"],
+    ["p", "<recipient_ConnectionKey>", "<platform_name>"],
+    ["P", "<sender_ConnectionKey>", "<platform_name>"],
     ["amount", "100000"],
     ["chain", "flokicoin"],
     ["relays", "wss://relay.zapf.app", "wss://relay.damus.io"],
@@ -69,15 +69,15 @@ Used by bots (Proxy Agents) to represent users on legacy platforms.
 * **Initiator:** Signed by Proxy Agent's Key (e.g., Zapf Discord Bot).
 * **Mechanism:** LNURL-Pay.
 * **Required Tags:**
-    * `P`: True Sender identity (3-element format, e.g., `["P", "<sender_ConnectionKey>", "<lidp_name>"]`).
-    * `p`: Recipient identity (3-element format, e.g., `["p", "<recipient_ConnectionKey>", "<lidp_name>"]`).
+    * `P`: True Sender identity (3-element format, e.g., `["P", "<sender_ConnectionKey>", "<platform_name>"]`).
+    * `p`: Recipient identity (3-element format, e.g., `["p", "<recipient_ConnectionKey>", "<platform_name>"]`).
     * `amount`: Value in milli-units.
     * `lnurl`: Recipient LNURL endpoint.
     * `chain`: Network context.
     * `relays`: Target relays for receipt publishing.
 
 **Validation / Identity Resolution (via Kind 35521):**
-When parsing a `5523` event (or its resultant `5521`), the ConnectionKey is the primary identifier. To display a "Verified" UI experience, clients MUST query for a **Kind 35521 (Identity Connection)** where the `#d` tag matches the ConnectionKey. If no 35521 exists, display the fallback LIDP identity (e.g., Provider Avatar).
+When parsing a `5523` event (or its resultant `5521`), the ConnectionKey is the primary identifier. To display a "Verified" UI experience, clients MUST query for a **Kind 35521 (Identity Connection)** where the `#d` tag matches the ConnectionKey. If no 35521 exists, display the fallback Web Identity (e.g., Provider Avatar).
 
 ## Kind 5521: Universal AltZap Receipt
 
@@ -88,8 +88,8 @@ When parsing a `5523` event (or its resultant `5521`), the ConnectionKey is the 
   "tags": [
     ["e", "<optional_target_event_id>"],
     ["a", "<optional_kind:pubkey:d_tag>"],
-    ["p", "<recipient_hex_or_ConnectionKey>", "<lidp_name>", "<handle>"],
-    ["P", "<sender_hex_or_ConnectionKey>", "<lidp_name>", "<handle>"],
+    ["p", "<recipient_hex_or_ConnectionKey>", "<platform_name>", "<handle>"],
+    ["P", "<sender_hex_or_ConnectionKey>", "<platform_name>", "<handle>"],
     ["r", "<resolved_recipient_nostr_pubkey>"],
     ["R", "<resolved_sender_nostr_pubkey>"],
     ["amount", "<payment_amount_milli_units>"],
@@ -142,7 +142,7 @@ When generating a 5521 AltZap Receipt, use this matrix to correctly populate ide
   "tags": [
     ["d", "<connection_key>"],
     ["e", "<attestation_event_id>", "<ia_relay_url>"],
-    ["lidp", "<lidp_name>"]
+    ["platform", "<platform_name>"]
   ],
   "content": "<public_profile_json>",
   "id": "...",
@@ -150,16 +150,16 @@ When generating a 5521 AltZap Receipt, use this matrix to correctly populate ide
 }
 ```
 
-The user's public declaration that they own a LIDP account. A parameterized replaceable event (30000–39999): keyed by `pubkey + d-tag`.
+The user's public declaration that they own a Web Identity account. A parameterized replaceable event (30000–39999): keyed by `pubkey + d-tag`.
 
-- `d` tag: bare ConnectionKey — **NEVER** prefixed with `lidp:`. Including a prefix breaks `#d` relay queries from third-party clients.
-- `lidp` tag: provider name (e.g., `"discord"`, `"github"`)
+- `d` tag: bare ConnectionKey — **NEVER** prefixed with `platform:`. Including a prefix breaks `#d` relay queries from third-party clients.
+- `platform` tag: provider name (e.g., `"discord"`, `"github"`)
 - `e` tag: `["e", "<attestation_event_id>", "<ia_relay_url>"]` — 3-element reference to Kind 35522. Consumers must fetch the full event from the IA relay to verify. **Never embed the attestation JSON.**
 - `expiration` tag: optional — mirrored from the Kind 35522 expiration (NIP-40) so relays can auto-prune expired events.
 - `content`: always cleartext JSON — `display_name`, `picture`, `user_id`, `username`. Empty (`""`) if no profile data.
 - Multiple `e` tags allowed — one per IA attesting the same connection (multi-IA stacking)
 
-When querying relays: use `#d` filter with the bare ConnectionKey. Use `#lidp` to filter by provider.
+When querying relays: use `#d` filter with the bare ConnectionKey. Use `#platform` to filter by provider.
 
 ## Kind 35522: IA Attestation (IA-Signed)
 
@@ -170,7 +170,7 @@ When querying relays: use `#d` filter with the bare ConnectionKey. Use `#lidp` t
   "tags": [
     ["d", "<connection_key>"],
     ["p", "<user_pubkey>"],
-    ["lidp", "<lidp_name>"],
+    ["platform", "<platform_name>"],
     ["evidence", "<verification_payload>"],
     ["expiration", "<unix_timestamp>"]
   ],
@@ -181,11 +181,11 @@ When querying relays: use `#d` filter with the bare ConnectionKey. Use `#lidp` t
 }
 ```
 
-The Identity Authority's cryptographic proof that a user owns a LIDP account.
+The Identity Authority's cryptographic proof that a user owns a Web Identity account.
 
 - `d` tag: bare ConnectionKey (same as Kind 35521 `d` tag)
 - `p` tag: user's Nostr pubkey — **frontend MUST verify `p == outerKind35521.pubkey`** to prevent embedding attacks
-- `lidp` tag: provider name
+- `platform` tag: provider name
 - `evidence` tag: `["evidence", "<verification_payload>"]` — cleartext v1 JSON string. Readable by anyone; enables cross-IA re-verification.
 - `expiration` tag: NIP-40 unix timestamp — default 90 days, configurable via `IA_ATTESTATION_EXPIRY_DAYS`
 - Content: `""` (empty)
@@ -196,7 +196,7 @@ A complete v1 evidence payload looks like this:
 ```json
 {
   "version": 1,
-  "lidp": "discord",
+  "platform": "discord",
   "auth_type": "public_post",
   "user_id": "1254093577051574374",
   "username": "joyosar",

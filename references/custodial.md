@@ -1,6 +1,6 @@
 # Custodial Logic & Fallback Addresses
 
-A core differentiating mechanic of AltZap (NIP-AZ) is its capacity to route value to users who do **not** have a Nostr keypair yet (Legacy Identity Providers / LIDPs).
+A core differentiating mechanic of AltZap (NIP-AZ) is its capacity to route value to users who do **not** have a Nostr keypair yet (Web Identities).
 
 ## The "Pending" State (Fallback Escrow)
 When a ZSP (Zap Settlement Provider) settles a zap intended for a legacy user (e.g., an email address or Discord ID):
@@ -17,7 +17,7 @@ Even when funds fall into a "Custodial" or "Pending" state where the recipient h
 ## The Claim Flow Mandate
 To ensure that funds are never permanently captive:
 - Any compliant ZSP **MUST** provide a "Claim Flow" (e.g., a bot-session or challenge-token verification flow).
-- When the LIDP user authenticates and generates a Nostr keypair, they go through the full verification flow:
+- When the Web Identity user authenticates and generates a Nostr keypair, they go through the full verification flow:
   1. IA operator approves → Kind 35522 attestation published (session `confirmed`).
   2. User signs and publishes Kind 35521 referencing the attestation via `e` tag (event ID + relay URL — no embedded JSON).
   3. Client sends the activation signal to the IA — **only at this point** does the IA write the `Identity` record to its store. The mechanism for this signal is IA-implementation-defined.

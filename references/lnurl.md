@@ -1,6 +1,6 @@
 # LNURL & LUD-16 Integration
 
-AltZap (NIP-AZ) uses **LUD-06** and **LUD-16** to bridge traditional Lightning wallets to Nostr infrastructure and Legacy Identity Providers (LIDPs) via AltZap Settlement Providers (ZSP).
+AltZap (NIP-AZ) uses **LUD-06** and **LUD-16** to bridge traditional Lightning wallets to Nostr infrastructure and Web Identities via AltZap Settlement Providers (ZSP).
 
 When modifying, debugging, or creating LNURL flows within Zapf, you **MUST** adhere to the following strict integration rules.
 
@@ -9,7 +9,7 @@ When modifying, debugging, or creating LNURL flows within Zapf, you **MUST** adh
 When Zapf receives a request at `GET /.well-known/lnurlp/<username>`, the `<username>` isn't necessarily a standard handle. It MUST be resolved in this exact priority order:
 
 1. **NIP-05 Handle** (`alice` in `alice@domain.com`): Looked up natively by querying the target domain's `.well-known/nostr.json`. 
-2. **ConnectionKey Hash** (`a1b2c3...`): A 64-character hex string representing a legacy social connection (e.g. Discord). **NEVER** expose the raw LIDP username (like `discorduser`) in the LNURL path.
+2. **ConnectionKey Hash** (`a1b2c3...`): A 64-character hex string representing a legacy social connection (e.g. Discord). **NEVER** expose the raw Web Identity username (like `discorduser`) in the LNURL path.
 3. **Raw Pubkey** (`<hex_pubkey>`): Used directly as the Nostr recipient.
 
 ### Custodial Fallback (The Proxy Behavior)

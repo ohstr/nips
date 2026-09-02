@@ -11,7 +11,7 @@ Identity Connection: Legacy Account Linking
 
 ## Abstract
 
-This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Legacy Identity Provider**, LIDP: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ uses to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
+This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Web Identity**: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ uses to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
 
 ## Motivation
 
@@ -26,11 +26,11 @@ Splitting these apart — rather than having a single self-attested event — me
 
 ## Terminology
 
-- **IA (Identity Authority)**: A service that verifies a user's ownership of an LIDP account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
-- **LIDP (Legacy Identity Provider)**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). See [NIP-AZ](./NIP-AZ.md) for the shared LIDP/ConnectionKey terminology.
-- **ConnectionKey**: `SHA256("<lidp>:<lidp-user-id>")` — see NIP-AZ. The `d` tag of both event kinds in this NIP.
+- **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
+- **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
+- **ConnectionKey**: `SHA256("<platform>:<platform-user-id>")` — see NIP-AZ. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
-- **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the LIDP platform as evidence of control.
+- **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
 ## Specification
 
@@ -53,7 +53,7 @@ Both are kind-30000-range parameterized replaceable events per NIP-01: a new eve
   "tags": [
     ["d", "<connection-key>"],
     ["e", "<attestation-event-id>", "<ia-relay-url>"],
-    ["lidp", "<lidp-name>"]
+    ["platform", "<platform-name>"]
   ],
   "content": "<public-profile-json>",
   "id": "...",
@@ -63,7 +63,7 @@ Both are kind-30000-range parameterized replaceable events per NIP-01: a new eve
 
 Published by the end user to claim a connection. On its own this is an unverified claim — see Verification Model.
 
-**Required tags**: `d` (the bare ConnectionKey — **MUST NOT** carry a platform prefix like `discord:`; a prefixed `d` tag breaks `#d` filter queries from third-party clients), `lidp` (the LIDP name, for relay-side filtering), `e` (references the witnessing `35522`; see below).
+**Required tags**: `d` (the bare ConnectionKey — **MUST NOT** carry a platform prefix like `discord:`; a prefixed `d` tag breaks `#d` filter queries from third-party clients), `platform` (the Web Identity's platform name, for relay-side filtering), `e` (references the witnessing `35522`; see below).
 
 **`e` tag**: `["e", "<attestation-event-id>", "<ia-relay-url>"]` — a **reference**, not an embed. The attestation is fetched from `<ia-relay-url>` on demand, keeping the `35521` event small (~100 bytes vs. 1-2 KB for an inlined attestation). A user MAY include multiple `e` tags, one per IA that has independently attested the same connection ("stacking") — a client only needs to trust one of them.
 
@@ -78,7 +78,7 @@ Published by the end user to claim a connection. On its own this is an unverifie
   "tags": [
     ["d", "<connection-key>"],
     ["p", "<user-pubkey>"],
-    ["lidp", "<lidp-name>"],
+    ["platform", "<platform-name>"],
     ["evidence", "<verification-payload-json>"],
     ["expiration", "<unix-timestamp>"]
   ],
@@ -91,7 +91,7 @@ Published by the end user to claim a connection. On its own this is an unverifie
 
 Signed by the IA immediately upon completing a successful verification flow. `content` is always empty — everything relevant is in the tags.
 
-**Required tags**: `d` (same ConnectionKey as the `35521` it will be referenced by), `p` (the Nostr pubkey that proved ownership — a client MUST verify this equals the outer `35521`'s `pubkey` when cross-checking, to prevent an attestation issued to one user being replayed inside a different user's `35521`), `lidp`, `evidence` (see below). `expiration` is a [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) timestamp; a default of 90 days is RECOMMENDED, and an IA MAY omit it for a non-expiring attestation.
+**Required tags**: `d` (same ConnectionKey as the `35521` it will be referenced by), `p` (the Nostr pubkey that proved ownership — a client MUST verify this equals the outer `35521`'s `pubkey` when cross-checking, to prevent an attestation issued to one user being replayed inside a different user's `35521`), `platform`, `evidence` (see below). `expiration` is a [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) timestamp; a default of 90 days is RECOMMENDED, and an IA MAY omit it for a non-expiring attestation.
 
 #### The `evidence` Tag
 
@@ -100,9 +100,9 @@ A cleartext JSON (v1) string:
 | Field | Type | Description |
 |---|---|---|
 | `version` | number | Always `1`. |
-| `lidp` | string | LIDP name. |
+| `platform` | string | Web Identity platform name. |
 | `auth_type` | string | Always `"public_post"` — every supported verification mode requires a public post of the challenge token. |
-| `user_id` | string | The normalized LIDP account identifier. |
+| `user_id` | string | The normalized platform account identifier. |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
 | `evidence_url` | string | URL of the public post carrying the challenge. |
@@ -143,14 +143,14 @@ A portable, shareable string (e.g. handed from a Discord bot to a mobile wallet)
 A client holding a 3-element identity tag (e.g. `["p", "<ConnectionKey>", "discord"]`, per NIP-AZ) resolves it to a Nostr identity as follows:
 
 1. Query `{"kinds": [35521], "#d": ["<ConnectionKey>"]}` against the network (and specifically the ZSP's own relays, if known).
-2. If no event is returned, the connection is **unverified** — fall back to displaying the LIDP-native profile (e.g. avatar/username from the ZSP's own API).
+2. If no event is returned, the connection is **unverified** — fall back to displaying the Web-Identity-native profile (e.g. avatar/username from the ZSP's own API).
 3. If a `35521` is returned, extract its `e` tag and fetch the referenced `35522` from the named relay hint (a Deep Check).
 4. If the fetch succeeds, the event is validly signed by its claimed `pubkey`, unexpired, and unrevoked (see Event Lifecycle), the connection is **Verified**. If the `35521` exists but its `35522` is missing, invalid, expired, or revoked, the connection is **Spoofed** — this is distinct from *unverified*: someone published a `35521` claim that does not check out.
 
 | State | Condition | Recommended UI |
 |---|---|---|
 | **Verified** | `35521` found; its `35522` fetches and checks out | ✅ native Nostr profile |
-| **Pending (fallback)** | No `35521` found | ⏳ fallback LIDP profile |
+| **Pending (fallback)** | No `35521` found | ⏳ fallback Web Identity profile |
 | **Spoofed** | `35521` found; `35522` missing, invalid, expired, or revoked | ⚠️ flag as unverified/suspicious |
 
 ## Event Lifecycle
@@ -158,12 +158,12 @@ A client holding a 3-element identity tag (e.g. `["p", "<ConnectionKey>", "disco
 1. **Creation**: the user completes a verification flow with an IA; the IA signs `35522`.
 2. **Publishing**: the IA publishes `35522` to its own relay(s). Session state: `confirmed`. **Routing is NOT yet active.**
 3. **Linking**: the IA hands the raw `35522` event back to the user's client, which extracts the event ID + IA relay URL, builds the `e` tag, and publishes `35521`. The attestation itself is never embedded.
-4. **Activation**: after publishing `35521`, the client signals the IA (mechanism is implementation-defined). Only now does the IA record the LIDP→Nostr routing link and move the session to `active`. If the user abandons the flow before this step, no routing link is ever created.
+4. **Activation**: after publishing `35521`, the client signals the IA (mechanism is implementation-defined). Only now does the IA record the Web Identity→Nostr routing link and move the session to `active`. If the user abandons the flow before this step, no routing link is ever created.
 5. **Revocation**: to revoke, the IA publishes a [Kind 5](https://github.com/nostr-protocol/nips/blob/master/09.md) deletion targeting the `35522` ID. This immediately fails any subsequent Deep Check. If the session was `active`, the IA also removes its internal routing record.
 
 ## Federated Trust Model & Multi-IA Stacking
 
-Zapf's IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same LIDP account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
+Zapf's IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same Web Identity account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
 
 ## Security Considerations
 

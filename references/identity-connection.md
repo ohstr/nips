@@ -1,15 +1,15 @@
 # Identity Connection: Kind 35521 & Kind 35522
 
-Complete reference for the LIDP-to-Nostr identity binding protocol. Load this file when building or auditing anything involving Kind 35521, Kind 35522, evidence format, ConnectionKey derivation, or `nconnection` URL encoding.
+Complete reference for the Web-Identity-to-Nostr identity binding protocol. Load this file when building or auditing anything involving Kind 35521, Kind 35522, evidence format, ConnectionKey derivation, or `nconnection` URL encoding.
 
-For the full session flow (VerifyFlow, verification service, state machines), see `../connection-lidp-flow/SKILL.md`.
+For the full session flow (VerifyFlow, verification service, state machines), see `../connection-web-identity-flow/SKILL.md`.
 
 ---
 
 ## A — ConnectionKey Derivation
 
 ```
-ConnectionKey = lowercase_hex(SHA256(lidpName + ":" + lidpUserID))
+ConnectionKey = lowercase_hex(SHA256(platform + ":" + platformUserID))
 ```
 
 | Input | Output |
@@ -21,17 +21,17 @@ Go implementation:
 
 ```go
 // pkg/nostr/connection_event.go
-func GenerateConnectionKey(lidpName, lidpID string) string {
-    h := sha256.Sum256([]byte(lidpName + ":" + lidpID))
+func GenerateConnectionKey(platform, externalID string) string {
+    h := sha256.Sum256([]byte(platform + ":" + externalID))
     return hex.EncodeToString(h[:])
 }
 ```
 
 **Rules:**
-- NEVER include the LIDP name as a prefix in the `d` tag of Kind 35521 or 35522. The `d` tag must be the bare ConnectionKey: `["d", connectionKey]`, never `["d", "discord:connectionKey"]`.
+- NEVER include the platform name as a prefix in the `d` tag of Kind 35521 or 35522. The `d` tag must be the bare ConnectionKey: `["d", connectionKey]`, never `["d", "discord:connectionKey"]`.
 - Nostr pubkeys are NEVER hashed into ConnectionKeys. Native Nostr identifiers (pubkeys, NIP-05 addresses) are used directly, not hashed.
-- The ConnectionKey is fully deterministic: same `lidpName` + `lidpUserID` always produces the same key.
-- The `lidp` tag in both kinds carries the provider name separately from the `d` tag.
+- The ConnectionKey is fully deterministic: same `platform` + `platformUserID` always produces the same key.
+- The `platform` tag in both kinds carries the provider name separately from the `d` tag.
 
 ---
 
@@ -44,9 +44,9 @@ The `evidence` tag value is a **cleartext JSON string** (v1 format). It is alway
 | Field | Type | Description |
 |-------|------|-------------|
 | `version` | `number` | Always `1` |
-| `lidp` | `string` | LIDP name (e.g., `"discord"`) |
+| `platform` | `string` | Web Identity platform name (e.g., `"discord"`) |
 | `auth_type` | `string` | Always `"public_post"` — all flows require a public challenge post |
-| `user_id` | `string` | Normalized LIDP account identifier |
+| `user_id` | `string` | Normalized platform account identifier |
 | `username` | `string` | Provider handle at verification time |
 | `verified_at` | `number` | Unix timestamp of verification |
 | `evidence_url` | `string` | URL of the public post where the challenge appeared |
@@ -58,7 +58,7 @@ The `evidence` tag value is a **cleartext JSON string** (v1 format). It is alway
 ```json
 {
   "version": 1,
-  "lidp": "discord",
+  "platform": "discord",
   "auth_type": "public_post",
   "user_id": "1254093577051574374",
   "username": "joyosar",
@@ -83,7 +83,7 @@ The `content` field of Kind 35521 is always **cleartext JSON** containing profil
 
 | Field | Source | Description |
 |-------|--------|-------------|
-| `display_name` | IA profile data | Human-readable name on the LIDP |
+| `display_name` | IA profile data | Human-readable name on the platform |
 | `picture` | IA profile data | Avatar URL |
 | `user_id` | Kind 35522 `evidence` tag | Platform-specific user ID |
 | `username` | Kind 35522 `evidence` tag | Platform handle / username |
@@ -96,7 +96,7 @@ Note: `encryptedId` (`data.encryptedId`) is a separate optional NIP-44 self-encr
 
 ## D — `nconnection` Bech32 Encoding
 
-Used to generate profile page URLs for LIDP-unresolved identities that have not yet published a Kind 35521.
+Used to generate profile page URLs for unresolved Web Identities that have not yet published a Kind 35521.
 
 **Format:** `nconnection1{bech32-encoded TLV data}`
 
@@ -106,7 +106,7 @@ Used to generate profile page URLs for LIDP-unresolved identities that have not 
 |------|------|---------|
 | 0 | 32 bytes | ConnectionKey raw bytes (hex-decoded) — **required** |
 | 1 | variable | Relay URL as UTF-8 bytes — repeatable, one per relay hint |
-| 2 | variable | LIDP name as UTF-8 bytes (e.g., `"discord"`) — at most once |
+| 2 | variable | Platform name as UTF-8 bytes (e.g., `"discord"`) — at most once |
 
 Implementation: `frontend/src/utils/nconnection.ts`
 
@@ -114,22 +114,22 @@ Implementation: `frontend/src/utils/nconnection.ts`
 export function encodeNconnection(
     connectionKey: string,   // 64-char hex
     relays: string[] = [],
-    lidp?: string
+    platform?: string
 ): string
 
 export function decodeNconnection(str: string): {
     connectionKey: string;
     relays: string[];
-    lidp?: string;
+    platform?: string;
 } | null
 ```
 
 Used in `useProfileLink` (`frontend/src/hooks/useProfileLink.ts`) when `isResolved === false`:
 ```typescript
-return '/' + encodeNconnection(identifier, [], lidp);
+return '/' + encodeNconnection(identifier, [], platform);
 ```
 
-Profile pages at `/nconnection1...` display the LIDP icon and platform username if available, and prompt the user to verify to claim their identity.
+Profile pages at `/nconnection1...` display the platform icon and username if available, and prompt the user to verify to claim their identity.
 
 ---
 
@@ -180,7 +180,7 @@ Implementation: `internal/service/cross_attest.go` / `pkg/nostr/attestation_even
   "tags": [
     ["d", "<connection_key>"],
     ["p", "<user_nostr_pubkey>"],
-    ["lidp", "<provider>"],
+    ["platform", "<provider>"],
     ["evidence", "<v1_cleartext_json>"],
     ["expiration", "<unix_timestamp>"]
   ]
@@ -198,7 +198,7 @@ Signed by IA private key via `CreateAttestationEvent(params)` in `pkg/nostr/atte
   "content": "{\"display_name\":\"alice\",\"user_id\":\"123456789\",\"username\":\"alice\"}",
   "tags": [
     ["d", "<connection_key>"],
-    ["lidp", "<provider>"],
+    ["platform", "<provider>"],
     ["e", "<attestation_event_id>", "<ia_relay_url>"],
     ["expiration", "<unix_timestamp>"]
   ]

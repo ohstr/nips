@@ -20,13 +20,13 @@ NIP-57 assumes two things that don't hold for a payments network bridging non-No
 2. **Sender/recipient are always Nostr pubkeys.** A large class of useful recipients — a Discord user, an email address, an X handle — do not have a Nostr keypair at the time they're zapped. NIP-57's `p` tag has no room to say "this identifier isn't a pubkey yet."
 3. **The signer is always the economic sender.** When a custodial bot generates a zap on behalf of a platform user it doesn't control the keys for, NIP-57 has no way to distinguish "the bot paid this" from "the bot is relaying a payment from someone else."
 
-AltZap solves all three by adding a mandatory `chain` tag (replay-safety across chains), extending the `p`/`P` identity tags to a 3-element `["p/P", "<hex-or-ConnectionKey>", "<lidp>"]` form, and introducing a dedicated on-behalf kind (`5523`) where the signing pubkey is explicitly *not* the party to trust for identity.
+AltZap solves all three by adding a mandatory `chain` tag (replay-safety across chains), extending the `p`/`P` identity tags to a 3-element `["p/P", "<hex-or-ConnectionKey>", "<platform>"]` form, and introducing a dedicated on-behalf kind (`5523`) where the signing pubkey is explicitly *not* the party to trust for identity.
 
 ## Terminology
 
 - **ZSP (AltZap Settlement Provider)**: The liquidity and receipt-issuing party — generates invoices against `5520`/`5523` requests and publishes the resulting `5521` receipt. Analogous to NIP-57's "zap receiver" role, but explicit and permissionless: anyone with Lightning liquidity can run one.
-- **LIDP (Legacy Identity Provider)**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** an LIDP.
-- **ConnectionKey**: A deterministic `SHA256("<lidp>:<identifier>")` hash standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
+- **Web Identity**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** a Web Identity.
+- **ConnectionKey**: A deterministic `SHA256("<platform>:<identifier>")` hash standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
 - **Proxy Agent**: A bot or service that signs a `5523` event on behalf of a platform user it does not hold private keys for.
 - **Chain**: The Lightning-routable settlement network, e.g. `flokicoin` or `bitcoin`.
 
@@ -67,13 +67,13 @@ AltZap's multi-chain support has an LNURL-side counterpart to the event-level `c
 All `p` (recipient) and `P` (sender) tags use:
 
 ```
-["p/P", "<hex-pubkey-or-ConnectionKey>", "<lidp>"]
+["p/P", "<hex-pubkey-or-ConnectionKey>", "<platform>"]
 ```
 
 - `[1]` is a 64-character hex Nostr pubkey **or** a ConnectionKey.
-- `[2]` is the LIDP name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey.
+- `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey.
 
-`5521` receipts additionally allow a 4th element, `["p/P", "<hex-or-ConnectionKey>", "<lidp>", "<handle>"]` — a stable, human-readable provider handle (e.g. a Discord username). It is informational only and MUST NOT be used for identity resolution.
+`5521` receipts additionally allow a 4th element, `["p/P", "<hex-or-ConnectionKey>", "<platform>", "<handle>"]` — a stable, human-readable provider handle (e.g. a Discord username). It is informational only and MUST NOT be used for identity resolution.
 
 ### Kind 5520 — AltZap Request
 
@@ -85,7 +85,7 @@ All `p` (recipient) and `P` (sender) tags use:
     ["e", "<optional-target-event-id>"],
     ["a", "<optional-kind:pubkey:d_tag>"],
     ["k", "<optional-target-event-kind>"],
-    ["p", "<recipient-pubkey-or-ConnectionKey>", "<optional-lidp>"],
+    ["p", "<recipient-pubkey-or-ConnectionKey>", "<optional-platform>"],
     ["amount", "1000000"],
     ["chain", "flokicoin"],
     ["lnurl", "lnurl1..."],
@@ -114,8 +114,8 @@ Identical structure to `5520`, kind `5523` instead, with one additional constrai
   "kind": 5523,
   "content": "Sent via Proxy Application",
   "tags": [
-    ["p", "<recipient-ConnectionKey>", "<lidp>"],
-    ["P", "<sender-ConnectionKey>", "<lidp>"],
+    ["p", "<recipient-ConnectionKey>", "<platform>"],
+    ["P", "<sender-ConnectionKey>", "<platform>"],
     ["amount", "100000"],
     ["chain", "flokicoin"],
     ["relays", "wss://relay.example.com"],
@@ -136,8 +136,8 @@ Identical structure to `5520`, kind `5523` instead, with one additional constrai
   "tags": [
     ["e", "<optional-target-event-id>"],
     ["a", "<optional-kind:pubkey:d_tag>"],
-    ["p", "<recipient-hex-or-ConnectionKey>", "<lidp>", "<handle>"],
-    ["P", "<sender-hex-or-ConnectionKey>", "<lidp>", "<handle>"],
+    ["p", "<recipient-hex-or-ConnectionKey>", "<platform>", "<handle>"],
+    ["P", "<sender-hex-or-ConnectionKey>", "<platform>", "<handle>"],
     ["r", "<resolved-recipient-pubkey>"],
     ["R", "<resolved-sender-pubkey>"],
     ["amount", "<settled-milli-units>"],
@@ -200,7 +200,7 @@ AltZap is intentionally **not** wire-compatible with NIP-57: a client that only 
 
 - **Cross-chain replay**: the mandatory `chain` tag exists specifically so a request signed for one chain cannot be settled — accidentally or maliciously — against a different chain's liquidity. Reject on chain mismatch; do not attempt "best effort" chain substitution.
 - **Proxy trust boundary**: `5523`'s signing `pubkey` is the Proxy Agent, not the sender. Clients and ZSPs MUST read `P`, not `pubkey`, when displaying or attributing the sender — treating the signer as the sender defeats the entire purpose of the kind.
-- **ConnectionKey collisions**: a ConnectionKey is a one-way hash of `"<lidp>:<identifier>"`. Implementations MUST NOT accept a claimed reverse mapping without independent verification (e.g. a signed identity-connection event) — the receipt alone is not proof of ownership.
+- **ConnectionKey collisions**: a ConnectionKey is a one-way hash of `"<platform>:<identifier>"`. Implementations MUST NOT accept a claimed reverse mapping without independent verification (e.g. a signed identity-connection event) — the receipt alone is not proof of ownership.
 - **`r`/`R` disclosure**: resolving a ConnectionKey to a real pubkey in a receipt is a deliberate, visible linkage of a legacy identity to a Nostr identity. A ZSP SHOULD only populate `r`/`R` when it has verified authorization to make that link public.
 
 ## Relation to Other NIPs
