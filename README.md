@@ -19,16 +19,3 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 ## Implementations
 
 Go: [`github.com/ohstr/nmilat`](https://github.com/ohstr/nmilat), packages `nipAZ`, `nipIC` and `nipLS`.
-
-## Agent Skill
-
-This repository also ships an installable [Agent Skill](https://skills.sh/) for NIP-AZ and NIP-IC (`SKILL.md` + `references/`), so AI coding assistants can build against them directly:
-
-```bash
-npx skills add ohstr/nips
-```
-
-This downloads `SKILL.md` and `references/` into your local `.agents/skills/zapf-nips` directory, giving your AI assistant instant, sourced expertise on NIP-AZ and NIP-IC — event kinds, tag formats, validation rules, and identity resolution.
-
-*Example prompt:*
-> "Create a new function to generate a Kind 5520 AltZap Request event according to the zapf-nips skill."
