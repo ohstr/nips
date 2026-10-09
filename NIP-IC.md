@@ -163,7 +163,7 @@ A client holding a 3-element identity tag (e.g. `["p", "<ConnectionKey>", "disco
 
 ## Federated Trust Model & Multi-IA Stacking
 
-Zapf's IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same Web Identity account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
+The IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same Web Identity account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
 
 ## Security Considerations
 
@@ -183,19 +183,3 @@ Zapf's IA layer is federated, not centralized: anyone can run an IA, and differe
 **NIP-09**: attestation revocation is a standard Kind 5 deletion targeting the `35522` event ID; no new deletion mechanism is introduced.
 
 **NIP-19**: the `nconnection` encoding reuses NIP-19's TLV pattern for consistency but is not a NIP-19-registered entity type.
-
-## Reference Implementation
-
-Go: [`github.com/ohstr/zapf`](https://github.com/ohstr/zapf) — `internal/domain`, `internal/nostr`, `internal/service` (`cross_attest.go`, `verification.go`), `pkg/nostr/attestation_event.go`. Not yet extracted into a standalone, reusable `nmilat` package the way NIP-AZ is.
-
-## Documentation
-
-Deployed protocol docs and guides: [docs.zapf.app](https://docs.zapf.app)
-
-- [Identity Authority](https://docs.zapf.app/concepts/identity-authority)
-- [Legacy Identity Providers](https://docs.zapf.app/concepts/legacy-identity-providers)
-- [Verification Model](https://docs.zapf.app/concepts/verification-model)
-- [Kind 35521 spec](https://docs.zapf.app/protocol/identity-connection-35521)
-- [Kind 35522 spec](https://docs.zapf.app/protocol/ia-attestation-35522)
-- [Evidence Sharing guide](https://docs.zapf.app/guides/evidence-sharing)
-- [Running an IA guide](https://docs.zapf.app/guides/running-an-ia)
