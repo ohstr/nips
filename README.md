@@ -1,6 +1,6 @@
-# zapf-nips
+# nips
 
-Nostr Improvement Proposals (NIPs) originating from the [Zapf](https://docs.zapf.app) project, plus an installable [Agent Skills](https://skills.sh/) package (`SKILL.md` + `references/`) so AI coding assistants can build against them directly.
+Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-contained: it specifies a protocol on its own terms and can be implemented without anything else in this repository.
 
 ## NIPs in this repository
 
@@ -8,24 +8,27 @@ Nostr Improvement Proposals (NIPs) originating from the [Zapf](https://docs.zapf
 |-----|-------|-------|--------|
 | [NIP-AZ](./NIP-AZ.md) | AltZap: Cross-Chain Lightning Zaps | `5520`, `5521`, `5523` | `draft` |
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Legacy Account Linking | `35521`, `35522` | `draft` |
+| [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
 
 **NIP-AZ** extends [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) so a zap can settle on any energy-backed Lightning-routable chain (not just Bitcoin) and target a recipient who doesn't have a Nostr keypair yet.
 
 **NIP-IC** defines how a user cryptographically links their Nostr pubkey to an account on a non-Nostr platform (Discord, X, email, ...), witnessed by a permissionless network of Identity Authorities — the mechanism NIP-AZ relies on to resolve a `ConnectionKey` back to a verified identity.
 
-Reference implementation: [`github.com/ohstr/nmilat`](https://github.com/ohstr/nmilat), package `nipAZ` (NIP-IC has no standalone library yet — see its own doc for details).
+**NIP-LS** lets a process on the same host sign through a key it can't read: a local signer answers the [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) method set as newline-delimited JSON over a unix socket (`bunker+unix:///path.sock`), with no relay and no encryption, and its own policy decides what gets signed.
 
-## Installation (Agent Skill)
+## Implementations
+
+Go: [`github.com/ohstr/nmilat`](https://github.com/ohstr/nmilat), packages `nipAZ`, `nipIC` and `nipLS`.
+
+## Agent Skill
+
+This repository also ships an installable [Agent Skill](https://skills.sh/) for NIP-AZ and NIP-IC (`SKILL.md` + `references/`), so AI coding assistants can build against them directly:
 
 ```bash
-npx skills add ohstr/zapf-nips
+npx skills add ohstr/nips
 ```
 
-This downloads `SKILL.md` and `references/` into your local `.agents/skills/zapf-nips` directory, giving your AI assistant instant, sourced expertise on both NIPs — event kinds, tag formats, validation rules, and identity resolution.
+This downloads `SKILL.md` and `references/` into your local `.agents/skills/zapf-nips` directory, giving your AI assistant instant, sourced expertise on NIP-AZ and NIP-IC — event kinds, tag formats, validation rules, and identity resolution.
 
 *Example prompt:*
 > "Create a new function to generate a Kind 5520 AltZap Request event according to the zapf-nips skill."
-
-## Documentation
-
-Deployed protocol docs and guides: [docs.zapf.app](https://docs.zapf.app)
