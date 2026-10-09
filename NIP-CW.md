@@ -226,7 +226,7 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    (§Membership). A Hub that cannot resolve that list yet — it fetches from relays and so has a startup
    window before any answer is available — MUST NOT fall back to denying membership, because a denial is
    indistinguishable to the caller from "you are not a member." It MUST instead answer with a distinct
-   not-ready error the caller can retry; this implementation returns `NOT_READY`.
+   not-ready error the caller can retry, such as `NOT_READY`.
 5. Check the one-active-wallet-per-(Hub, identity) rule (§Membership), rejecting if the identity
    already holds an active Circle Wallet under this Hub.
 6. Validate `max_amount` against the Hub's own per-wallet ceiling, the resolved `budget_renewal` against
@@ -252,8 +252,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    database could still both pass this check. Making the read-and-create genuinely atomic requires a
    database-level lock scoped to the Hub — an implementation whose datastore cannot provide one MUST NOT
    be run as multiple concurrent processes against a shared database, since the commitment ceiling is
-   otherwise unenforced. This implementation takes a transaction-scoped advisory lock where the datastore
-   supports it.
+   otherwise unenforced. A transaction-scoped advisory lock is sufficient where the datastore supports
+   one.
 10. After the transaction commits, never before, publish the new connection's relay subscription.
 11. Return a single `encrypted_details` ciphertext containing the pairing URI and every resolved wallet
     parameter. Nothing describing the wallet may travel outside it (§Response).

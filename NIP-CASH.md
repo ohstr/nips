@@ -203,8 +203,8 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 }
 ```
 
-- `recipients` — MUST contain at least one entry, and an implementation MAY cap how many (this
-  implementation caps at 100; `cash_consolidate` deliberately uses the same limit for its `sources`, so the
+- `recipients` — MUST contain at least one entry, and an implementation MAY cap how many (e.g. at
+  100; an implementation that caps both SHOULD use the same limit for `cash_consolidate`'s `sources`, so the
   two batch operations stay symmetrical — §Consolidating Tokens). A request over the cap MUST be rejected
   whole, never partially fulfilled: a caller cannot be left guessing which recipients were funded. Each
   entry's `identity_type` MUST be `pubkey`,
@@ -219,7 +219,7 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   it MUST be honored exactly up to whatever absolute bound the implementation's own time representation
   imposes. Such a bound is a representational limit, not a policy: it MUST be far beyond any lifetime a
   caller would legitimately request, and a request exceeding it MUST be rejected rather than silently
-  clamped. This implementation bounds it at 100 years, sized to stay clear of its nanosecond-resolution
+  clamped. For example, a bound of 100 years stays clear of a nanosecond-resolution timestamp's
   wraparound.
 
 `min_transfer_millis` is deliberately NOT a request field here — it's a Hub-level setting (§Data Model),
@@ -650,8 +650,8 @@ This gives three outcomes where there were two:
 - The window is measured **from the spend, not from the bill's expiry**, so a bill that never expires is
   covered too. Its length is the Hub's choice. A Hub MAY set it to zero, which opts out of tombstones
   entirely: silence from the moment the bill is destroyed. Implementations SHOULD default to a non-zero
-  window, since the alternative leaves a holder unable to distinguish "spent" from "unreachable" — this
-  implementation defaults to 15 days. Past `retained_until` the Hub returns to silence either way, so a
+  window, since the alternative leaves a holder unable to distinguish "spent" from "unreachable" — 15 days
+  is a reasonable default. Past `retained_until` the Hub returns to silence either way, so a
   tombstone is never wrong — only absent for old bills.
 - **The window is inclusive of `retained_until` itself.** A request landing at exactly that instant MUST
   still be answered; only strictly after it does the Hub fall silent. This is stated because it is not
@@ -1084,7 +1084,7 @@ sequenceDiagram
 ```
 
 - `sources` — MUST contain at least two distinct, unredeemed source slices; the same slice MUST NOT appear
-  twice, and an implementation MAY cap the total count (this implementation caps at 100, matching
+  twice, and an implementation MAY cap the total count (e.g. at 100, matching
   `mint_cash`'s recipient-batch limit). Each carries a `proof` (identity-bound), same scheme as
   `cash_transfer`, carried as that entry's own sibling fields; a `connection_key` source additionally
   carries an `attestation_event`, validated identically (live IA trust, §Transferring and Splitting a
@@ -1439,9 +1439,8 @@ links them disappears.
 
   An implementation MUST treat an absent, empty, or literal-`null` `bill_proof` as absent. This
   is called out because `null` is the trap: it decodes to four bytes, so a length check reads it
-  as a proof that is present and unverifiable. That exact mistake, on `proof`, made bearer items
-  unservable in a released implementation, and the symptom was an omission — information-free,
-  so no caller could learn why.
+  as a proof that is present and unverifiable. Made on `proof`, that mistake leaves items
+  unservable, and the symptom is an omission — information-free, so no caller can learn why.
 
 - **`not_after`** — REQUIRED. The request event's `created_at` is randomised up to two days
   into the past (§The Request Event), precisely so it leaks nothing, which means it cannot
@@ -1703,10 +1702,9 @@ ECDH, no ephemeral keypair for the response, and (when the Hub's transport key l
 Lightning node) no extra node round trip per reply. To an observer the exchange is still between
 two values that never recur.
 
-This derivation was previously implemented but never written down, and the omission was invisible
-to both existing implementations because they share one SDK. An independent client following the
-rest of this section would find its response, fail to decrypt it, and have nothing in the
-document to check its work against.
+This derivation is easy to miss. A client that follows the rest of this section without it would
+find its response, fail to decrypt it, and have nothing to check its work against; the test
+vectors below exist for that.
 
 ##### Test vectors
 
