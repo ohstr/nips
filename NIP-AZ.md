@@ -109,7 +109,7 @@ All `p` (recipient) and `P` (sender) tags use:
 
 Signed by the sender's own key; the sender is always the event signer for `9520`.
 
-**Required tags**: `p` (exactly one), `amount` (positive integer, milli-units — `mloki` or `msats`), `chain`, `lnurl` (bech32-encoded), `relays` (one or more `wss://`/`ws://` URLs).
+**Required tags**: `p` (exactly one), `amount` (positive integer, milli-units — `mloki` or `msats`), `chain`, `lnurl` (bech32 LNURL, see Verification Algorithm), `relays` (one or more `wss://`/`ws://` URLs).
 **Optional tags**: `e` (at most one, 32-byte hex — the specific note being zapped), `a` (`<kind>:<pubkey>:<d-tag>` coordinate, for zapping a parameterized replaceable event), `k` (stringified kind number of the target event). A `9520` MUST NOT carry a `P` tag: the signer is the sender.
 
 **Description-hash binding.** Once validated, the LNURL server issues a BOLT11 invoice whose `description_hash` equals the SHA256 of the event JSON exactly as received in the `nostr` parameter (after URL-decoding). The LNURL server MUST NOT re-serialize the event before hashing, and the receipt's `description` tag carries that same string verbatim. This is what lets a `9521` receipt's `description` tag be checked against the invoice that was actually paid (see Verification Algorithm below) — the invoice is cryptographically bound to this exact request, not just to an amount.
@@ -181,25 +181,45 @@ When the LNURL server can independently map a ConnectionKey back to a real Nostr
 
 ## Verification Algorithm
 
-Implementations MUST enforce all of the following when validating an inbound `9520`/`9523` request. Signature verification MUST happen before any tag content is trusted; the remaining checks are independent and order does not otherwise matter.
+Two actors validate AltZap events, and they enforce different subsets:
 
-1. **Signature.** The event's `id`/`sig` MUST verify against `pubkey` per NIP-01.
-2. **Identity tags.** MUST have exactly one `p` tag and a non-empty `lnurl` tag.
-3. **`chain`.** MUST be present and non-empty. An LNURL server that only routes a subset of chains MUST reject requests naming an unsupported chain.
-4. **`amount`.** MUST parse as a positive integer. If the caller has an expected amount in hand (e.g. from the LNURL callback's own `amount` query parameter), it MUST equal the tag value exactly.
-5. **`relays`.** MUST contain at least one `ws://`/`wss://` URL.
-6. **`e`.** At most one is allowed; if present, MUST be a 32-byte hex ID.
-7. **`9523`-specific.** MUST have exactly one `P` tag. A `9520` MUST NOT have a `P` tag.
+- **LNURL server**: validates a `9520`/`9523` request at its callback before issuing an invoice. It is about to settle a payment, so it MUST enforce every rule below.
+- **Relay**: stores events someone else signed. A receipt records a payment that already happened, so a relay MUST reject an event that is forged or provably inconsistent, and SHOULD NOT reject one for a rule that only the LNURL server could have enforced. A relay MAY skip AltZap validation entirely.
 
-For a `9521` receipt:
+Clients displaying a receipt SHOULD apply the relay subset. AltZap's rules are deliberately stricter than NIP-57's: implementations that share validator code between the two MUST NOT relax an AltZap MUST to a NIP-57 tolerance.
 
-1. **Signature**, as above.
-2. **`chain`, `preimage`, `bolt11`** MUST be present.
-3. **Hash lock.** `SHA256(preimage)` MUST equal the invoice's payment hash.
-4. **Chain.** The `bolt11` invoice MUST belong to the network named in the receipt's `chain` tag.
-5. If `description` is present, it MUST parse as valid JSON, embed a validly-signed request event, and: `SHA256(description)` MUST equal the invoice's `description_hash`; the invoice's settled amount MUST equal the embedded request's `amount`; the receipt's `p` MUST equal the embedded request's `p`; the receipt's `chain` MUST equal the embedded request's `chain`.
-6. If `description` is absent (a plain LNURL payment settled without a signed request), the invoice's settled amount MUST be positive — there is no request to cross-check against.
-7. If `amount` is present, it MUST equal the invoice's settled amount.
+Signature verification MUST happen before any tag content is trusted; the remaining checks are independent and their order does not matter.
+
+### Request (`9520` / `9523`)
+
+| # | Rule | LNURL server | Relay |
+|---|------|--------------|-------|
+| 1 | `id`/`sig` verify against `pubkey` per NIP-01. | MUST | MUST |
+| 2 | Exactly one `p` tag. | MUST | MUST |
+| 3 | `9520` has no `P` tag; `9523` has exactly one. | MUST | MUST |
+| 4 | `chain` is present, non-empty, and one of the chains the endpoint advertises. | MUST | SHOULD (presence only) |
+| 5 | `amount` is a positive integer and equals the callback's `amount` parameter. | MUST | SHOULD (positive integer only) |
+| 6 | `lnurl` is present and well formed (see below). | MUST | MAY |
+| 7 | `relays` has at least one `ws://`/`wss://` URL. | MUST | MAY |
+| 8 | At most one `e` tag, a 32-byte hex ID. | MUST | SHOULD |
+
+**The `lnurl` tag** carries the recipient's LNURL-pay endpoint as a bech32 string with the `lnurl` prefix (LUD-01), not a lightning address. Bech32 is case-insensitive: receivers MUST accept `lnurl1…` and `LNURL1…` alike and compare decoded URLs, not strings. It is required on `9520` and `9523`; unlike NIP-57, where it is optional, it binds the signed request to one endpoint so it cannot be replayed against another.
+
+### Receipt (`9521`)
+
+| # | Rule | Publisher (LNURL server) | Relay |
+|---|------|--------------------------|-------|
+| 1 | `id`/`sig` verify against `pubkey` per NIP-01. | MUST | MUST |
+| 2 | `bolt11`, `chain` and `preimage` are present. | MUST | MUST |
+| 3 | Hash lock: `SHA256(preimage)` equals the invoice's payment hash. | MUST | MUST |
+| 4 | The invoice belongs to the network named in `chain`. | MUST | MUST |
+| 5 | If `description` is present: it parses as JSON, embeds a validly signed `9520`/`9523` request, and `SHA256(description)` equals the invoice's `description_hash`. | MUST | MUST |
+| 6 | If `description` is present: the receipt's `p` and `chain` equal the embedded request's `p` and `chain`. | MUST | MUST |
+| 7 | If `description` is present: the invoice amount equals the embedded request's `amount`. | MUST | SHOULD |
+| 8 | If `description` is absent (a plain LNURL payment settled without a signed request): the invoice amount is positive. | MUST | SHOULD |
+| 9 | If `amount` is present, it equals the invoice amount. | MUST | SHOULD |
+
+Rules 3 to 6 are what make a receipt proof of payment for a specific request; a relay that skipped them would store forged receipts. Rules 7 to 9 catch an LNURL server that mis-settled, which a relay can report but cannot correct.
 
 ## Custodial Settlement
 

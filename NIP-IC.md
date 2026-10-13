@@ -148,6 +148,8 @@ A client holding a 3-element identity tag (e.g. `["p", "<ConnectionKey>", "disco
 
 The IA is the authority, not the user's claim. An IA holds at most one current attestation per ConnectionKey: its latest `35522` for that `d` tag, which replaces any earlier one (see Event Lifecycle). The pubkey in that attestation's `p` tag is the only pubkey the IA links to the account. A `35521` that points to any other attestation is not verified, even if the attestation it points to is validly signed.
 
+A client MUST NOT show a connection as **Verified** unless every check in step 3 passes. Steps 4 and 5 are MUST for a client that displays a state at all; how it renders each state is a SHOULD (see the table).
+
 1. Query `{"kinds": [35521], "#d": ["<ConnectionKey>"]}`.
 2. If no event is returned, the connection is **Unverified**: fall back to the Web Identity's own profile.
 3. For each returned `35521` and each of its `e` tags, fetch the referenced `35522` from the relay hint (a Deep Check). The attestation counts only if all of the following hold:
