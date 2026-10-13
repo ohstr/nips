@@ -6,7 +6,7 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 
 | NIP | Title | Kinds | Status |
 |-----|-------|-------|--------|
-| [NIP-AZ](./NIP-AZ.md) | AltZap: Cross-Chain Lightning Zaps | `5520`, `5521`, `5523` | `draft` |
+| [NIP-AZ](./NIP-AZ.md) | AltZap: Cross-Chain Lightning Zaps | `9520`, `9521`, `9523` | `draft` |
 | [NIP-CASH](./NIP-CASH.md) | Cash Hub | `11190`, `23190`–`23193` | `draft` |
 | [NIP-CW](./NIP-CW.md) | Circle Wallet | `23199` | `draft` |
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Legacy Account Linking | `35521`, `35522` | `draft` |
