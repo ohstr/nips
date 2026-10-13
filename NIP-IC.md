@@ -1,8 +1,8 @@
 NIP-IC
 ======
 
-Identity Connection: Legacy Account Linking
----------------------------------------------
+Identity Connection: Web Identity Linking
+-----------------------------------------
 
 `draft` `optional`
 
@@ -101,15 +101,17 @@ A cleartext JSON (v1) string:
 |---|---|---|
 | `version` | number | Always `1`. |
 | `platform` | string | Web Identity platform name. |
-| `auth_type` | string | Always `"public_post"` — every supported verification mode requires a public post of the challenge token. |
+| `auth_type` | string | How the IA verified control of the account. `"public_post"` is defined below; IAs MAY use other values (e.g. a one-time code sent to an email address). |
 | `user_id` | string | The normalized platform account identifier. |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
-| `evidence_url` | string | URL of the public post carrying the challenge. |
-| `challenge` | string | The `npv1...` challenge token published at `evidence_url`. |
-| `pre_auth_code` | string | The raw code the challenge was derived from — REQUIRED for cross-IA re-verification (see below). |
+| `evidence_url` | string | `public_post` only: URL of the public post carrying the challenge. |
+| `challenge` | string | `public_post` only: the `npv11...` challenge token published at `evidence_url`. |
+| `pre_auth_code` | string | `public_post` only: the raw code the challenge was derived from — REQUIRED for cross-IA re-verification (see below). |
 
-Because verification is backed by a public, independently-fetchable URL, any IA can re-verify the same claim without user interaction — simply fetch `evidence_url` and confirm `challenge` is present.
+With `public_post`, verification is backed by a public, independently-fetchable URL, so any IA can re-verify the same claim without user interaction: fetch `evidence_url` and confirm `challenge` is present.
+
+With any other `auth_type` (e.g. an email or phone handshake), there is no public evidence to re-check. The attestation rests only on the IA's signature, and a client that trusts the IA accepts that the IA completed the handshake. Such an attestation cannot be re-verified by another IA.
 
 #### The `npv1` Challenge Token
 
@@ -119,13 +121,15 @@ A bech32-encoded TLV binding a challenge to one specific user and session, preve
 type=0x00 || length=0x20 || value=SHA256(pubkey_bytes || pre_auth_code_bytes)
 ```
 
+`pubkey_bytes` is the 32-byte raw public key (the hex pubkey, decoded). `pre_auth_code_bytes` is the UTF-8 encoding of the `pre_auth_code` string exactly as it appears in `evidence`. The bech32 human-readable part is `npv1`, so encoded tokens start with `npv11`.
+
 A second IA performing cross-IA re-verification from existing evidence MUST:
 1. Bech32-decode `challenge` to its 34-byte TLV payload.
 2. Strip the 2-byte header (`0x00 0x20`) to recover the 32-byte session hash.
-3. Recompute `SHA256(hex.Decode(p_tag_pubkey) || evidence.pre_auth_code)`.
+3. Recompute `SHA256(pubkey_bytes || pre_auth_code_bytes)` from the attestation's `p` tag and `evidence.pre_auth_code`.
 4. Assert the two hashes are equal.
 
-Step 4 is what distinguishes a genuinely session-bound challenge from a token replayed out of a different session — which is why `pre_auth_code` MUST always be present in `evidence`; without it, step 3 cannot be performed.
+Step 4 is what distinguishes a genuinely session-bound challenge from a token replayed out of a different session — which is why `public_post` evidence MUST include `pre_auth_code`; without it, step 3 cannot be performed.
 
 ### The `nconnection` Bech32 Encoding
 
@@ -142,60 +146,54 @@ A portable, shareable string (e.g. handed from a Discord bot to a mobile wallet)
 
 A client holding a 3-element identity tag (e.g. `["p", "<ConnectionKey>", "discord"]`, per NIP-AZ) resolves it to a Nostr identity as follows:
 
-1. Query `{"kinds": [35521], "#d": ["<ConnectionKey>"]}` against the network (and specifically the ZSP's own relays, if known).
-2. If no event is returned, the connection is **unverified** — fall back to displaying the Web-Identity-native profile (e.g. avatar/username from the ZSP's own API).
-3. If a `35521` is returned, extract its `e` tag and fetch the referenced `35522` from the named relay hint (a Deep Check).
-4. If the fetch succeeds, the event is validly signed by its claimed `pubkey`, unexpired, and unrevoked (see Event Lifecycle), the connection is **Verified**. If the `35521` exists but its `35522` is missing, invalid, expired, or revoked, the connection is **Spoofed** — this is distinct from *unverified*: someone published a `35521` claim that does not check out.
+The IA is the authority, not the user's claim. An IA holds at most one current attestation per ConnectionKey: its latest `35522` for that `d` tag, which replaces any earlier one (see Event Lifecycle). The pubkey in that attestation's `p` tag is the only pubkey the IA links to the account. A `35521` that points to any other attestation is not verified, even if the attestation it points to is validly signed.
+
+1. Query `{"kinds": [35521], "#d": ["<ConnectionKey>"]}`.
+2. If no event is returned, the connection is **Unverified**: fall back to the Web Identity's own profile.
+3. For each returned `35521` and each of its `e` tags, fetch the referenced `35522` from the relay hint (a Deep Check). The attestation counts only if all of the following hold:
+   - it is a validly signed kind `35522` whose `pubkey` is an IA the client trusts;
+   - its `d` and `platform` tags equal the `35521`'s `d` and `platform` tags;
+   - its `p` tag equals the `35521`'s `pubkey`;
+   - it is unexpired (NIP-40) and not deleted (NIP-09);
+   - it is the IA's current attestation: querying the IA's relay for `{"kinds": [35522], "authors": ["<ia-pubkey>"], "#d": ["<ConnectionKey>"]}` returns this same event ID.
+4. A `35521` with at least one attestation that counts is **Verified**. A `35521` without one is **Spoofed**: someone published a claim that does not check out, which is distinct from *Unverified*.
+5. If trusted IAs' current attestations name different pubkeys for the same ConnectionKey, the attestation with the latest `created_at` wins; claims from every other pubkey are **Spoofed**.
 
 | State | Condition | Recommended UI |
 |---|---|---|
-| **Verified** | `35521` found; its `35522` fetches and checks out | ✅ native Nostr profile |
-| **Pending (fallback)** | No `35521` found | ⏳ fallback Web Identity profile |
-| **Spoofed** | `35521` found; `35522` missing, invalid, expired, or revoked | ⚠️ flag as unverified/suspicious |
+| **Verified** | `35521` found; it points to a trusted IA's current attestation for its own pubkey | ✅ native Nostr profile |
+| **Unverified** | No `35521` found | ⏳ fallback Web Identity profile |
+| **Spoofed** | `35521` found, but no attestation it points to passes step 3, or a newer attestation names another pubkey | ⚠️ flag as suspicious |
 
 ## Event Lifecycle
 
 1. **Creation**: the user completes a verification flow with an IA; the IA signs `35522`.
-2. **Publishing**: the IA publishes `35522` to its own relay(s). Session state: `confirmed`. **Routing is NOT yet active.**
-3. **Linking**: the IA hands the raw `35522` event back to the user's client, which extracts the event ID + IA relay URL, builds the `e` tag, and publishes `35521`. The attestation itself is never embedded.
-4. **Activation**: after publishing `35521`, the client signals the IA (mechanism is implementation-defined). Only now does the IA record the Web Identity→Nostr routing link and move the session to `active`. If the user abandons the flow before this step, no routing link is ever created.
-5. **Revocation**: to revoke, the IA publishes a [Kind 5](https://github.com/nostr-protocol/nips/blob/master/09.md) deletion targeting the `35522` ID. This immediately fails any subsequent Deep Check. If the session was `active`, the IA also removes its internal routing record.
+2. **Publishing**: the IA publishes `35522` to its own relay(s).
+3. **Linking**: the IA hands the `35522` event to the user's client, which builds the `e` tag from its event ID and the IA relay URL and publishes `35521`. The attestation itself is never embedded.
+4. **Re-issue and transfer**: when the IA verifies the same account again, for the same pubkey or a new one, it publishes a new `35522` with the same `d` tag, which replaces the earlier one. Claims pointing to the replaced attestation stop verifying; the current owner publishes a new `35521` pointing to the new attestation.
+5. **Revocation**: to revoke, the IA publishes a [Kind 5](https://github.com/nostr-protocol/nips/blob/master/09.md) deletion targeting the `35522` ID. This immediately fails any subsequent Deep Check.
 
 ## Federated Trust Model & Multi-IA Stacking
 
-Zapf's IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same Web Identity account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
+The IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same Web Identity account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
 
 ## Security Considerations
 
-- **Content-field spoofing**: `35521`'s `content` is user-controlled and unverified. A ZSP MUST route payments strictly by the cryptographic `d`-tag hash, never by `content` — a user cannot redirect funds by editing their display name. A verifying client MUST cross-check `content` claims against the fetched `35522`'s `evidence` and flag a mismatch as spoofed, rather than rendering `content` at face value.
+- **Content-field spoofing**: `35521`'s `content` is user-controlled and unverified. An LNURL server MUST route payments strictly by the cryptographic `d`-tag hash, never by `content` — a user cannot redirect funds by editing their display name. A verifying client MUST cross-check `content` claims against the fetched `35522`'s `evidence` and flag a mismatch as spoofed, rather than rendering `content` at face value.
 - **Self-attestation**: a `35522` is only meaningful because it's signed by a key distinct from the user's own — a verifier MUST confirm the attesting `pubkey` is a key it (or its trust set) recognizes as an IA, not the user's own key.
 - **Cross-session replay**: the `npv1` challenge binds a specific `pubkey` + `pre_auth_code` pair (see above); without checking that binding, a challenge published for one verification session could be replayed to justify an unrelated one.
 - **`p`-tag confusion attack**: an attacker could copy a real `35522` (issued to user A) and reference it from a `35521` published by user B. A verifying client MUST check that the attestation's `p` tag equals the outer `35521` event's own `pubkey` — a mismatch means the attestation does not belong to this connection, regardless of how it was referenced.
+- **`d`-tag substitution attack**: user B verifies their own account X, then publishes a `35521` whose `d` is victim Y's ConnectionKey but whose `e` points to B's attestation for X. The `p` check passes, because that attestation really was issued to B. A verifying client MUST check that the attestation's `d` and `platform` equal the `35521`'s; otherwise B could claim Y's account and receive payments addressed to it.
+- **Stale attestations**: a replaced or transferred `35522` can still be served by relays other than the IA's. A verifying client MUST confirm the referenced attestation is the IA's current one for that ConnectionKey (Verification Model, step 3), not just that it exists somewhere.
 - **No private mode**: `evidence.user_id`/`evidence.username` are always cleartext and public once a `35522` is published. There is no way to link an identity without disclosing these fields on the relay.
 - **Attestation expiry**: an IA SHOULD default to a bounded `expiration` (90 days is RECOMMENDED) rather than an unexpiring attestation, so a compromised or abandoned IA's attestations naturally age out even if the IA never explicitly revokes them.
 
 ## Relation to Other NIPs
 
-**NIP-AZ**: an AltZap Receipt's `r`/`R` tags (resolved recipient/sender pubkey) are populated by exactly the lookup this NIP defines — a ZSP that has indexed `35521` connections can resolve a ConnectionKey `p`/`P` tag to a real pubkey and attach it to the receipt.
+**NIP-AZ**: an AltZap Receipt's `r`/`R` tags (resolved recipient/sender pubkey) are populated by exactly the lookup this NIP defines — an LNURL server that has indexed `35521` connections can resolve a ConnectionKey `p`/`P` tag to a real pubkey and attach it to the receipt.
 
 **NIP-40**: the `35522` `expiration` tag reuses NIP-40's semantics unmodified — relays that already prune on NIP-40 expiration need no additional logic to age out attestations.
 
 **NIP-09**: attestation revocation is a standard Kind 5 deletion targeting the `35522` event ID; no new deletion mechanism is introduced.
 
 **NIP-19**: the `nconnection` encoding reuses NIP-19's TLV pattern for consistency but is not a NIP-19-registered entity type.
-
-## Reference Implementation
-
-Go: [`github.com/ohstr/zapf`](https://github.com/ohstr/zapf) — `internal/domain`, `internal/nostr`, `internal/service` (`cross_attest.go`, `verification.go`), `pkg/nostr/attestation_event.go`. Not yet extracted into a standalone, reusable `nmilat` package the way NIP-AZ is.
-
-## Documentation
-
-Deployed protocol docs and guides: [docs.zapf.app](https://docs.zapf.app)
-
-- [Identity Authority](https://docs.zapf.app/concepts/identity-authority)
-- [Legacy Identity Providers](https://docs.zapf.app/concepts/legacy-identity-providers)
-- [Verification Model](https://docs.zapf.app/concepts/verification-model)
-- [Kind 35521 spec](https://docs.zapf.app/protocol/identity-connection-35521)
-- [Kind 35522 spec](https://docs.zapf.app/protocol/ia-attestation-35522)
-- [Evidence Sharing guide](https://docs.zapf.app/guides/evidence-sharing)
-- [Running an IA guide](https://docs.zapf.app/guides/running-an-ia)
