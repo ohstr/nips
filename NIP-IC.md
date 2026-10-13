@@ -129,7 +129,7 @@ A second IA performing cross-IA re-verification from existing evidence MUST:
 3. Recompute `SHA256(pubkey_bytes || pre_auth_code_bytes)` from the attestation's `p` tag and `evidence.pre_auth_code`.
 4. Assert the two hashes are equal.
 
-Step 4 is what distinguishes a genuinely session-bound challenge from a token replayed out of a different session — which is why `pre_auth_code` MUST always be present in `evidence`; without it, step 3 cannot be performed.
+Step 4 is what distinguishes a genuinely session-bound challenge from a token replayed out of a different session — which is why `public_post` evidence MUST include `pre_auth_code`; without it, step 3 cannot be performed.
 
 ### The `nconnection` Bech32 Encoding
 
