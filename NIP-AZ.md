@@ -207,19 +207,4 @@ AltZap is intentionally **not** wire-compatible with NIP-57: a client that only 
 
 **NIP-57**: AltZap extends NIP-57's conceptual request/receipt/LNURL flow but is a distinct, non-interoperable wire format (see Backwards Compatibility).
 
-**[NIP-IC](./NIP-IC.md)** (Identity Connection, `kind:35521`/`kind:35522`): AltZap's ConnectionKey mechanism is protocol-agnostic about *how* a key gets resolved to a pubkey — resolving `r`/`R` via a NIP-IC identity connection is one implementation's choice, not a requirement of this spec, but it's the one this ecosystem actually uses.
-
-## Reference Implementation
-
-Go: [`github.com/ohstr/nmilat`](https://github.com/ohstr/nmilat), package `nipAZ`.
-
-## Documentation
-
-Deployed protocol docs and guides: [docs.zapf.app](https://docs.zapf.app)
-
-- [Introduction](https://docs.zapf.app/intro)
-- [AltZap Settlement Provider](https://docs.zapf.app/concepts/zap-settlement-provider)
-- [Kind 5520 spec](https://docs.zapf.app/protocol/zap-request-5520)
-- [Kind 5521 spec](https://docs.zapf.app/protocol/zap-receipt-5521)
-- [Kind 5523 spec](https://docs.zapf.app/protocol/on-behalf-zap-request-5523)
-- [LNURL Integration](https://docs.zapf.app/protocol/lnurl)
+**[NIP-IC](./NIP-IC.md)** (Identity Connection, `kind:35521`/`kind:35522`): AltZap's ConnectionKey mechanism is protocol-agnostic about *how* a key gets resolved to a pubkey — resolving `r`/`R` via a NIP-IC identity connection is RECOMMENDED but not required by this spec.
