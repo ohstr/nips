@@ -1,8 +1,8 @@
 NIP-IC
 ======
 
-Identity Connection: Legacy Account Linking
----------------------------------------------
+Identity Connection: Web Identity Linking
+-----------------------------------------
 
 `draft` `optional`
 
@@ -101,15 +101,17 @@ A cleartext JSON (v1) string:
 |---|---|---|
 | `version` | number | Always `1`. |
 | `platform` | string | Web Identity platform name. |
-| `auth_type` | string | Always `"public_post"` — every supported verification mode requires a public post of the challenge token. |
+| `auth_type` | string | How the IA verified control of the account. `"public_post"` is defined below; IAs MAY use other values (e.g. a one-time code sent to an email address). |
 | `user_id` | string | The normalized platform account identifier. |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
-| `evidence_url` | string | URL of the public post carrying the challenge. |
-| `challenge` | string | The `npv11...` challenge token published at `evidence_url`. |
-| `pre_auth_code` | string | The raw code the challenge was derived from — REQUIRED for cross-IA re-verification (see below). |
+| `evidence_url` | string | `public_post` only: URL of the public post carrying the challenge. |
+| `challenge` | string | `public_post` only: the `npv11...` challenge token published at `evidence_url`. |
+| `pre_auth_code` | string | `public_post` only: the raw code the challenge was derived from — REQUIRED for cross-IA re-verification (see below). |
 
-Because verification is backed by a public, independently-fetchable URL, any IA can re-verify the same claim without user interaction — simply fetch `evidence_url` and confirm `challenge` is present.
+With `public_post`, verification is backed by a public, independently-fetchable URL, so any IA can re-verify the same claim without user interaction: fetch `evidence_url` and confirm `challenge` is present.
+
+With any other `auth_type` (e.g. an email or phone handshake), there is no public evidence to re-check. The attestation rests only on the IA's signature, and a client that trusts the IA accepts that the IA completed the handshake. Such an attestation cannot be re-verified by another IA.
 
 #### The `npv1` Challenge Token
 

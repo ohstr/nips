@@ -9,7 +9,7 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 | [NIP-AZ](./NIP-AZ.md) | AltZap: Cross-Chain Lightning Zaps | `9520`, `9521`, `9523` | `draft` |
 | [NIP-CASH](./NIP-CASH.md) | Cash Hub | `11190`, `23190`–`23193` | `draft` |
 | [NIP-CW](./NIP-CW.md) | Circle Wallet | `23199` | `draft` |
-| [NIP-IC](./NIP-IC.md) | Identity Connection: Legacy Account Linking | `35521`, `35522` | `draft` |
+| [NIP-IC](./NIP-IC.md) | Identity Connection: Web Identity Linking | `35521`, `35522` | `draft` |
 | [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
 
 **NIP-AZ** extends [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) so a zap can settle on any energy-backed Lightning-routable chain (not just Bitcoin) and target a recipient who doesn't have a Nostr keypair yet.
