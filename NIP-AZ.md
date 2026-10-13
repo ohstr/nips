@@ -110,13 +110,13 @@ All `p` (recipient) and `P` (sender) tags use:
 Signed by the sender's own key; the sender is always the event signer for `9520`.
 
 **Required tags**: `p` (exactly one), `amount` (positive integer, milli-units — `mloki` or `msats`), `chain`, `lnurl` (bech32-encoded), `relays` (one or more `wss://`/`ws://` URLs).
-**Optional tags**: `e` (at most one, 32-byte hex — the specific note being zapped), `a` (`<kind>:<pubkey>:<d-tag>` coordinate, for zapping a parameterized replaceable event), `k` (stringified kind number of the target event), `P` (sender identity override, 3-element form).
+**Optional tags**: `e` (at most one, 32-byte hex — the specific note being zapped), `a` (`<kind>:<pubkey>:<d-tag>` coordinate, for zapping a parameterized replaceable event), `k` (stringified kind number of the target event). A `9520` MUST NOT carry a `P` tag: the signer is the sender.
 
 **Description-hash binding.** Once validated, the ZSP issues a BOLT11 invoice whose `description_hash` equals the SHA256 of the event JSON exactly as received in the `nostr` parameter (after URL-decoding). The ZSP MUST NOT re-serialize the event before hashing, and the receipt's `description` tag carries that same string verbatim. This is what lets a `9521` receipt's `description` tag be checked against the invoice that was actually paid (see Verification Algorithm below) — the invoice is cryptographically bound to this exact request, not just to an amount.
 
 ### Kind 9523 — On-Behalf AltZap Request
 
-Identical structure to `9520`, kind `9523` instead, with one additional constraint: **`P` (sender) is REQUIRED**, not optional. The event's own `pubkey` field (the Proxy Agent's signing key) MUST NOT be treated as the economic sender — implementations MUST read `P` instead.
+Identical structure to `9520`, kind `9523` instead, with one additional constraint: **exactly one `P` (sender) tag is REQUIRED**. The event's own `pubkey` field (the Proxy Agent's signing key) MUST NOT be treated as the economic sender — implementations MUST read `P` instead.
 
 ```json
 {
@@ -176,7 +176,7 @@ When the ZSP can independently map a ConnectionKey back to a real Nostr pubkey (
 
 | Intent kind | Sender (`P`) | Recipient (`p`) | `r` | `R` |
 |---|---|---|---|---|
-| `9520` | Pubkey | Pubkey or ConnectionKey | If `p` is a ConnectionKey and resolved | N/A — sender is already a pubkey |
+| `9520` | Signer pubkey (no `P` on the request; the receipt sets it) | Pubkey or ConnectionKey | If `p` is a ConnectionKey and resolved | N/A — sender is already a pubkey |
 | `9523` | ConnectionKey | ConnectionKey | If resolved | If resolved |
 
 ## Verification Algorithm
@@ -189,7 +189,7 @@ Implementations MUST enforce all of the following when validating an inbound `95
 4. **`amount`.** MUST parse as a positive integer. If the caller has an expected amount in hand (e.g. from the LNURL callback's own `amount` query parameter), it MUST equal the tag value exactly.
 5. **`relays`.** MUST contain at least one `ws://`/`wss://` URL.
 6. **`e`.** At most one is allowed; if present, MUST be a 32-byte hex ID.
-7. **`9523`-specific.** MUST have at least one `P` tag.
+7. **`9523`-specific.** MUST have exactly one `P` tag. A `9520` MUST NOT have a `P` tag.
 
 For a `9521` receipt:
 
