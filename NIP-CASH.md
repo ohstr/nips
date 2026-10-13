@@ -109,6 +109,19 @@ inside an already end-to-end-encrypted NIP-47 request body) — see each method'
 exactly what it must bind to. Kind 23198 is deliberately not kind 35521: that number belongs to NIP-IC's
 own, structurally incompatible, long-lived Identity Connection claim.
 
+### Event Kinds
+
+| Kind | Range | Signed by | Purpose |
+|---|---|---|---|
+| `23198` | ephemeral | the slice's current registered identity | Claim proof for `cash_redeem`, `cash_transfer` and `cash_consolidate`; never published (§Methods) |
+| `11190` | replaceable | the Hub's node identity | Hub announcement: how to reach the private transport (§Cash-Mode Slices) |
+| `23190` | ephemeral | a fresh ephemeral key, used once | Private request envelope (§Cash-Mode Slices) |
+| `23191` | ephemeral | the Hub, authenticated by the reply key | Private response (§Cash-Mode Slices) |
+| `23192` | ephemeral | the slice's registered identity (none for a bearer item) | Item proof, one per item (§Item Proofs) |
+| `23193` | ephemeral | the bill's connection secret | Bill proof, one per item (§Bill Proofs) |
+
+This document also verifies NIP-IC's kind `35522` attestations; it does not define them.
+
 ## Data Model
 
 This section describes what a Cash Hub, and the wallets it creates to hold minted cash, MUST be able to
@@ -2574,8 +2587,8 @@ retired Identity Authority needs to be cut off immediately, for every wallet it 
 just wallets created after revocation. The same applies to `cash_transfer`'s `new_identity` validation.
 
 **A kind-35522 attestation's `expiration` tag is mandatory here, and this document deliberately diverges from
-NIP-IC on that point.** NIP-IC treats an attestation's expiration as optional and doesn't itself error on an
-expired one, because it supports revoking a single attestation directly (a NIP-09 kind-5 deletion of the
+NIP-IC on that point.** NIP-IC makes an attestation's expiration optional (it rejects one that has
+passed), because it supports revoking a single attestation directly (a NIP-09 kind-5 deletion of the
 kind-35522 event). This document doesn't specify a per-attestation revocation mechanism — only the
 whole-IA-revocation check above — so an implementation MUST reject an attestation carrying no `expiration`
 tag, or one that has already passed, as its only bound on how long a not-yet-revoked attestation stays
