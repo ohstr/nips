@@ -179,7 +179,7 @@ The IA layer is federated, not centralized: anyone can run an IA, and different 
 
 ## Security Considerations
 
-- **Content-field spoofing**: `35521`'s `content` is user-controlled and unverified. A ZSP MUST route payments strictly by the cryptographic `d`-tag hash, never by `content` — a user cannot redirect funds by editing their display name. A verifying client MUST cross-check `content` claims against the fetched `35522`'s `evidence` and flag a mismatch as spoofed, rather than rendering `content` at face value.
+- **Content-field spoofing**: `35521`'s `content` is user-controlled and unverified. An LNURL server MUST route payments strictly by the cryptographic `d`-tag hash, never by `content` — a user cannot redirect funds by editing their display name. A verifying client MUST cross-check `content` claims against the fetched `35522`'s `evidence` and flag a mismatch as spoofed, rather than rendering `content` at face value.
 - **Self-attestation**: a `35522` is only meaningful because it's signed by a key distinct from the user's own — a verifier MUST confirm the attesting `pubkey` is a key it (or its trust set) recognizes as an IA, not the user's own key.
 - **Cross-session replay**: the `npv1` challenge binds a specific `pubkey` + `pre_auth_code` pair (see above); without checking that binding, a challenge published for one verification session could be replayed to justify an unrelated one.
 - **`p`-tag confusion attack**: an attacker could copy a real `35522` (issued to user A) and reference it from a `35521` published by user B. A verifying client MUST check that the attestation's `p` tag equals the outer `35521` event's own `pubkey` — a mismatch means the attestation does not belong to this connection, regardless of how it was referenced.
@@ -190,7 +190,7 @@ The IA layer is federated, not centralized: anyone can run an IA, and different 
 
 ## Relation to Other NIPs
 
-**NIP-AZ**: an AltZap Receipt's `r`/`R` tags (resolved recipient/sender pubkey) are populated by exactly the lookup this NIP defines — a ZSP that has indexed `35521` connections can resolve a ConnectionKey `p`/`P` tag to a real pubkey and attach it to the receipt.
+**NIP-AZ**: an AltZap Receipt's `r`/`R` tags (resolved recipient/sender pubkey) are populated by exactly the lookup this NIP defines — an LNURL server that has indexed `35521` connections can resolve a ConnectionKey `p`/`P` tag to a real pubkey and attach it to the receipt.
 
 **NIP-40**: the `35522` `expiration` tag reuses NIP-40's semantics unmodified — relays that already prune on NIP-40 expiration need no additional logic to age out attestations.
 

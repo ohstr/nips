@@ -24,7 +24,7 @@ AltZap solves all three by adding a mandatory `chain` tag (replay-safety across 
 
 ## Terminology
 
-- **ZSP (AltZap Settlement Provider)**: The liquidity and receipt-issuing party — generates invoices against `9520`/`9523` requests and publishes the resulting `9521` receipt. Analogous to NIP-57's "zap receiver" role, but explicit and permissionless: anyone with Lightning liquidity can run one.
+- **LNURL server**: The recipient's LNURL-pay server (NIP-57's "lnurl server"; LUD-06's "LN SERVICE"). It receives `9520`/`9523` requests at its callback, issues the invoices and publishes the resulting `9521` receipts.
 - **Web Identity**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** a Web Identity.
 - **ConnectionKey**: A deterministic `SHA256("<platform>:<identifier>")` hash standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
 - **Proxy Agent**: A bot or service that signs a `9523` event on behalf of a platform user it does not hold private keys for.
@@ -38,7 +38,7 @@ AltZap solves all three by adding a mandatory `chain` tag (replay-safety across 
 |------|------|-----------|-----------|
 | `9520` | AltZap Request | Sender | LNURL-Pay |
 | `9523` | On-Behalf AltZap Request | Proxy Agent | LNURL-Pay |
-| `9521` | AltZap Receipt | ZSP | — |
+| `9521` | AltZap Receipt | LNURL server | — |
 
 ### LNURL Chain Advertisement
 
@@ -52,7 +52,7 @@ AltZap's multi-chain support has an LNURL-side counterpart to the event-level `c
   "metadata": "[[\"text/plain\",\"...\"],[\"chain/flokicoin\",\"loki\"]]",
   "tag": "payRequest",
   "allowsNostr": true,
-  "nostrPubkey": "<zsp-pubkey>"
+  "nostrPubkey": "<lnurl-server-pubkey>"
 }
 ```
 
@@ -112,7 +112,7 @@ Signed by the sender's own key; the sender is always the event signer for `9520`
 **Required tags**: `p` (exactly one), `amount` (positive integer, milli-units — `mloki` or `msats`), `chain`, `lnurl` (bech32-encoded), `relays` (one or more `wss://`/`ws://` URLs).
 **Optional tags**: `e` (at most one, 32-byte hex — the specific note being zapped), `a` (`<kind>:<pubkey>:<d-tag>` coordinate, for zapping a parameterized replaceable event), `k` (stringified kind number of the target event). A `9520` MUST NOT carry a `P` tag: the signer is the sender.
 
-**Description-hash binding.** Once validated, the ZSP issues a BOLT11 invoice whose `description_hash` equals the SHA256 of the event JSON exactly as received in the `nostr` parameter (after URL-decoding). The ZSP MUST NOT re-serialize the event before hashing, and the receipt's `description` tag carries that same string verbatim. This is what lets a `9521` receipt's `description` tag be checked against the invoice that was actually paid (see Verification Algorithm below) — the invoice is cryptographically bound to this exact request, not just to an amount.
+**Description-hash binding.** Once validated, the LNURL server issues a BOLT11 invoice whose `description_hash` equals the SHA256 of the event JSON exactly as received in the `nostr` parameter (after URL-decoding). The LNURL server MUST NOT re-serialize the event before hashing, and the receipt's `description` tag carries that same string verbatim. This is what lets a `9521` receipt's `description` tag be checked against the invoice that was actually paid (see Verification Algorithm below) — the invoice is cryptographically bound to this exact request, not just to an amount.
 
 ### Kind 9523 — On-Behalf AltZap Request
 
@@ -156,21 +156,21 @@ Identical structure to `9520`, kind `9523` instead, with one additional constrai
     ["description", "<json-string-of-the-original-request>"],
     ["preimage", "<32-byte-hex>"]
   ],
-  "pubkey": "<zsp-pubkey>",
+  "pubkey": "<lnurl-server-pubkey>",
   "created_at": "<unix-timestamp>",
   "id": "...",
   "sig": "..."
 }
 ```
 
-Signed by the ZSP once the invoice settles, published to the relays named in the originating request's `relays` tag.
+Signed by the LNURL server once the invoice settles, published to the relays named in the originating request's `relays` tag.
 
 **Required tags**: `bolt11`, `chain`, `preimage`. `p` is required whenever `description` is present.
 **Optional tags**: `e`/`a` (mirrored from the request), `amount` (the settled amount in milli-units, informational), `description` (the stringified original `9520`/`9523` event — omitted for a plain LNURL payment settled without any signed request), `r`/`R` (resolved native pubkeys, see below).
 
 #### `r` / `R` — Resolved Identity
 
-When the ZSP can independently map a ConnectionKey back to a real Nostr pubkey (e.g. via a `kind:35521` identity connection it has indexed), it MAY attach that pubkey as `r` (for a ConnectionKey `p`) or `R` (for a ConnectionKey `P`). This lets a client render a "Social Bridge" experience — showing the real recipient's profile — without waiting on the recipient to claim funds.
+When the LNURL server can independently map a ConnectionKey back to a real Nostr pubkey (e.g. via a `kind:35521` identity connection it has indexed), it MAY attach that pubkey as `r` (for a ConnectionKey `p`) or `R` (for a ConnectionKey `P`). This lets a client render a "Social Bridge" experience — showing the real recipient's profile — without waiting on the recipient to claim funds.
 
 #### Identity Tag Matrix
 
@@ -185,7 +185,7 @@ Implementations MUST enforce all of the following when validating an inbound `95
 
 1. **Signature.** The event's `id`/`sig` MUST verify against `pubkey` per NIP-01.
 2. **Identity tags.** MUST have exactly one `p` tag and a non-empty `lnurl` tag.
-3. **`chain`.** MUST be present and non-empty. A ZSP that only routes a subset of chains MUST reject requests naming an unsupported chain.
+3. **`chain`.** MUST be present and non-empty. An LNURL server that only routes a subset of chains MUST reject requests naming an unsupported chain.
 4. **`amount`.** MUST parse as a positive integer. If the caller has an expected amount in hand (e.g. from the LNURL callback's own `amount` query parameter), it MUST equal the tag value exactly.
 5. **`relays`.** MUST contain at least one `ws://`/`wss://` URL.
 6. **`e`.** At most one is allowed; if present, MUST be a 32-byte hex ID.
@@ -203,18 +203,18 @@ For a `9521` receipt:
 
 ## Custodial Settlement
 
-A ZSP MAY act as a temporary custodian when the resolved recipient has no reachable wallet at settlement time — either because `p` is a ConnectionKey with no linked identity yet, or because a linked Nostr wallet is unresponsive. In both cases the ZSP publishes the `9521` receipt as normal and holds the settled value internally against the recipient's ConnectionKey or pubkey until they authenticate and connect a wallet, at which point the ZSP sweeps the balance to them. This is an operational behavior of the ZSP, not a protocol-level tag or event.
+An LNURL server MAY act as a temporary custodian when the resolved recipient has no reachable wallet at settlement time — either because `p` is a ConnectionKey with no linked identity yet, or because a linked Nostr wallet is unresponsive. In both cases the LNURL server publishes the `9521` receipt as normal and holds the settled value internally against the recipient's ConnectionKey or pubkey until they authenticate and connect a wallet, at which point the LNURL server sweeps the balance to them. This is an operational behavior of the LNURL server, not a protocol-level tag or event.
 
 ## Backwards Compatibility
 
-AltZap is intentionally **not** wire-compatible with NIP-57: a client that only understands `9734`/`9735` will neither generate nor recognize `9520`–`9523` events, and vice versa. This is deliberate — silently mixing the two wire formats under shared kinds would let a chain-unaware client misinterpret a chain-gated request. A ZSP that wants to serve both ecosystems runs both flows side by side, keyed on kind number.
+AltZap is intentionally **not** wire-compatible with NIP-57: a client that only understands `9734`/`9735` will neither generate nor recognize `9520`–`9523` events, and vice versa. This is deliberate — silently mixing the two wire formats under shared kinds would let a chain-unaware client misinterpret a chain-gated request. An LNURL server that wants to serve both ecosystems runs both flows side by side, keyed on kind number.
 
 ## Security Considerations
 
 - **Cross-chain replay**: the mandatory `chain` tag exists specifically so a request signed for one chain cannot be settled — accidentally or maliciously — against a different chain's liquidity. Reject on chain mismatch; do not attempt "best effort" chain substitution.
-- **Proxy trust boundary**: `9523`'s signing `pubkey` is the Proxy Agent, not the sender. Clients and ZSPs MUST read `P`, not `pubkey`, when displaying or attributing the sender — treating the signer as the sender defeats the entire purpose of the kind.
+- **Proxy trust boundary**: `9523`'s signing `pubkey` is the Proxy Agent, not the sender. Clients and LNURL servers MUST read `P`, not `pubkey`, when displaying or attributing the sender — treating the signer as the sender defeats the entire purpose of the kind.
 - **ConnectionKey collisions**: a ConnectionKey is a one-way hash of `"<platform>:<identifier>"`. Implementations MUST NOT accept a claimed reverse mapping without independent verification (e.g. a signed identity-connection event) — the receipt alone is not proof of ownership.
-- **`r`/`R` disclosure**: resolving a ConnectionKey to a real pubkey in a receipt is a deliberate, visible linkage of a Web Identity to a Nostr identity. A ZSP SHOULD only populate `r`/`R` when it has verified authorization to make that link public.
+- **`r`/`R` disclosure**: resolving a ConnectionKey to a real pubkey in a receipt is a deliberate, visible linkage of a Web Identity to a Nostr identity. An LNURL server SHOULD only populate `r`/`R` when it has verified authorization to make that link public.
 
 ## Relation to Other NIPs
 
