@@ -266,9 +266,9 @@ the mint signature is best-effort and the TLV stream has length limits a long re
 tempting response is to emit `""` and rely on `pairing_uri` still being valid. That is not safe: a client
 that prefers the token, or that treats the field's presence as meaning it is usable, receives something that
 looks like a credential and is not, with nothing indicating which of the two failed. A Hub that cannot
-produce the token MUST either omit the field entirely, so a client's own absent-field path handles it, or
-fail the mint. This matters most for a single-`cash` recipient, whose secret is shown exactly once: a
-response that silently carries half a credential can lose that value irrecoverably.
+produce the token MUST fail the mint, and SHOULD build the token before committing any funds so that the
+failure costs the caller nothing. This matters most for a single-`cash` recipient, whose secret is shown
+exactly once: a response that silently carries half a credential can lose that value irrecoverably.
 
 For the single-`cash`-recipient request shape above, the response's `recipients` entry instead carries
 the generated secret:
@@ -293,8 +293,8 @@ A timeout does not mean the mint did not happen. The Hub's funding step is compl
 before any response is built, so the usual case is a response the caller never saw rather than work
 the Hub never did.
 
-The key is scoped to the Hub that received it: two Hubs are two ledgers, and one Hub's key MUST NOT
-affect another's. It is opaque to the Hub, which MUST NOT derive meaning from its contents.
+The key is scoped to the Cash Hub connection that received it. One node may host several Cash Hubs, each
+its own ledger, and one Hub's key MUST NOT affect another's. It is opaque to the Hub, which MUST NOT derive meaning from its contents.
 
 **A repeat MUST be refused, not answered with the original result.** This is a deliberate limit
 rather than an implementation shortcut: a `cash`-mode mint's secret exists only in the reply the
@@ -320,8 +320,9 @@ On receiving `mint_cash`, the Hub MUST, in order:
 3. For each `connection_key`-mode recipient, verify its `ia_pubkey` is on the wallet owner's trusted
    Identity Authority allowlist right now. An untrusted or unknown IA MUST reject the entire request, not
    just that recipient. For each `cash`-mode recipient, generate its secret now, with enough entropy
-   that guessing it is infeasible (§Cash-Mode Slices). A caller-supplied `cash_secret` at this step MUST be
-   rejected — the Hub is the only party that can vouch for the entropy behind it.
+   that guessing it is infeasible (§Cash-Mode Slices). A request carrying a `cash_secret` on any recipient
+   MUST be refused whole, not have the field ignored — the Hub is the only party that can vouch for the
+   entropy behind it.
 4. Resolve `expiry`. If the Hub's own expiry ceiling is "never," an omitted/zero `expiry` here MUST produce
    a Cash Wallet with no expiry at all — never a zero-duration, already-expired one — and any explicit,
    positive `expiry` the caller does supply MUST be honored exactly, since there's no Hub-configured ceiling
@@ -1193,8 +1194,9 @@ A `cash`-mode entry in `mint_cash`'s `recipients[]` (§Minting Cash) carries no
 slice's wallet is always single-recipient, never mixed with an identity-bound slice or a second cash-mode
 slice (§Data Model, §Redemption Metadata) — mixing them would let a co-recipient on the same shared
 connection decrypt and steal a cash secret the moment it's used (§Security Considerations). The Hub MUST
-generate the slice's `cash_secret` itself, with enough entropy that guessing it is infeasible; a
-caller-supplied secret MUST NOT be accepted, since the caller has no way to prove its entropy. The
+generate the slice's `cash_secret` itself, with enough entropy that guessing it is infeasible; a request
+carrying a `cash_secret` MUST be refused, not have the field ignored, since the caller has no way to prove
+its entropy. The
 response's matching entry MUST carry that `cash_secret` in plaintext, exactly once (§Minting Cash,
 Response). There MUST be no way to retrieve a cash-mode slice's secret again after that response.
 Losing it is equivalent to losing the funds — same as losing any cash-mode ecash note.
