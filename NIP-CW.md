@@ -466,12 +466,24 @@ member may hold nothing but the Hub connection string and an un-updated client.
   a wallet the caller already holds; a join by definition has no wallet yet. The `d` tag of the
   item's kind-23192 proof therefore carries the Hub's own pubkey, which is the same value
   §Identity Proof already requires the kind-23199 proof to bind to.
-- **Two proofs travel together, and both are REQUIRED.** The kind-23199 identity proof is what
-  authorizes the join, and is unchanged — every check in §Identity Proof still applies. The
-  kind-23192 item proof authorizes the *item*, binding it to this envelope, this method and
-  these params. Neither substitutes for the other: without the 23199 proof anyone could request
-  a wallet for someone else's pubkey, and without the 23192 proof an envelope assembler could
-  re-point a verified join at different params.
+- **The 23199 identity proof and the 23192 item proof travel together, and both are REQUIRED.**
+  The kind-23199 identity proof is what authorizes the join, and is unchanged — every check in
+  §Identity Proof still applies. The kind-23192 item proof authorizes the *item*, binding it to
+  this envelope, this method and these params. Neither substitutes for the other: without the
+  23199 proof anyone could request a wallet for someone else's pubkey, and without the 23192
+  proof an envelope assembler could re-point a verified join at different params.
+- **The item proof's signer MUST equal the request's `pubkey`** — the same key that signed the
+  23199 proof. NIP-CASH lets an item proof's key be the signer's own choice (§Item Proofs in
+  NIP-CASH), because a bill item's slice is named by other means; a join has no slice, so the
+  params binding means something only if the requester made it. A Hub MUST treat a join whose
+  item proof is signed by any other key as carrying an item proof that did not verify.
+- **The bill proof is signed with the Hub connection's secret.** NIP-CASH requires a kind-23193
+  bill proof on every item (§Bill Proofs in NIP-CASH), and a join is no exception. With no bill
+  to hold, it is signed with the `secret` of the Hub connection the member was given
+  (`circlehub1...`, or the equivalent pairing URI), and its `d` tag carries the Hub's pubkey like
+  the item proof's. It proves only that the sender holds the shared Hub connection string — which
+  every prospective member does — so it authorizes nothing by itself; it is what lets the Hub
+  answer a refused join with an error rather than an omission (§Responses below).
 - **A batch of joins is legitimate.** One envelope MAY carry several joins — a host onboarding
   a group — and each is independently proven, so a Hub MUST evaluate them individually rather
   than accepting or rejecting the batch as a unit.
