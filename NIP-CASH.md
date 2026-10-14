@@ -1120,8 +1120,8 @@ sequenceDiagram
 - `new_identity` — REQUIRED. `identity_type` of `pubkey`, `connection_key`, or `cash` — the same shape
   set `cash_transfer` accepts (§Transferring and Splitting a Slice), validated identically: live IA trust
   for `connection_key`; a caller-supplied, never wallet-minted, commitment for `cash` (§Cash-Mode Slices).
-  The merged wallet is owned by, and its token delivered to, this identity — see Response below for how
-  delivery differs by type.
+  The merged wallet is owned by this identity; its token is delivered to the caller, who hands it on —
+  see Response below for how delivery differs by type.
 
 ### Response
 
@@ -1134,10 +1134,12 @@ sequenceDiagram
 }
 ```
 
-For a `pubkey` `new_identity`, `new_wallet_token` is NIP-44 encrypted directly to that pubkey using the
-merged wallet's own keypair — a *different* delivery than a split's caller-keyed nested encryption
-(§Spinning a Slice Off), because `new_identity` here need not be the caller at all (the "controlled by
-the caller" requirement, §What Can Be Consolidated Together, binds the *sources*, not the recipient). For
+For a `pubkey` `new_identity`, `new_wallet_token` is NIP-44 encrypted to the **caller's** proof pubkey —
+the signer of the first source's `identity_event` — using the merged wallet's own keypair: the same
+caller-keyed nested delivery as a spin-off (§Spinning a Slice Off). The caller then hands the token to
+`new_identity` out of band. This is safe even when `new_identity` is someone else: the token only dials
+the merged wallet, and only `new_identity` can redeem or move its slice. Keying it to the caller is what
+lets a caller resend a handoff that went astray. For
 `connection_key`/`cash`, there is no real pubkey to encrypt to yet — the token travels in the clear
 inside the response's own ordinary outer encryption, the same way a freshly-`mint_cash`-minted token does.
 Per §Security Considerations, the token doesn't need to be kept secret: holding it only grants the ability
@@ -1167,8 +1169,9 @@ On receiving `cash_consolidate`, the node MUST, in order:
    compensating-saga mechanism as §Spinning a Slice Off's own Atomicity discussion, generalized from up to
    two new wallets to exactly one new wallet funded from as many sources as were named (§Security
    Considerations).
-8. Deliver the consolidated wallet's connection: nested-encrypted to `new_identity` for `pubkey`
-   (§Spinning a Slice Off), in the clear for `connection_key`/`cash` (see Response above).
+8. Deliver the consolidated wallet's connection: nested-encrypted to the caller's proof pubkey (the first
+   source's signer) for a `pubkey` `new_identity` (§Spinning a Slice Off), in the clear for
+   `connection_key`/`cash` (see Response above).
 
 A request that fails steps 1–6 MUST be rejected before step 7. A rejected `cash_consolidate` never leaves
 any source consumed or partially merged.
