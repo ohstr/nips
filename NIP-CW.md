@@ -122,7 +122,7 @@ A Circle Wallet Hub MUST maintain, for itself:
 A member's `max_amount` is a spend cap, not a pre-funded transfer: a Circle Wallet starts at zero
 balance and draws against the Hub's own underlying balance as it spends, up to that cap. The Hub MUST
 maintain this cap-vs-balance invariant atomically with every new wallet it creates (§Creating a Circle
-Wallet's own Processing Algorithm, step 7). A wallet's expiry determines when it stops counting toward
+Wallet's own Processing Algorithm, step 9). A wallet's expiry determines when it stops counting toward
 this sum.
 
 For each member who currently holds an active Circle Wallet under a given Hub, an implementation MUST
@@ -215,12 +215,13 @@ inside for the same reason — they describe this one member's wallet, not the c
 On receiving `create_circle_wallet`, the Hub MUST, in order:
 
 1. Validate `pubkey` is a well-formed 64-character lowercase-hex string.
-2. Verify the kind-23199 identity proof per §Identity Proof, all five checks: the event's own `id` matches
-   its content, the signature verifies, the signer equals the requested `pubkey`, `created_at` is fresh,
-   and the `d` tag equals the Hub's pairing-URI pubkey. The `id` check is not optional — without it the
-   replay guard in step 3 is bypassable by mutating only that field.
-3. Check the proof's event ID against the single-use replay guard. A previously-consumed event ID MUST
-   be rejected, even if otherwise valid and still within its freshness window.
+2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–5: the kind is 23199, the event's
+   own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
+   `created_at` is fresh, and the `d` tag equals the Hub's pairing-URI pubkey. The `id` check is not
+   optional — without it the replay guard in step 3 is bypassable by mutating only that field.
+3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 6). A
+   previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
+   window.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
    direct lookup, while a `following`-policy Hub resolves the provider's current kind:3 contact list
    (§Membership). A Hub that cannot resolve that list yet — it fetches from relays and so has a startup
@@ -282,23 +283,26 @@ section for the general reasoning, which applies identically here).
 
 There's only one identity mode here, since a Circle Wallet member is always a raw Nostr pubkey.
 
-Verification MUST establish all of the following, and a failure of any one MUST be rejected:
+Verification MUST establish all of the following, and a failure of any one MUST be rejected. This is the
+one list of checks; every other section that verifies a kind-23199 proof refers to it.
 
-1. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
+1. **The event's `kind` is 23199.** Another kind signed by the same key — a NIP-CASH proof, say — is not
+   an identity proof for this Hub, however well its other fields match.
+2. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
    compare. This is load-bearing rather than a formality: a Nostr signature does not cover the `id` field,
    so a proof whose id is *not* checked can be replayed indefinitely by mutating only that field — the
    signature stays valid and the single-use replay guard below, which keys on the id, never sees a repeat.
    Omitting this check silently defeats the guard rather than weakening it.
-2. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
-3. **`created_at` is inside the freshness window** given above.
-4. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
+3. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
+4. **`created_at` is inside the freshness window** given above.
+5. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
    Wallet Hub's **pairing URI**, the only one a member holding the shared connection string can know. An
    implementation that maintains a second, internal keypair derived from the connection's secret MUST NOT
    bind against that one: no member could compute it, so every genuine request would be rejected.
-5. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
+6. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
-Steps 1–4 MUST run before the allowlist/following
+Checks 1–5 MUST run before the allowlist/following
 authorization check. This ordering is what closes an allowlist-membership oracle: an attacker who does
 not hold the target's private key MUST NOT be able to reach the authorization check at all, so the
 response cannot be used to probe list membership.
@@ -463,7 +467,7 @@ member may hold nothing but the Hub connection string and an un-updated client.
   item's kind-23192 proof therefore carries the Hub's own pubkey, which is the same value
   §Identity Proof already requires the kind-23199 proof to bind to.
 - **Two proofs travel together, and both are REQUIRED.** The kind-23199 identity proof is what
-  authorizes the join, and is unchanged — all five checks in §Identity Proof still apply. The
+  authorizes the join, and is unchanged — every check in §Identity Proof still applies. The
   kind-23192 item proof authorizes the *item*, binding it to this envelope, this method and
   these params. Neither substitutes for the other: without the 23199 proof anyone could request
   a wallet for someone else's pubkey, and without the 23192 proof an envelope assembler could
