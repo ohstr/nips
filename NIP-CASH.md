@@ -745,6 +745,10 @@ An implementation MUST determine the outcome as follows, in this order:
      a Dedicated Wallet) — see that section's own "Why Not Reassign in Place, for a Cash-Mode Target on a
      Shared Wallet?" for why a multi-recipient-history wallet can't take this shortcut.
 
+A **spin-off** is any outcome that lands value in brand-new dedicated wallets rather than reassigning in
+place: a partial split (two wallets) or a full transfer to `cash` on a multi-recipient-history wallet (one
+wallet). "Split" on its own always means the partial split.
+
 ```mermaid
 sequenceDiagram
     participant Caller as Recipient (current registered identity)
@@ -807,8 +811,9 @@ sequenceDiagram
   - a `d` tag whose value is the wallet's `WalletPubkey` (same as a claim proof);
   - a `new_identity_hash` tag:
     `sha256(new_identity.identity_type + ":" + new_identity.identity_value + ":" + new_identity.ia_pubkey)`,
-    hex-encoded (`identity_value` is `""` for a `cash` target, since the caller doesn't choose one ahead
-    of generating it; `ia_pubkey` is `""` for every target type except `connection_key`). `ia_pubkey` MUST be
+    hex-encoded (`identity_value` is the caller's own commitment for a `cash` target, the same value sent
+    in `new_identity`, so the proof binds the commitment that will receive the value; `ia_pubkey` is `""`
+    for every target type except `connection_key`). `ia_pubkey` MUST be
     folded into the hash, not just `identity_type`/`identity_value` — omitting it would let a captured proof
     for one `connection_key` target be replayed against the same `identity_value` under a different,
     still-trusted Identity Authority, redirecting who is authoritative to redeem the transferred slice even
@@ -828,8 +833,9 @@ sequenceDiagram
   `connection_key`, same shape as one `recipients[]` entry in `mint_cash` (§Minting Cash), with
   `ia_pubkey` required for `connection_key`. For `cash`, `identity_value` is REQUIRED
   (a caller-generated `sha256` commitment — see §Cash-Mode Slices) and `ia_pubkey` MUST NOT be present.
-- `amount_millis` — OPTIONAL, as described above. When present, MUST be strictly positive and MUST NOT
-  exceed the slice's current committed amount.
+- `amount_millis` — OPTIONAL. Omit it, or set it equal to the slice's current committed amount, for a full
+  transfer; a smaller value splits off exactly that much (§Which outcome a request produces). When present,
+  it MUST be strictly positive and MUST NOT exceed the slice's current committed amount.
 
 ### Response
 
@@ -853,7 +859,7 @@ sequenceDiagram
 This response MUST NOT ever carry a cash secret, nor any other secret capable of moving funds, in a
 form decryptable by every holder of this connection — `identity_value` here is always either a public
 identity or a one-way commitment the caller already supplied, never a value the wallet itself generated.
-The `*_wallet_token` fields, present only for a split outcome, are the one exception that looks like it
+The `*_wallet_token` fields, present only for a spin-off, are the one exception that looks like it
 might violate this, and doesn't: see §Spinning a Slice Off Into a Dedicated Wallet for why they're safe
 despite traveling over this same shared connection. See also §Security Considerations.
 
@@ -881,7 +887,7 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
 5. For an in-place reassignment: atomically transfer the slice. The old registered identity MUST stop
    authorizing `cash_redeem` or `cash_transfer` on this slice from the moment this step completes. The new
    identity becomes the slice's sole registered identity, for the same committed amount, unchanged.
-6. For a split: follow §Spinning a Slice Off Into a Dedicated Wallet's own algorithm instead. The source
+6. For a spin-off: follow §Spinning a Slice Off Into a Dedicated Wallet's own algorithm instead. The source
    slice is claimed **terminal** (exactly like a redemption — its committed amount is never rewritten to a
    smaller value), and its value re-emerges as new dedicated wallets: one wallet of `amount_millis` for a
    full transfer to `cash`; two wallets (carved `amount_millis` + remainder) for a partial split.
@@ -895,7 +901,7 @@ never leaves a slice partially transferred, partially split, or claimed.
 ## Spinning a Slice Off Into a Dedicated Wallet
 
 Whenever §Transferring and Splitting a Slice's Processing Algorithm (step 3) determines the outcome is a
-split, the source slice is claimed terminal and its value re-emerges as one or two brand-new, dedicated,
+spin-off, the source slice is claimed terminal and its value re-emerges as one or two brand-new, dedicated,
 single-recipient Cash Wallets, whose connections are delivered to the caller alone:
 
 - a **full transfer to `cash`** on a wallet whose recipient history rules out an in-place reassignment
@@ -1183,7 +1189,8 @@ Hub payout needs when the same connection goes out to many recipients at once (�
 A slice MAY still move into or out of cash-mode status via `cash_transfer` (§Transferring and Splitting a
 Slice) — either wholly (a full transfer) or partially (a split carves a new cash note off, while the
 remainder, if any, stays under the giver's own unchanged identity — that remainder is never itself
-cash). Moving *out* of cash-mode status presents the current secret as `cash_transfer`'s proof, the same
+cash unless the giver's own identity is cash, in which case it keeps the giver's commitment in its new
+wallet). Moving *out* of cash-mode status presents the current secret as `cash_transfer`'s proof, the same
 way `cash_redeem` does. Moving *into* cash-mode status in place — reassigning the current wallet's connection
 to serve a cash-mode slice — is restricted to a full transfer on a wallet that has **ever** had only one
 recipient, not merely one still-unclaimed one, for the reasons §Transferring and Splitting a Slice and
