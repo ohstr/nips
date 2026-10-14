@@ -122,7 +122,7 @@ A Circle Wallet Hub MUST maintain, for itself:
 A member's `max_amount` is a spend cap, not a pre-funded transfer: a Circle Wallet starts at zero
 balance and draws against the Hub's own underlying balance as it spends, up to that cap. The Hub MUST
 maintain this cap-vs-balance invariant atomically with every new wallet it creates (§Creating a Circle
-Wallet's own Processing Algorithm, step 7). A wallet's expiry determines when it stops counting toward
+Wallet's own Processing Algorithm, step 9). A wallet's expiry determines when it stops counting toward
 this sum.
 
 For each member who currently holds an active Circle Wallet under a given Hub, an implementation MUST
@@ -193,11 +193,16 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
 {
   "pairing_uri": "nostr+walletconnect://...",
   "wallet_pubkey": "<hex>",
+  "max_amount": 100000,
   "expires_at": 1720000000,
   "fees_ppm": 0,
   "budget_renewal": "monthly"
 }
 ```
+
+`max_amount` is the spend cap as the Hub resolved it, in the request's units. A Hub that adjusts the
+requested value, for example by rounding it to a unit its node can represent, reports what it actually
+applied, so the member is never left assuming a cap they do not have.
 
 **The response carries exactly one field on purpose.** `encrypted_details` MUST be encrypted (NIP-44) to
 the requester's own pubkey, and every term describing the issued wallet MUST be inside it — not merely the
@@ -215,28 +220,29 @@ inside for the same reason — they describe this one member's wallet, not the c
 On receiving `create_circle_wallet`, the Hub MUST, in order:
 
 1. Validate `pubkey` is a well-formed 64-character lowercase-hex string.
-2. Verify the kind-23199 identity proof per §Identity Proof, all five checks: the event's own `id` matches
-   its content, the signature verifies, the signer equals the requested `pubkey`, `created_at` is fresh,
-   and the `d` tag equals the Hub's pairing-URI pubkey. The `id` check is not optional — without it the
-   replay guard in step 3 is bypassable by mutating only that field.
-3. Check the proof's event ID against the single-use replay guard. A previously-consumed event ID MUST
-   be rejected, even if otherwise valid and still within its freshness window.
+2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–5: the kind is 23199, the event's
+   own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
+   `created_at` is fresh, and the `d` tag equals the Hub's pairing-URI pubkey. The `id` check is not
+   optional — without it the replay guard in step 3 is bypassable by mutating only that field.
+3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 6). A
+   previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
+   window.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
    direct lookup, while a `following`-policy Hub resolves the provider's current kind:3 contact list
    (§Membership). A Hub that cannot resolve that list yet — it fetches from relays and so has a startup
    window before any answer is available — MUST NOT fall back to denying membership, because a denial is
-   indistinguishable to the caller from "you are not a member." It MUST instead answer with a distinct
-   not-ready error the caller can retry, such as `NOT_READY`.
-5. Check the one-active-wallet-per-(Hub, identity) rule (§Membership), rejecting if the identity
-   already holds an active Circle Wallet under this Hub.
+   indistinguishable to the caller from "you are not a member." It MUST instead answer `NOT_READY`
+   (§Errors), which the caller can retry.
+5. Check the one-active-wallet-per-(Hub, identity) rule (§Membership), rejecting with `WALLET_EXISTS`
+   (§Errors) if the identity already holds an active Circle Wallet under this Hub.
 6. Validate `max_amount` against the Hub's own per-wallet ceiling, the resolved `budget_renewal` against
    the Hub's own renewal floor, and, if `expiry` was explicitly supplied (non-zero), that it does not
    exceed the Hub's own expiry ceiling (§Data Model).
 7. Rate-limit per requester `pubkey`. A Hub SHOULD bound how often one member may ask, and MUST answer a
    throttled request with a distinct rate-limit error rather than a generic failure, so a caller can tell
    "slow down" from "you are not a member" — the same distinguishability §Identity Proof's ordering exists
-   to protect. Quota SHOULD be spent only by requests that got this far, so a malformed or unauthorized
-   request cannot exhaust a legitimate member's allowance.
+   to protect. That error is `RATE_LIMITED` (§Errors). Quota SHOULD be spent only by requests that got
+   this far, so a malformed or unauthorized request cannot exhaust a legitimate member's allowance.
 8. Guard against concurrent requests against the same Hub. A Hub MUST NOT let two in-flight requests both
    pass step 9's commitment check against the same balance; rejecting the second with a retryable error is
    sufficient. This guard is caller-visible, which is why it is specified: a member may see a transient
@@ -257,6 +263,21 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 10. After the transaction commits, never before, publish the new connection's relay subscription.
 11. Return a single `encrypted_details` ciphertext containing the pairing URI and every resolved wallet
     parameter. Nothing describing the wallet may travel outside it (§Response).
+
+### Errors
+
+A caller needs to tell these refusals apart to know what to do next, so a Hub MUST use these NIP-47 error
+codes for them, on either transport:
+
+| code | meaning | retry? |
+|---|---|---|
+| `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
+| `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
+| `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it is deleted |
+| `RATE_LIMITED` | the requester has asked too often (step 7) | yes, later |
+
+Other failures (a malformed request, a proof that does not verify, a balance or ceiling check failing) keep
+whatever codes the implementation uses; this document names only the four a caller has to distinguish.
 
 ## Identity Proof (kind 23199)
 
@@ -282,23 +303,26 @@ section for the general reasoning, which applies identically here).
 
 There's only one identity mode here, since a Circle Wallet member is always a raw Nostr pubkey.
 
-Verification MUST establish all of the following, and a failure of any one MUST be rejected:
+Verification MUST establish all of the following, and a failure of any one MUST be rejected. This is the
+one list of checks; every other section that verifies a kind-23199 proof refers to it.
 
-1. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
+1. **The event's `kind` is 23199.** Another kind signed by the same key — a NIP-CASH proof, say — is not
+   an identity proof for this Hub, however well its other fields match.
+2. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
    compare. This is load-bearing rather than a formality: a Nostr signature does not cover the `id` field,
    so a proof whose id is *not* checked can be replayed indefinitely by mutating only that field — the
    signature stays valid and the single-use replay guard below, which keys on the id, never sees a repeat.
    Omitting this check silently defeats the guard rather than weakening it.
-2. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
-3. **`created_at` is inside the freshness window** given above.
-4. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
+3. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
+4. **`created_at` is inside the freshness window** given above.
+5. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
    Wallet Hub's **pairing URI**, the only one a member holding the shared connection string can know. An
    implementation that maintains a second, internal keypair derived from the connection's secret MUST NOT
    bind against that one: no member could compute it, so every genuine request would be rejected.
-5. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
+6. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
-Steps 1–4 MUST run before the allowlist/following
+Checks 1–5 MUST run before the allowlist/following
 authorization check. This ordering is what closes an allowlist-membership oracle: an attacker who does
 not hold the target's private key MUST NOT be able to reach the authorization check at all, so the
 response cannot be used to probe list membership.
@@ -357,6 +381,11 @@ A Circle Wallet Hub MAY apply a forwarding-fee skim to a member's payments — `
   intended behaviour rather than an artifact.
 - **Who pays.** The paying member, on top of the payment amount, out of their own wallet balance —
   never any other member's, and never the Hub's own underlying balance.
+- **Which rate.** The one reported in that member's own `create_circle_wallet` response, fixed for the
+  life of the wallet. A Hub MAY change its rate, but the new rate applies only to wallets created after
+  the change, and `get_info`'s `circle_wallet.fees_ppm` (§The Circle Wallet Hub Connection) reports the rate
+  a new member would get. A member's economics MUST NOT shift underneath them because the host changed a
+  setting after they joined — the same rule NIP-CASH applies to a slice's redeem fee.
 
 A Hub that charges no fee at all MUST still report `fees_ppm: 0`, not omit the field. Whatever rate a Hub
 advertises, it MUST actually apply that exact rate to every qualifying payment — see §Security
@@ -462,12 +491,24 @@ member may hold nothing but the Hub connection string and an un-updated client.
   a wallet the caller already holds; a join by definition has no wallet yet. The `d` tag of the
   item's kind-23192 proof therefore carries the Hub's own pubkey, which is the same value
   §Identity Proof already requires the kind-23199 proof to bind to.
-- **Two proofs travel together, and both are REQUIRED.** The kind-23199 identity proof is what
-  authorizes the join, and is unchanged — all five checks in §Identity Proof still apply. The
-  kind-23192 item proof authorizes the *item*, binding it to this envelope, this method and
-  these params. Neither substitutes for the other: without the 23199 proof anyone could request
-  a wallet for someone else's pubkey, and without the 23192 proof an envelope assembler could
-  re-point a verified join at different params.
+- **The 23199 identity proof and the 23192 item proof travel together, and both are REQUIRED.**
+  The kind-23199 identity proof is what authorizes the join, and is unchanged — every check in
+  §Identity Proof still applies. The kind-23192 item proof authorizes the *item*, binding it to
+  this envelope, this method and these params. Neither substitutes for the other: without the
+  23199 proof anyone could request a wallet for someone else's pubkey, and without the 23192
+  proof an envelope assembler could re-point a verified join at different params.
+- **The item proof's signer MUST equal the request's `pubkey`** — the same key that signed the
+  23199 proof. NIP-CASH lets an item proof's key be the signer's own choice (§Item Proofs in
+  NIP-CASH), because a bill item's slice is named by other means; a join has no slice, so the
+  params binding means something only if the requester made it. A Hub MUST treat a join whose
+  item proof is signed by any other key as carrying an item proof that did not verify.
+- **The bill proof is signed with the Hub connection's secret.** NIP-CASH requires a kind-23193
+  bill proof on every item (§Bill Proofs in NIP-CASH), and a join is no exception. With no bill
+  to hold, it is signed with the `secret` of the Hub connection the member was given
+  (`circlehub1...`, or the equivalent pairing URI), and its `d` tag carries the Hub's pubkey like
+  the item proof's. It proves only that the sender holds the shared Hub connection string — which
+  every prospective member does — so it authorizes nothing by itself; it is what lets the Hub
+  answer a refused join with an error rather than an omission (§Responses below).
 - **A batch of joins is legitimate.** One envelope MAY carry several joins — a host onboarding
   a group — and each is independently proven, so a Hub MUST evaluate them individually rather
   than accepting or rejecting the batch as a unit.
@@ -489,7 +530,7 @@ different outcomes and the distinction is deliberate. A join refused because the
 not a member, is rate-limited, or already holds a wallet MUST be answered with the
 corresponding error, because a prospective member needs to tell those cases apart to know
 whether to retry — the same distinguishability §Identity Proof's check ordering exists to
-protect. Omission is reserved for an item the Hub structurally does not serve, or whose item
+protect. The codes are the same as on the standard transport (§Errors). Omission is reserved for an item the Hub structurally does not serve, or whose item
 proof did not verify.
 
 Note this means the membership oracle §Identity Proof closes is closed here by the *same*
@@ -525,6 +566,14 @@ commitment/balance griefing (minting max-amount wallets "as" real members).
 **Single-use replay guard is necessary.** A Circle Wallet identity proof has no invoice to bind it to.
 Without an explicit single-use guard keyed on the proof's event ID, a captured proof could be
 resubmitted repeatedly within its own freshness window.
+
+**On the standard transport, the identity proof does not bind the request's params.** It binds the
+requester and the Hub, nothing else. Anyone who reads a request before the Hub does — a co-member holding
+the shared connection who sees it on a relay — can resubmit the same proof with a different `max_amount`,
+`expiry` or `budget_renewal` and, by arriving first, consume it; the requester's own copy is then refused
+as a replay. The wallet is still issued to the requester's `pubkey` and its details are still encrypted to
+them, so this cannot take a wallet, but it can change its terms or tie up the Hub's commitment ceiling. A
+member who cares SHOULD join over §Private Join, where the requester's own item proof binds the params.
 
 **One active wallet per (Hub, identity)**'s two-layer enforcement (§Membership) exists because a pre-check
 alone is a race, not a guarantee — the unique-constraint insert is what makes it authoritative.
