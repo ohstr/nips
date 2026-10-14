@@ -2323,7 +2323,7 @@ connection does not itself serve:
 
 ```jsonc
 {
-  "methods": ["get_balance", "get_info", "get_budget"],
+  "methods": ["get_balance", "get_info"],
   "private_methods": ["cash_consolidate", "cash_redeem", "cash_status", "cash_transfer"]
 }
 ```
