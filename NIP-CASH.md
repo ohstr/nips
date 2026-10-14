@@ -397,6 +397,14 @@ kind-23198 proof.
 - `identity_type`, `identity_value`, `identity_event` — REQUIRED for an identity-bound slice, and REQUIRED
   together. The kind-23198 `identity_event` MUST bind the caller to that slice's *current* registered
   identity and to this specific invoice, so a captured proof can't be replayed against a different one.
+  Concretely, it is signed by that identity, its `created_at` falls inside the same freshness window as
+  kind 23199 (up to five minutes past, one minute future), and it MUST carry:
+  - a `d` tag whose value is the wallet's `WalletPubkey`;
+  - a `bolt11_hash` tag whose value is the invoice's **payment hash**, 64 lowercase hex characters, as
+    decoded from `invoice`. Despite the tag's name it is not a hash of the invoice string: the payment
+    hash is what identifies the payment, and it survives any re-encoding of the invoice;
+  - for `connection_key` mode only, a `connection_key` tag and an `e` tag referencing the accompanying
+    `attestation_event`.
 - `attestation_event` — REQUIRED additionally when the slice's identity is `connection_key`: a
   currently-trusted Identity Authority's attestation (§Terminology).
 - `cash_secret` — REQUIRED instead of all of the above when the slice's identity is `cash`
@@ -428,7 +436,8 @@ On receiving `cash_redeem`, the wallet MUST, in order:
    same-node redemption, per §The Redeem Fee), not the real Lightning routing cost, which is never charged
    to the recipient.
 
-A request that fails step 1, 2, or 3 MUST be rejected before step 4.
+A request that fails step 1, 2, or 3 MUST be rejected before any payment is attempted, leaving the slice
+claimable. Where step 3 runs inside step 4's atomic claim, a failure there MUST release the claim.
 
 ## The Redeem Fee
 
@@ -1556,8 +1565,8 @@ that assembler perform a substitution.
 | `en` | the envelope `nonce` | banking a proof and replaying it in a later envelope |
 | `expiration` | the envelope's `not_after` | using it indefinitely |
 
-This is the same reasoning kind-23198 already applies by binding `bolt11_hash` and
-`new_identity_hash` (§Transferring and Splitting a Slice) — extended, because a batch has an
+This is the same reasoning kind-23198 already applies by binding `bolt11_hash` (§Redeeming a Slice)
+and `new_identity_hash` (§Transferring and Splitting a Slice) — extended, because a batch has an
 assembler that a single request does not.
 
 `ph` MUST be computed over a **canonical** form of `params`: object keys sorted, insignificant
