@@ -1976,8 +1976,8 @@ one-byte length field. The entries:
 | `1` | relay | a relay URL, ASCII | **one or more**, order preserved; each MUST be non-empty |
 | `2` | secret | 32 raw bytes — the NWC connection secret | exactly one, REQUIRED |
 | `3` | identity required | 1 byte, `0` or `1` | zero or one, OPTIONAL |
-| `5` | mint signature | 65 raw bytes — a compact recoverable ECDSA signature: 1 recovery byte, 32-byte R, 32-byte S (§Mint Provenance) | zero or one, OPTIONAL |
-| `6` | attested amount | 8 bytes, big-endian millis — the value the mint signature commits to | zero or one, OPTIONAL |
+| `5` | mint signature | 65 raw bytes — a compact recoverable ECDSA signature: 1 recovery byte, 32-byte R, 32-byte S (§Mint Provenance) | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
+| `6` | attested amount | 8 bytes, big-endian millis — the value the mint signature commits to | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `7` | hub group | 4 raw bytes — the issuing Cash Hub's fingerprint (§The Hub Group Fingerprint) | zero or one, OPTIONAL |
 
 Type numbers `0` and `1` carry the same meaning NIP-19 already gives them for `nprofile`/`nevent`/`naddr`
@@ -1994,7 +1994,7 @@ surface via `cash_status` instead.)
 Types `5` and `6` are a matched pair: a token carrying one MUST carry the other, since the signature
 commits to the amount and cannot be verified without it. A decoder that finds one without the other MUST
 treat the token as carrying no valid provenance (§Mint Provenance) — never as a hard decode failure, since
-both are optional.
+provenance is never a spending credential.
 
 A decoder MUST reject a token missing either required field (`0` or `2`), carrying a wrong-length value for
 any of the typed fields above **except the provenance pair `5`/`6` and the hub group `7`**, or repeating any
@@ -2009,10 +2009,11 @@ let a caller construct a token that decodes ambiguously, into a connection nobod
 metadata that could mislead a client about how to attempt a call. Truncated or malformed TLV data MUST
 also be rejected rather than read out of bounds.
 
-**Why `5`/`6` are carved out.** They are the only OPTIONAL fields whose corruption says nothing about
-whether the token is usable. A wallet's pubkey, secret, amount and expiry are all still intact and
-independently verifiable, so rejecting the whole token would make real money unspendable to punish a
-malformed *advisory* field — and provenance is explicitly never a spending credential (§Mint Provenance).
+**Why `5`, `6` and `7` are carved out.** They are the only fields whose corruption says nothing about
+whether the token can be dialed. The wallet pubkey, secret and relay hints are all still intact, so
+rejecting the whole token would leave real money unreachable to punish a malformed field that is not a
+credential — provenance is never a spending credential (§Mint Provenance), and the hub group is only a
+grouping hint (§The Hub Group Fingerprint).
 A decoder MUST therefore treat a wrong-length, duplicated or unpaired `5`/`6` as **no valid provenance**
 and decode the rest normally, exactly as §Mint Provenance requires. This is the one place where "malformed
 input" and "unusable token" come apart, which is why it is stated rather than left to the general rule.
@@ -2086,7 +2087,7 @@ listed relay is still untried.
 ### Redemption Metadata
 
 Type `3` (identity required) is an OPTIONAL hint, not part of the connection credential itself (only types
-`0`–`2` are REQUIRED — §Wire Format) — it lets a client decide how to attempt a call without a relay
+`0`–`2` make up the connection — §Wire Format) — it lets a client decide how to attempt a call without a relay
 round-trip first, purely as a convenience:
 
 **Identity required** (`0` = false, `1` = true) reports whether the wallet currently requires a proof at
@@ -2121,9 +2122,15 @@ succeeding or failing — only as a hint for deciding how to construct the attem
 
 ### The Hub Group Fingerprint
 
-A token MAY carry a **hub group** (TLV type `7`): four bytes, the first four of
-`sha256(<issuing Cash Hub's pubkey>)`. A Hub SHOULD stamp the same value on every bill it mints, including
-the ones it creates by splitting or consolidating existing bills.
+A token MAY carry a **hub group** (TLV type `7`): four bytes, the first four of `sha256` over an input the
+issuing Cash Hub chooses — one stable for the Hub's whole life and distinct from its sibling Hubs on the same
+node. A Hub SHOULD stamp the same value on every bill it mints, including the ones it creates by splitting or
+consolidating existing bills, and MUST NOT change its input once it has minted a bill, since that would split
+its own bills into two groups.
+
+Clients never compute a fingerprint; they only compare two of them byte for byte. The input is therefore
+the Hub's business, but a Hub deriving it from one of its own pubkeys SHOULD hash that pubkey as its
+64-character lowercase hex text, not its 32 raw bytes, so that implementations sharing a code base agree.
 
 It answers exactly one question: **do two bills share an issuing Hub, and may they therefore be
 consolidated together?** Nothing else in a token answers it. Mint provenance identifies the minting *node*
@@ -2142,10 +2149,10 @@ must already share a minter before grouping is considered at all — a handful o
 space. And a bill is a string a person copies and pastes, so the field costs about ten characters of a
 roughly 290-character token.
 
-It is a **hash**, and truncated, rather than the Hub's pubkey itself. Every bill a Hub mints would
-otherwise carry a stable, linkable identifier for that Hub in the clear, which would let an observer
-holding two bills learn they came from the same Hub *and* which Hub that is. A short digest of a pubkey
-nobody can enumerate lets a holder group their own bills without publishing who issued them.
+It is a **hash**, and truncated, rather than the Hub's pubkey itself, so a bill does not name its Hub in
+the clear. This hides little: two bills with the same fingerprint visibly share a Hub, and anyone holding a
+list of candidate inputs — Hub pubkeys seen on relays, say — can hash each one and match a fingerprint
+against it. A holder MUST NOT rely on the fingerprint to keep a bill's issuing Hub secret.
 
 A bill carrying no fingerprint is **ungrouped**, which is not the same as matching other ungrouped bills.
 Clients MUST NOT treat absent fingerprints as equal: two bills agreeing only on "unknown Hub" are exactly
@@ -2210,11 +2217,10 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   recompute the payload from the token's own HRP, pubkey (`0`), and attested amount (`6`), wrap it in the
   prefix above, hash twice, recover the signer, and compare it to whichever minter pubkey the
   holder expects or trusts. A type-`5`/`6` pair that doesn't recover to a valid pubkey over its own payload
-  MUST be treated as carrying no valid provenance — never as a hard decode failure, since both are optional.
-- **Optional by default.** Because it roughly doubles a token's length, a minter SHOULD omit it unless
-  portable provenance is wanted; a token without types `5`/`6` is exactly as spendable. The signature is
-  provenance only — it is NEVER a spending credential, and its presence or absence changes nothing about
-  how `cash_redeem`/`cash_transfer` authorize a call.
+  MUST be treated as carrying no valid provenance — never as a hard decode failure.
+- **Required, but never a spending credential.** Every minter MUST include it, for the reason above. It
+  authorizes nothing: its presence changes nothing about how `cash_redeem`/`cash_transfer` authorize a
+  call, and a token whose provenance a decoder cannot verify still decodes.
 
 **Provenance is not custody.** A mint signature proves who *minted* a token; it does not, by itself, prove
 the funds still exist or that any given node can pay them out. Only the node currently custodying a wallet
@@ -2757,9 +2763,9 @@ connection through channels that don't also reveal who else received it.
 
 A token carrying mint provenance (§Mint Provenance) additionally exposes, in the clear, its **minter node
 pubkey** (recoverable from the signature) and its **denomination** (the attested amount, TLV type `6`).
-That's inherent to offline provenance — a physical bill's denomination is visible too — but a minter who
-doesn't want a token's value or origin legible to everyone who sees the string SHOULD omit the signature;
-it is optional, and a token without it is exactly as spendable.
+That's inherent to offline provenance — a physical bill's denomination is visible too — and it cannot be
+opted out of: the signature is REQUIRED, because it is what lets a bill reach the private transport (§Mint
+Provenance). Exposing origin and denomination to whoever sees the string is the price of that transport.
 
 A split's brand-new dedicated wallet is, by construction, never shared with anyone the source wallet's
 former recipients could observe — but the amount it was funded with, and the timing of its creation, are
