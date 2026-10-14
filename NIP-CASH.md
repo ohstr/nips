@@ -1382,8 +1382,10 @@ distinguishable wire sizes back to four, which is the batch-count leak §Padding
 And once a Hub rotates its inbox key, being able to pin a client to the retired one would defeat
 rotation entirely, which is the only remedy a Hub has for a leaked inbox.
 
-**A Hub MUST NOT announce a `pad_bucket_bytes` below one maximal item, and a client MUST reject
-one that does.**
+**A Hub MUST NOT announce a `pad_bucket_bytes` below 2048 bytes, and a client MUST reject one
+that does.** The floor is a fixed number because the size of "one item" is not: a
+`cash_consolidate` item grows with its source count, and tying the floor to the largest item a Hub
+permits would forbid ordinary bucket sizes.
 
 Padding only conceals batch size while a bucket is wider than the thing being concealed. A
 policy of `1` makes every item count produce its own wire size, exactly linear, so an observer
@@ -1554,7 +1556,9 @@ This is the requirement that keeps the allowance from becoming a hole. An identi
 could otherwise dodge its proof by omitting one and looking bearer — so a Hub presented with a
 proofless item MUST look the target up, and serve it only if that slice is genuinely cash-mode
 and the supplied secret matches. For any other slice the item is unservable and MUST be
-omitted, exactly as an unverifiable proof is.
+omitted, exactly as an unverifiable proof is — unless the item's bill proof verified, in which case the
+Hub MAY refuse it with an error instead (§Bill Proofs: once possession is proved, a reason tells the
+sender nothing new). Possession decides between the two outcomes, never the item's own claims.
 
 A Hub MUST NOT count a proofless item against a verification budget it advertises, since there
 is no signature to verify; and a client MUST NOT assume otherwise when packing an envelope.
@@ -1580,7 +1584,13 @@ and `new_identity_hash` (§Transferring and Splitting a Slice) — extended, bec
 assembler that a single request does not.
 
 `ph` MUST be computed over a **canonical** form of `params`: object keys sorted, insignificant
-whitespace removed, and numbers preserved exactly as written. Canonicalising rather than
+whitespace removed, and numbers preserved exactly as written. Keys are sorted and strings are
+serialized as RFC 8785 (JCS) does: a string escapes only `"`, `\` and control characters below
+U+0020 (as `\b`, `\t`, `\n`, `\f`, `\r`, or else lowercase `\u00XX`), and every other character is
+written as literal UTF-8. In particular `<`, `>`, `&`, U+2028 and U+2029 are written unescaped,
+although some JSON encoders escape them by default; an encoder that does produces a different
+hash, and the Hub omits the item. Numbers are the one departure from RFC 8785: they are kept
+verbatim, for the reason below. Absent or empty `params` are hashed as `{}`. Canonicalising rather than
 hashing the received bytes matters twice over. It stops the binding depending on nothing ever
 re-serialising `params` in transit — a dependency that would fail silently and with no
 indication why. And preserving numbers verbatim is required because an amount in millis can
@@ -1662,8 +1672,9 @@ Per-item errors use NIP-47's own error shape, so a per-item failure reads exactl
 single-request failure does today.
 
 **Results need not cover every item, and omission is meaningful.** An item whose target the
-Hub does not hold, or whose proof did not verify, MUST be **omitted** rather than answered
-with an error. This is what stops batching from becoming an existence oracle: producing a
+Hub does not hold, or whose bill proof did not verify, MUST be **omitted** rather than answered
+with an error. Once the bill proof verifies, an item whose slice proof or bearer secret fails MAY
+be refused with an error instead of omitted (§Bill Proofs). This is what stops batching from becoming an existence oracle: producing a
 verifying proof requires the bill's connection secret in the first place, so a caller who
 legitimately holds a bill learns nothing it did not already know, while a caller probing for
 bills it does not hold learns nothing at all. A client MUST read an omission as "not served"
@@ -1797,11 +1808,18 @@ client SHOULD distinguish an incomplete reply from a complete one containing omi
 they support different actions: the first is "ask again", the second is final.
 
 A Hub SHOULD keep `total` as low as the limits allow, since each additional event is another
-round of padding and another thing that can be lost. A client MUST accept chunks in any order,
-and MUST reject a set whose members disagree about `total` or repeat a `seq`.
+round of padding and another thing that can be lost. A client MUST accept chunks in any order.
+The same event (same event id) received twice, for example from two relays, is one chunk, not a
+repeat.
 
-**A client MUST reject a reply that answers the same item id in more than one chunk**, and MUST
-NOT resolve the conflict by arrival order or by `seq`.
+**A malformed set is incomplete, not void.** If chunks disagree about `total`, or two different
+events carry the same `seq`, the client MUST treat the reply as incomplete. It MUST still keep
+every item outcome a validly decrypted chunk decided, exactly as for any other incomplete reply
+(below), since one of them may be the only copy of a new bill's token.
+
+**A client MUST NOT accept an item id answered in more than one chunk**, and MUST NOT resolve the
+conflict by arrival order or by `seq`. That item has no decided outcome and MUST be surfaced as
+indeterminate; the other items keep theirs.
 
 This follows from the rule above it. Duplicate ids are already malformed *within* one chunk, and
 chunks may arrive in any order — so if the duplicate rule stops at the chunk boundary, two
@@ -1813,7 +1831,8 @@ by reordering two events it cannot read: a `NOT_FOUND` becomes a live bill, or t
 Ordering by `seq` is not the remedy. It makes the outcome deterministic and leaves the choice
 with the Hub, which picks the winner by deciding which chunk to number first. Refusing leaves
 neither party a choice: a Hub that answers one item twice with different content has
-contradicted itself, and no reading of that reply is safe to act on.
+contradicted itself, and no reading of that item's answer is safe to act on. The contradiction
+says nothing about the other items, so it does not cost them their outcomes.
 
 **A client MUST bound `total` by the number of items it requested.** `total` is Hub-supplied and
 otherwise constrained only from below, so an inflated value is a reply a client will wait for
