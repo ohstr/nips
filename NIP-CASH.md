@@ -136,8 +136,9 @@ A Cash Hub MUST maintain, for itself:
   mints unless the `mint_cash` caller requests one of their own (§Minting Cash);
 - a default value for `min_transfer_millis` (§Transferring and Splitting a Slice), applied to every slice a freshly-minted
   wallet carries. Zero (no floor) is a valid default;
-- a default value for `redeem_fee_ppm` (§The Redeem Fee), applied to every slice a freshly-minted wallet
-  carries. Zero (free) is a valid default. It is a parts-per-million rate, so it MUST be bounded at
+- a default value for `redeem_fee_base` and `redeem_fee_ppm` (§The Redeem Fee), applied to every slice a
+  freshly-minted wallet carries. Zero (free) is a valid default for either. `redeem_fee_ppm` is a
+  parts-per-million rate, so it MUST be bounded at
   1,000,000 — the whole slice. A Hub MUST reject a configured value above that bound rather than clamp it,
   since a silently-clamped fee would misreport what a recipient is about to be charged;
 - the retention window for answering about a destroyed bill (§Answering About a Destroyed Bill), in seconds.
@@ -155,7 +156,7 @@ For each recipient slice, an implementation MUST track:
 - the committed amount, fixed for the slice's whole life — a redemption, a split, or a consolidate
   consumes the slice entirely; nothing ever rewrites it to a smaller value in place (§Transferring and Splitting a Slice);
 - whether, and when, the slice has been redeemed;
-- this slice's own `min_transfer_millis` floor and `redeem_fee_ppm` rate — fixed when the slice was created,
+- this slice's own `min_transfer_millis` floor, `redeem_fee_base` and `redeem_fee_ppm` — fixed when the slice was created,
   from the Hub's default or inherited from the source slice it was split from (§The Redeem Fee);
 - whether the slice's value was moved into a brand-new dedicated Cash Wallet, either in full or as part
   of a split, and if so, which one — purely informational (an implementation MAY surface this for an
@@ -500,11 +501,6 @@ every other recipient's row, matching the transparency model `get_balance` alrea
 same connection type (§Scope Surface). Asked with `scope: mine`, or with no scope at all, it returns only the
 calling recipient's own row — a Hub MUST honour that and MUST NOT widen it (§Scoping the Roster).
 
-This paragraph previously ended "an implementation MUST NOT filter it to the caller's own slice", which
-contradicted §Scoping the Roster once scoping existed. That sentence was written when a Hub genuinely could
-not tell its recipients apart, so filtering was not implementable; the private transport identifies the
-caller per item, and the narrow answer became both possible and the default.
-
 ### Scoping the Roster
 
 The private transport changes that premise. There, every item carries a kind-23192 proof signed by one
@@ -555,9 +551,7 @@ sequenceDiagram
 
 ```jsonc
 {
-  "scope": "mine"   // OPTIONAL: "all" | "mine". Absent means "mine" on the private
-                    // transport and "all" on the standard one — see
-                    // Absent means "mine" — see §Scoping the Roster.
+  "scope": "mine"   // OPTIONAL: "all" | "mine". Absent means "mine" — see §Scoping the Roster.
 }
 ```
 
@@ -595,14 +589,16 @@ reject a value that is neither `all` nor `mine`.
 ```
 
 - `recipients` — every slice this wallet was ever created or split into, in no particular guaranteed
-  order, including already-claimed ones (`claimed_at` distinguishes them).
-- `redeem_fee_millis` / `net_redeemable_millis` — this slice's own `redeem_fee_ppm` (§The Redeem Fee) applied
-  to `amount_millis`, and what's left after it. This is necessarily the worst-case quote: `cash_status`
+  order, including already-claimed ones (`claimed_at` distinguishes them). The one exception is a slice the
+  wallet owner removed (§Removing a Recipient), which no longer appears.
+- `redeem_fee_millis` / `net_redeemable_millis` — this slice's own redeem fee (§The Redeem Fee): its
+  `redeem_fee_base` plus its `redeem_fee_ppm` share of `amount_millis`, capped at `amount_millis` — and what's
+  left after it. This is necessarily the worst-case quote: `cash_status`
   has no invoice in hand to know in advance whether a given future `cash_redeem` call will resolve to a
   same-node payment, which stays fee-free regardless of the configured rate. A slice's eventual `cash_redeem`
   MAY pay out more than `net_redeemable_millis` here (the full `amount_millis`, if same-node); it will never
-  pay out less. `redeem_fee_millis` is `0` for a slice whose `redeem_fee_ppm` is `0`, for every recipient,
-  same-node or not.
+  pay out less. `redeem_fee_millis` is `0` for a slice whose `redeem_fee_base` and `redeem_fee_ppm` are both
+  `0`, for every recipient, same-node or not.
 - `min_transfer_millis` — this slice's own split floor (§Transferring and Splitting a Slice), fixed at creation. A recipient
   MUST be able to learn this value here, before attempting a `cash_transfer` split, rather than only from a
   rejected attempt's error text — which also costs a share of whatever rate limiting the Hub applies to
@@ -618,20 +614,16 @@ reject a value that is neither `all` nor `mine`.
 
 On receiving `cash_status` for a bill that still exists, the wallet MUST, in order:
 
-1. Load every slice ever recorded for this wallet, claimed or not.
+1. Load every slice ever recorded for this wallet, claimed or not, except any the wallet owner removed
+   (§Removing a Recipient).
 2. Resolve the wallet's own `expires_at` once (§Data Model) — omitted if the wallet never expires.
-3. For each slice, compute `redeem_fee_millis` from that slice's own `redeem_fee_ppm` (never the Hub's
-   current default — a slice's rate is fixed at creation, §The Redeem Fee) and `amount_millis`, and
-   `net_redeemable_millis` as the difference; include that slice's own `min_transfer_millis` floor unchanged;
+3. For each slice, compute `redeem_fee_millis` as that slice's own `redeem_fee_base` plus its own
+   `redeem_fee_ppm` share of `amount_millis`, capped at `amount_millis` (never the Hub's current defaults —
+   a slice's fee is fixed at creation, §The Redeem Fee), and `net_redeemable_millis` as the difference; include that slice's own `min_transfer_millis` floor unchanged;
    include the wallet's `expires_at` from step 2, identical on every row.
 4. Apply `scope` (§Scoping the Roster). Absent means `mine`: only the calling recipient's own row. `all`
    returns every recipient's row, identity and amount included (§Privacy Considerations) — available on
-   request, but no longer the default, and no longer the only option.
-
-   This step previously read "MUST NOT be scoped to only the caller's own slice", which was accurate while
-   the Hub could not tell its recipients apart: they share one connection string, so the only answers
-   available were everyone or no one. The private transport identifies the caller per item, so the smallest
-   honest answer became possible and is now the default.
+   request, but not the default.
 
 ### Answering About a Destroyed Bill
 
@@ -2341,7 +2333,7 @@ of the following, derived while the slice is live and stored once it becomes ter
 | `redeemed` | paid out over Lightning |
 | `split` | value moved into another bill (a split or a consolidate) |
 | `expired` | the redeem window passed unclaimed; value returned to the Hub |
-| `reclaimed` | the wallet was destroyed before the window passed; value returned to the Hub |
+| `reclaimed` | the wallet was destroyed, or the owner removed the slice, before the window passed; value returned to the Hub |
 | `written-off` | value could not be returned anywhere, because the parent Hub was gone |
 
 A stored terminal value is NOT the "separately-tracked flag" this section warns against: that prohibition
@@ -2367,6 +2359,19 @@ anyone who ever saw the token, a co-recipient of a shared bill included. Whichev
 it MUST be the same for `cash_redeem`, `cash_transfer`, `cash_consolidate` and `cash_status` — the last
 included because a Hub answering a status read for one drain mechanism and not another would rebuild the
 same oracle this rule exists to close.
+
+### Removing a Recipient
+
+The wallet owner MAY remove a single unclaimed slice from a live Cash Wallet, for example a recipient added
+by mistake. The slice's committed amount MUST be swept back to the Cash Hub in the same atomic step that
+removes it, so the wallet never holds value no slice can claim, and the slice becomes terminal as
+`reclaimed`. A claimed slice MUST NOT be removed. Removing the wallet's last unclaimed slice leaves nothing
+on it, and the wallet is then deleted like any other drained wallet.
+
+A removed slice no longer appears in `cash_status`, under either scope (§Cash Status). Its former holder
+still holds the bill, so a `scope: mine` read from them is answered `NOT_FOUND` (§Scoping the Roster). A
+removed slice still counts toward the wallet's recipient history, which decides whether a full transfer
+to `cash` may reassign in place (§Which outcome a request produces).
 
 ### Archival on Deletion
 
