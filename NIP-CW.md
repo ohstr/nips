@@ -125,6 +125,10 @@ maintain this cap-vs-balance invariant atomically with every new wallet it creat
 Wallet's own Processing Algorithm, step 9). A wallet's expiry determines when it stops counting toward
 this sum.
 
+For each Circle Wallet it issues, a Hub records the member's `connection_pubkey` (§Request) and authorizes
+it as that wallet's client key. It never generates, receives or stores the matching secret (§Pairing
+Connection).
+
 For each member who currently holds an active Circle Wallet under a given Hub, an implementation MUST
 be able to determine that fact. §Membership's one-active-wallet-per-member rule is checked against it.
 That fact MUST stop being true once the member's wallet connection is deleted, freeing them to request
@@ -150,14 +154,16 @@ sequenceDiagram
     participant Hub as Circle Wallet Hub (shared connection)
     participant Wallet as new Circle Wallet connection
 
-    Member->>Hub: create_circle_wallet {pubkey, max_amount, expiry, budget_renewal?, identity_event}
+    Member->>Member: generate the connection keypair locally (secret never leaves)
+    Member->>Hub: create_circle_wallet {pubkey, connection_pubkey, max_amount, expiry, budget_renewal?, identity_event}
     Hub->>Hub: verify identity proof
     Hub->>Hub: authorize requester as a circle member
     Hub->>Hub: check one active wallet per (Hub, identity)
     Hub->>Hub: validate requested budget and expiry
     Hub->>Hub: check available balance
-    Hub->>Wallet: create wallet and record membership, in one transaction
-    Hub-->>Member: {encrypted_details}  %% one ciphertext; every term is inside it
+    Hub->>Wallet: create wallet authorizing connection_pubkey, record membership, in one transaction
+    Hub-->>Member: {encrypted_details}  %% one ciphertext; every term is inside it, no secret
+    Member->>Member: build the connection string from wallet_pubkey, relays and its own secret
 ```
 
 ### Request
@@ -165,6 +171,7 @@ sequenceDiagram
 ```jsonc
 {
   "pubkey": "<hex requester pubkey>",
+  "connection_pubkey": "<hex pubkey of the connection keypair the member generated>",
   "max_amount": 100000,
   "expiry": 2592000,
   "budget_renewal": "monthly",
@@ -173,6 +180,11 @@ sequenceDiagram
 ```
 
 - `pubkey` — REQUIRED, MUST be a 64-character lowercase-hex Nostr pubkey.
+- `connection_pubkey` — REQUIRED, the public half of a keypair the member generated locally for this
+  wallet's connection: a 64-character lowercase-hex x-only secp256k1 pubkey. It MUST differ from `pubkey`.
+  The member keeps the secret and never sends it; the Hub authorizes this pubkey as the wallet's client key.
+  A request without it MUST be rejected — there is no Hub-generated alternative. A member SHOULD generate a
+  fresh keypair per request, so the connection key links to nothing else they use.
 - `max_amount` — REQUIRED, MUST NOT exceed the Hub's own per-wallet ceiling (§Data Model).
 - `expiry` — OPTIONAL; if omitted or zero, it MUST default to the Hub's own expiry ceiling.
 - `budget_renewal` — OPTIONAL; if omitted, it MUST default to `never`. Whether omitted or explicit, the
@@ -191,8 +203,8 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
 
 ```jsonc
 {
-  "pairing_uri": "nostr+walletconnect://...",
   "wallet_pubkey": "<hex>",
+  "relays": ["wss://relay.example.com"],
   "max_amount": 100000,
   "expires_at": 1720000000,
   "fees_ppm": 0,
@@ -200,13 +212,20 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
 }
 ```
 
+It carries no secret and no connection string. The member builds its own connection string from
+`wallet_pubkey`, `relays` and the secret it kept —
+`nostr+walletconnect://<wallet_pubkey>?relay=<each relay>&secret=<its own secret>` — and a Hub MUST NOT
+return a secret, a `pairing_uri`, or anything else derived from one. `relays` MUST carry at least one
+non-empty relay URL, in failover order, for the same reason NIP-CASH requires one on every credential it
+defines (§Relay Hints Are Mandatory in NIP-CASH): the wallet is reachable nowhere else.
+
 `max_amount` is the spend cap as the Hub resolved it, in the request's units. A Hub that adjusts the
 requested value, for example by rounding it to a unit its node can represent, reports what it actually
 applied, so the member is never left assuming a cap they do not have.
 
 **The response carries exactly one field on purpose.** `encrypted_details` MUST be encrypted (NIP-44) to
-the requester's own pubkey, and every term describing the issued wallet MUST be inside it — not merely the
-connection string. A Hub MUST NOT place any of them beside the ciphertext.
+the requester's own pubkey, and every term describing the issued wallet MUST be inside it. A Hub MUST NOT
+place any of them beside the ciphertext.
 
 The reason is that the Hub connection is *shared*: it is broadcast to everyone who might join, so every
 co-member can decrypt the transport layer of this response. Anything outside `encrypted_details` is
@@ -219,12 +238,14 @@ inside for the same reason — they describe this one member's wallet, not the c
 
 On receiving `create_circle_wallet`, the Hub MUST, in order:
 
-1. Validate `pubkey` is a well-formed 64-character lowercase-hex string.
-2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–5: the kind is 23199, the event's
+1. Validate that `pubkey` and `connection_pubkey` are well-formed 64-character lowercase-hex strings,
+   that `connection_pubkey` is a valid x-only secp256k1 pubkey, and that the two differ.
+2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–6: the kind is 23199, the event's
    own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
-   `created_at` is fresh, and the `d` tag equals the Hub's pairing-URI pubkey. The `id` check is not
-   optional — without it the replay guard in step 3 is bypassable by mutating only that field.
-3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 6). A
+   `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, and the `connection` tag equals
+   the requested `connection_pubkey`. The `id` check is not optional — without it the replay guard in
+   step 3 is bypassable by mutating only that field.
+3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 7). A
    previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
    window.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
@@ -249,10 +270,11 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    failure caused by another member's request, not by anything wrong with their own.
 9. Inside one transaction, verify that the sum of `max_amount` across every currently-active wallet the
    Hub has issued, plus this request's `max_amount`, does not exceed the Hub's own current balance (and
-   its optional aggregate ceiling, if configured). Then create the Circle Wallet connection and insert
-   its membership row. The membership row's uniqueness constraint is the authoritative guard for step
-   5, so a conflict here, or a balance/ceiling check failing, MUST roll back the entire transaction,
-   including the just-created connection and permission rows.
+   its optional aggregate ceiling, if configured). Then create the Circle Wallet connection, authorizing
+   `connection_pubkey` as its client key, and insert its membership row. The membership row's uniqueness
+   constraint is the authoritative guard for step 5, so a conflict here, a `connection_pubkey` already
+   authorized for another connection on this node, or a balance/ceiling check failing, MUST roll back the
+   entire transaction, including the just-created connection and permission rows.
 
    Step 8's guard is not sufficient on its own: it is process-local, so two Hub processes sharing one
    database could still both pass this check. Making the read-and-create genuinely atomic requires a
@@ -261,8 +283,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    otherwise unenforced. A transaction-scoped advisory lock is sufficient where the datastore supports
    one.
 10. After the transaction commits, never before, publish the new connection's relay subscription.
-11. Return a single `encrypted_details` ciphertext containing the pairing URI and every resolved wallet
-    parameter. Nothing describing the wallet may travel outside it (§Response).
+11. Return a single `encrypted_details` ciphertext containing `wallet_pubkey`, `relays` and every resolved
+    wallet parameter, and no secret. Nothing describing the wallet may travel outside it (§Response).
 
 ### Errors
 
@@ -292,9 +314,10 @@ section for the general reasoning, which applies identically here).
   "pubkey": "<requester pubkey — MUST equal `pubkey` in the request>",
   "created_at": 1720000000, // freshness window: up to 5 minutes in the past, up to 1 minute in the future
   "tags": [
-    ["d", "<Circle Wallet Hub's own pubkey>"] // binds proof to THIS Hub; no invoice to bind it to
-                                             // — see below: this is the pubkey from the Hub's
-                                             // PAIRING URI, not any key derived from its secret
+    ["d", "<Circle Wallet Hub's own pubkey>"], // binds proof to THIS Hub; no invoice to bind it to
+                                              // — see below: this is the pubkey from the Hub's
+                                              // PAIRING URI, not any key derived from its secret
+    ["connection", "<connection_pubkey from the request>"] // binds proof to the key the wallet is issued to
   ],
   "content": "",
   "sig": "<schnorr signature by `pubkey`>"
@@ -319,10 +342,13 @@ one list of checks; every other section that verifies a kind-23199 proof refers 
    Wallet Hub's **pairing URI**, the only one a member holding the shared connection string can know. An
    implementation that maintains a second, internal keypair derived from the connection's secret MUST NOT
    bind against that one: no member could compute it, so every genuine request would be rejected.
-6. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
+6. **The `connection` tag equals the request's `connection_pubkey`.** Exactly one such tag. It ties the
+   member's identity to the key the wallet will be issued to, so nobody who sees the request can have the
+   wallet issued to a key of their own instead (§Security Considerations).
+7. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
-Checks 1–5 MUST run before the allowlist/following
+Checks 1–6 MUST run before the allowlist/following
 authorization check. This ordering is what closes an allowlist-membership oracle: an attacker who does
 not hold the target's private key MUST NOT be able to reach the authorization check at all, so the
 response cannot be used to probe list membership.
@@ -394,10 +420,18 @@ defect, not merely cosmetic.
 
 ## Pairing Connection
 
-A Circle Wallet MUST keep a one-time-random pairing secret, never persisted after generation. The owner
-MUST NOT be able to reconstruct a member's connection string after the fact. That's a deliberate
-custody choice: no "reveal connection again" capability, even for the host. Offering one would require
-switching to a deterministic, re-derivable pairing key instead — a custody trade-off, not an oversight.
+A Circle Wallet's connection keypair is generated by the member, on the member's own device, and only its
+public half (`connection_pubkey`) is ever sent (§Creating a Circle Wallet). The Hub authorizes that pubkey
+and MUST NOT generate, request, receive or store the secret.
+
+The owner therefore cannot reconstruct a member's connection string, and this holds by construction rather
+than by promise: the secret was never on the Hub, so no copy of its database, its logs or retained relay
+traffic contains it, and no response to the member carries it. The owner still custodies the wallet's
+funds — the wallet runs on the host's node — but cannot act as the member over the member's connection.
+
+It follows that there is no "reveal connection again" capability, for the host or anyone else. A member
+who loses the secret has lost the connection: the member (or the host) deletes the wallet, which sweeps its balance
+back to the Hub (§Lifecycle and Deletion) and frees the member to request a new one with a new keypair.
 
 ## The Circle Wallet Hub Connection (`circlehub1...`)
 
