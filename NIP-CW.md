@@ -517,7 +517,8 @@ kinds, same envelope, same item proofs, same announcement. This section states o
 specific to joining.
 
 A Hub that offers it MUST continue accepting the standard transport, since a prospective
-member may hold nothing but the Hub connection string and an un-updated client.
+member may hold nothing but the Hub connection string and a client that does not implement the
+private transport.
 
 ### What differs from a bill operation
 
@@ -554,7 +555,9 @@ member may hold nothing but the Hub connection string and an un-updated client.
 
 The response is a kind-23191 envelope like any other, and the join's own result — a single
 `encrypted_details` ciphertext (§Response) — travels inside its `result`. That ciphertext stays
-encrypted to the requester's own pubkey exactly as on the standard transport. The two layers do
+encrypted to the requester's own pubkey exactly as on the standard transport, and likewise carries
+no secret: the member generated the connection key, and `connection_pubkey` travels in the item's
+params, where the item proof binds it. The two layers do
 different jobs and neither is redundant: the transport layer hides the exchange from the relay,
 and `encrypted_details` hides the wallet from *co-members*, who can decrypt the shared Hub
 connection but not each other's wallets.
@@ -601,13 +604,25 @@ commitment/balance griefing (minting max-amount wallets "as" real members).
 Without an explicit single-use guard keyed on the proof's event ID, a captured proof could be
 resubmitted repeatedly within its own freshness window.
 
-**On the standard transport, the identity proof does not bind the request's params.** It binds the
-requester and the Hub, nothing else. Anyone who reads a request before the Hub does — a co-member holding
-the shared connection who sees it on a relay — can resubmit the same proof with a different `max_amount`,
-`expiry` or `budget_renewal` and, by arriving first, consume it; the requester's own copy is then refused
-as a replay. The wallet is still issued to the requester's `pubkey` and its details are still encrypted to
-them, so this cannot take a wallet, but it can change its terms or tie up the Hub's commitment ceiling. A
-member who cares SHOULD join over §Private Join, where the requester's own item proof binds the params.
+**The connection key is bound, not merely sent.** The wallet is issued to whatever `connection_pubkey`
+the Hub accepts, so a request whose proof did not bind it could be re-pointed: anyone who reads the
+request before the Hub does could resubmit it with their own key and receive a wallet that spends
+against the Hub on the real member's membership. The kind-23199 `connection` tag (§Identity Proof,
+check 6) closes this on both transports.
+
+**On the standard transport, the identity proof does not bind the other params.** It binds the
+requester, the Hub and the connection key, nothing else. Anyone who reads a request before the Hub does —
+a co-member holding the shared connection who sees it on a relay — can resubmit the same proof with a
+different `max_amount`, `expiry` or `budget_renewal` and, by arriving first, consume it; the requester's
+own copy is then refused as a replay. The wallet is still issued to the requester's own connection key and
+its details are still encrypted to them, so this cannot take a wallet, but it can change its terms or tie
+up the Hub's commitment ceiling. A member who cares SHOULD join over §Private Join, where the requester's
+own item proof binds every param.
+
+**The Hub never holds a member's connection secret** (§Pairing Connection). A compromise of the Hub's
+storage, logs or retained traffic therefore yields no member's connection. It does not make the host
+powerless — the host's node holds and moves the funds — but impersonating a member over their own
+connection is not among the host's capabilities.
 
 **One active wallet per (Hub, identity)**'s two-layer enforcement (§Membership) exists because a pre-check
 alone is a race, not a guarantee — the unique-constraint insert is what makes it authoritative.
@@ -652,11 +667,18 @@ exposed, and a `following` Hub's list was already public by construction (above)
 the mechanism sensitive has no way to hide it while still answering `get_info`, and SHOULD treat the Hub's
 connection string as the access-controlled secret it effectively is.
 
-`encrypted_details` keeps a member's connection string **and every other term of their wallet, including
-its `wallet_pubkey`,** unreadable to anyone else holding the shared Hub connection. That matters most for
-`wallet_pubkey`: it is the address a wallet's traffic is subscribed under, so leaving it outside the
-ciphertext would let any co-member follow that member's wallet for its whole life, which is a stronger
-exposure than the connection string alone.
+`encrypted_details` keeps **every term of a member's wallet, including its `wallet_pubkey`,** unreadable to
+anyone else holding the shared Hub connection. That matters most for `wallet_pubkey`: it is the address a
+wallet's traffic is subscribed under, so leaving it outside the ciphertext would let any co-member follow
+that member's wallet for its whole life.
+
+**On the standard transport, `connection_pubkey` is readable by every co-member**, and it exposes the same
+thing from the other side. The request is encrypted to the shared Hub connection, which every co-member
+holds, and the member's wallet requests are authored by that key for the wallet's whole life. A co-member
+who saw the join can therefore recognize that member's wallet traffic on relays without ever learning
+`wallet_pubkey`. §Private Join removes this — its request is encrypted to the Hub's inbox, not to the
+shared connection — and a member who wants their wallet traffic unlinkable from co-members SHOULD join
+that way.
 
 What remains visible to whatever system stores or logs the Hub's request/response history is the
 *request*: that a given requester `pubkey` asked for a wallet, and when. The existence of a member's
