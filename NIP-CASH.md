@@ -1718,6 +1718,10 @@ the Hub wrote it.
 its reply (§Chunked Replies) on the relay the request event arrived on, and MAY additionally
 publish it on its other inbox relays (§The Hub Announcement). A client MUST listen for the reply
 on the relay it sent the request to, subscribing there before it publishes (§Chunked Replies).
+Subscribing first only helps once the relay has the subscription: the subscription and the request
+travel independently, so a relay can take the request first and deliver the reply to nobody. A client
+SHOULD therefore wait for the relay's EOSE on the reply subscription before publishing, for a bounded
+time, after which it publishes anyway.
 
 The tag says *which* event is the reply; this says *where* it is. A client sends each request to
 one relay out of several (§Multiple Relay Hints) and has no way to learn which of a Hub's relays
