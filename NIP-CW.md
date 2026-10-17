@@ -562,6 +562,10 @@ different jobs and neither is redundant: the transport layer hides the exchange 
 and `encrypted_details` hides the wallet from *co-members*, who can decrypt the shared Hub
 connection but not each other's wallets.
 
+The reply is published where NIP-CASH publishes any private-transport reply: on the relay the
+join request arrived on, and optionally on the Hub's other inbox relays (§Addressing the
+Response in NIP-CASH). A prospective member MUST listen on the relay it sent the join to.
+
 **An item the Hub will not serve is omitted, and a refused join is an error.** These are
 different outcomes and the distinction is deliberate. A join refused because the requester is
 not a member, is rate-limited, or already holds a wallet MUST be answered with the

@@ -1714,6 +1714,28 @@ and it is why a client MUST still check `req_nonce` and reject results for ids i
 anyone can publish an event carrying a `p` tag they observed, and only the derived key proves
 the Hub wrote it.
 
+**The reply goes back to the relay the request came in on.** A Hub MUST publish every chunk of
+its reply (§Chunked Replies) on the relay the request event arrived on, and MAY additionally
+publish it on its other inbox relays (§The Hub Announcement). A client MUST listen for the reply
+on the relay it sent the request to, subscribing there before it publishes (§Chunked Replies).
+Subscribing first only helps once the relay has the subscription: the subscription and the request
+travel independently, so a relay can take the request first and deliver the reply to nobody. A client
+SHOULD therefore wait for the relay's EOSE on the reply subscription before publishing, for a bounded
+time, after which it publishes anyway.
+
+The tag says *which* event is the reply; this says *where* it is. A client sends each request to
+one relay out of several (§Multiple Relay Hints) and has no way to learn which of a Hub's relays
+a reply might otherwise land on. Without the rule, two conforming implementations miss each
+other: the client sends `cash_redeem` on one relay and listens there, the Hub pays and replies on
+another, and the client reports an indeterminate outcome for a payment that happened.
+
+If the same request event reaches the Hub over several relays, only the first copy is served —
+the others are replays (§Envelopes, `nonce`) — and the reply goes to the relay that copy arrived
+on, so a client that publishes one request to several relays MUST listen on all of them. If the
+arrival relay refuses the reply, the Hub SHOULD publish it on its other inbox relays rather than
+drop it: a reply on another relay can still be found by a client that widens its subscription,
+and a dropped one cannot.
+
 #### The Reply Key
 
 **A kind-23191 response MUST be encrypted under a key derived from the request's own NIP-44
