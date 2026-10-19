@@ -6,7 +6,7 @@ Circle Wallet
 
 `draft` `optional` `nwc`
 
-**Depends on**: NIP-47 (Nostr Wallet Connect)
+**Depends on**: NIP-47 (Nostr Wallet Connect), NIP-51 (Lists)
 
 ## Abstract
 
@@ -34,7 +34,7 @@ settles as an instant, fee-free internal transfer, the same way moving money bet
 one bank account carries no wire fee. A payment to anyone outside the circle still goes out over
 ordinary Lightning.
 
-Who counts as a member — an allowlist, "people the host follows," or every account a business creates —
+Who counts as a member — an allowlist, a named follow set the host publishes, or every account a business creates —
 is just a configuration choice, not what a Circle Wallet fundamentally is. This document specifies that
 mechanism, the wallet's data model, and the one-active-wallet-per-member rule. The circle's real value
 is the free wallet and free in-circle transfers, not the admission rule.
@@ -70,7 +70,7 @@ scheduled payout to a payee who isn't already a trusted member with standing acc
 pattern entirely.
 
 This document also doesn't define a "followers" policy — one that checks the *requester's own*
-published contact list. That's deliberately excluded; see §Membership.
+published lists. That's deliberately excluded; see §Membership.
 
 This document also doesn't define circles denominated in anything other than sats. A game economy
 running Taproot Assets, or any other asset a host's node can carry, could extend the same shared-node,
@@ -106,7 +106,8 @@ format or a storage schema — how an implementation stores or names this state 
 document's scope.
 
 A Circle Identity MUST record which admission mechanism it uses (§Membership), plus the data that
-mechanism needs: the provider pubkey being followed, or the set of allowlisted pubkeys. A Circle
+mechanism needs: the set of allowlisted pubkeys, or the follow set's address — its author (the provider
+pubkey) and its `d` identifier (§Membership). A Circle
 Identity MAY be referenced by more than one Circle Wallet Hub at once. It MUST NOT be tied to any one
 Hub's lifetime.
 
@@ -249,7 +250,7 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
    window.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
-   direct lookup, while a `following`-policy Hub resolves the provider's current kind:3 contact list
+   direct lookup, while a `follow_set`-policy Hub resolves the current version of its follow set
    (§Membership). A Hub that cannot resolve that list yet — it fetches from relays and so has a startup
    window before any answer is available — MUST NOT fall back to denying membership, because a denial is
    indistinguishable to the caller from "you are not a member." It MUST instead answer `NOT_READY`
@@ -348,7 +349,7 @@ one list of checks; every other section that verifies a kind-23199 proof refers 
 7. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
-Checks 1–6 MUST run before the allowlist/following
+Checks 1–6 MUST run before the membership
 authorization check. This ordering is what closes an allowlist-membership oracle: an attacker who does
 not hold the target's private key MUST NOT be able to reach the authorization check at all, so the
 response cannot be used to probe list membership.
@@ -358,16 +359,36 @@ response cannot be used to probe list membership.
 A Circle Identity's admission mechanism (§Terminology) supports two forms:
 
 - **allowlist**: an explicit list of pubkeys the host maintains directly.
-- **following**: whoever the host's own Nostr account currently follows (kind:3 contact list). The list
-  lives on relays rather than in the Hub, so "currently" means the Hub's most recent resolution of it: an
-  implementation MAY cache the list and refresh it, and MUST bound that staleness, but MUST NOT treat an
-  unresolved list as an empty one (§Creating a Circle Wallet, step 4). Because the host alone controls
-  their own contact list, this is a real authorization decision:
-  membership simply tracks a relationship the host already maintains elsewhere on Nostr, so adding or
-  removing someone from the circle requires no separate action against this protocol at all.
+- **follow_set**: the pubkeys in one NIP-51 follow set (kind `30000`), named by its address: the
+  provider pubkey that authors it and its `d` identifier. The provider is normally the host's own
+  account, but can be any account the host controls. Because a follow set is addressable, one account
+  can publish many, so one account can run several circles, each Circle Identity naming a different
+  `d`. Adding or removing someone from a circle is just editing that set — no separate action against
+  this protocol at all.
 
-A "followers" mechanism — checking the *requester's own* published contact list to see whether they
-claim to follow the host — MUST NOT be offered. Anyone can publish a contact list claiming to follow
+A `follow_set` Hub MUST apply these rules:
+
+- **Which event.** Only a kind-`30000` event whose signature verifies, whose author is the provider
+  pubkey and whose `d` tag equals the configured identifier. Of those, the one with the highest
+  `created_at` wins; on a tie, the lowest `id` (NIP-01's rule for addressable events). An event from
+  any other author MUST be ignored, whatever it claims.
+- **Which members.** Exactly the pubkeys in that event's public `p` tags. Private items in its
+  encrypted `content` MUST NOT be counted: they are encrypted to the provider's own key, which the Hub
+  does not hold, and a Hub that held it to read them would hold the key that edits the circle.
+- **Staleness.** The set lives on relays rather than in the Hub, so "current" means the Hub's most
+  recent resolution of it. An implementation MAY cache it and refresh it, and MUST bound that
+  staleness.
+- **Unresolved is not empty.** A set the Hub has not found yet MUST be treated as unresolved, not as
+  empty (§Creating a Circle Wallet, step 4). A resolved set with no `p` tags is empty: nobody is a
+  member. A host who wants to close a circle SHOULD therefore publish the set with no `p` tags rather
+  than rely on a deletion request (NIP-09), which relays may not honor or propagate.
+
+A host's kind:3 contact list is not a membership source. It is one list per account, so it cannot
+describe more than one circle, and it already means something else to every client that reads it —
+following someone to read their notes would silently admit them to a wallet.
+
+A "followers" mechanism — checking the *requester's own* published lists to see whether they
+claim to follow the host — MUST NOT be offered. Anyone can publish a list claiming to follow
 anyone, for free. It asserts nothing a host can rely on.
 
 Independent of which admission mechanism a Hub uses, a member MUST hold at most one active Circle
@@ -449,7 +470,7 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
   "available_millis": 1000000, // what the Hub can still commit: balance minus outstanding commitments
   "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
-  "circle_policy": "allowlist" // "allowlist" | "following" (§Membership)
+  "circle_policy": "allowlist" // "allowlist" | "follow_set" (§Membership)
 }
 ```
 
@@ -507,7 +528,7 @@ one they're sharing.
 pubkey. That publishes more than it looks like. The Hub connection is *shared*, so every
 request to it is `p`-tagged with one stable, widely-known identifier: a relay observer learns
 how many people joined a given circle and when, without decrypting anything. The requester's
-own pubkey is in the request, so with §Membership's `following` policy — whose contact list is
+own pubkey is in the request, so with §Membership's `follow_set` policy — whose set is
 public by construction — an observer can often tell *who* joined, and match a join against a
 name.
 
@@ -648,26 +669,27 @@ between its members and the host; it's only opaque to outsiders. Members who nee
 
 **The standard transport publishes who joined, and when.** Every `create_circle_wallet` request is
 `p`-tagged with the Hub's one shared pubkey and carries the requester's own pubkey, so a relay observer
-learns the circle's join rate and, under a `following` policy whose contact list is public anyway, often
+learns the circle's join rate and, under a `follow_set` policy whose set is public anyway, often
 the joiners themselves. §Private Join removes that; a host who considers membership sensitive SHOULD
 offer it. What it cannot remove is relay-level metadata — that some client reached this Hub at this
 moment — which is outside this protocol's reach.
 
-A `following`-policy circle draws membership from the host's public kind:3 contact list. Anyone
-watching that list, not just fellow members, can learn who's eligible to request a wallet, even before
-they request one. Hosts who need membership itself to stay private SHOULD use the `allowlist` mechanism
-instead.
+A `follow_set`-policy circle draws membership from a public follow set. Anyone watching that set, not
+just fellow members, can learn who's eligible to request a wallet, even before they request one. The
+set's `title` and `description` tags, if the host sets them, are public too. Hosts who need membership
+itself to stay private SHOULD use the `allowlist` mechanism instead; a follow set's private items do not
+help, since the Hub cannot count them (§Membership).
 
 **`get_info` discloses which mechanism a Hub uses.** Any holder of the shared Hub connection string — which
 is broadcast to everyone who might join, so in practice anyone who has been told about the circle — can read
 `circle_policy` (§The Circle Wallet Hub Connection) and learn whether admission is `allowlist` or
-`following`. This is deliberate: it lets a client avoid prompting a member to request a wallet that will be
+`follow_set`. This is deliberate: it lets a client avoid prompting a member to request a wallet that will be
 auto-refused, and the same fact is discoverable anyway by attempting once.
 
 What it costs is worth naming rather than leaving implicit. It tells someone outside the circle which
-approach could get them in — cultivate the host's follow graph for a `following` Hub, or that there is no
+approach could get them in — get added to the host's follow set for a `follow_set` Hub, or that there is no
 such path for an `allowlist` one. It does **not** reveal who the members are: `allowlist` contents are never
-exposed, and a `following` Hub's list was already public by construction (above). A host who considers even
+exposed, and a `follow_set` Hub's set was already public by construction (above). A host who considers even
 the mechanism sensitive has no way to hide it while still answering `get_info`, and SHOULD treat the Hub's
 connection string as the access-controlled secret it effectively is.
 
