@@ -435,6 +435,9 @@ value only the provider and the Hub can read:
   one in its kind-11190 announcement (§The Hub Announcement in NIP-CASH). It MUST NOT be encrypted to
   the Hub's connection pubkey: that connection's secret is shared with every member, so every member
   could read every hidden entry. A Hub that publishes no announcement cannot have hidden members.
+  A Hub with hidden members SHOULD offer §Private Join and so report `circle_wallet.identity`
+  (§Finding the Private Transport): a hidden member who joins over the standard transport puts their
+  pubkey on the shared connection, where every co-member can read it.
 - **A separate tag, not a marked `p`.** Relays index single-letter tags and clients read a `p` value
   as a pubkey, so ciphertext in a `p` tag would be indexed, rendered and possibly notified as if it
   were one.
@@ -538,7 +541,8 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
   "available_millis": 1000000, // what the Hub can still commit: balance minus outstanding commitments
   "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
-  "circle_policy": "allowlist" // "allowlist" | "follow_set" (§Membership)
+  "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
+  "identity": "<hex x-only>"   // OPTIONAL: present iff the Hub offers §Private Join
 }
 ```
 
