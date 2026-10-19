@@ -6,7 +6,7 @@ Circle Wallet
 
 `draft` `optional` `nwc`
 
-**Depends on**: NIP-47 (Nostr Wallet Connect), NIP-51 (Lists)
+**Depends on**: NIP-47 (Nostr Wallet Connect), NIP-51 (Lists), NIP-44 (Encrypted Payloads)
 
 ## Abstract
 
@@ -372,9 +372,14 @@ A `follow_set` Hub MUST apply these rules:
   pubkey and whose `d` tag equals the configured identifier. Of those, the one with the highest
   `created_at` wins; on a tie, the lowest `id` (NIP-01's rule for addressable events). An event from
   any other author MUST be ignored, whatever it claims.
-- **Which members.** Exactly the pubkeys in that event's public `p` tags. Private items in its
-  encrypted `content` MUST NOT be counted: they are encrypted to the provider's own key, which the Hub
-  does not hold, and a Hub that held it to read them would hold the key that edits the circle.
+- **Which members.** Exactly the pubkeys in that event's public `p` tags, plus any `hidden_p` entries
+  the Hub can decrypt (§Hidden Members). NIP-51's private items in the encrypted `content` MUST NOT be
+  counted: they are encrypted to the provider's own key, which the Hub does not hold, and a Hub that held
+  it to read them would hold the key that edits the circle.
+- **Nothing else.** `title`, `description` and `image` (NIP-51) are display-only. A Hub MUST NOT read
+  membership, terms or any other setting from a tag other than `d`, `p` and `hidden_p`: a Hub's terms
+  live in the Hub (§Data Model) and are reported by `get_info`, and one Circle Identity can serve several
+  Hubs with different terms.
 - **Staleness.** The set lives on relays rather than in the Hub, so "current" means the Hub's most
   recent resolution of it. An implementation MAY cache it and refresh it, and MUST bound that
   staleness.
@@ -382,6 +387,61 @@ A `follow_set` Hub MUST apply these rules:
   empty (§Creating a Circle Wallet, step 4). A resolved set with no `p` tags is empty: nobody is a
   member. A host who wants to close a circle SHOULD therefore publish the set with no `p` tags rather
   than rely on a deletion request (NIP-09), which relays may not honor or propagate.
+
+An example set, one of several the same account can publish:
+
+```jsonc
+{
+  "kind": 30000,
+  "pubkey": "<provider pubkey>",
+  "tags": [
+    ["d", "family"],
+    ["title", "Ada's Family Circle"],                 // display-only
+    ["description", "Wallets for the family, on my node"], // display-only
+    ["p", "<member pubkey>"],
+    ["p", "<member pubkey>", "wss://relay.example.com"],   // a relay hint is ignored for membership
+    ["hidden_p", "<NIP-44 v2 payload>"]                // §Hidden Members
+  ],
+  "content": "",
+  ...
+}
+```
+
+A Hub reading it is configured with the address `30000:<provider pubkey>:family`.
+
+A host SHOULD give the set a `title`. When it does, a Hub SHOULD use that `title` as the default
+`label` of its `circlehub1...` string (§The Circle Wallet Hub Connection), so the invite and the set
+carry the same name.
+
+### Hidden Members
+
+A `p` tag publishes who is in the circle. A host MAY instead list a member as a `hidden_p` tag, whose
+value only the provider and the Hub can read:
+
+```jsonc
+["hidden_p", "<NIP-44 v2 payload>"]
+```
+
+- **Encryption.** The payload is NIP-44 version 2, encrypting the member's pubkey as 64-character
+  lowercase hex, under the conversation key between the provider and the Hub's **inbox** pubkey, the
+  one in its kind-11190 announcement (§The Hub Announcement in NIP-CASH). It MUST NOT be encrypted to
+  the Hub's connection pubkey: that connection's secret is shared with every member, so every member
+  could read every hidden entry. A Hub that publishes no announcement cannot have hidden members.
+- **A separate tag, not a marked `p`.** Relays index single-letter tags and clients read a `p` value
+  as a pubkey, so ciphertext in a `p` tag would be indexed, rendered and possibly notified as if it
+  were one.
+- **Reading.** For each `hidden_p` tag, a Hub MUST attempt NIP-44 v2 decryption with its inbox key and
+  the provider pubkey. An entry that fails to decrypt MUST be skipped without error, since it may be
+  meant for another Hub sharing the Circle Identity. An entry that decrypts to anything but a
+  well-formed 64-character lowercase-hex pubkey MUST be skipped too.
+- **Several Hubs.** A Circle Identity serving several Hubs with different inbox keys needs one
+  `hidden_p` entry per hidden member per inbox key.
+- **Re-encrypt on every publish.** NIP-44 payloads are randomized, so a provider SHOULD encrypt every
+  `hidden_p` entry afresh, and SHOULD shuffle their order, each time it publishes the set. Unchanged
+  payloads would show exactly which entry was added or removed between two versions.
+- **Inbox rotation.** A hidden entry is bound to the inbox key it was encrypted to. A Hub that rotates
+  its inbox key SHOULD keep trying its retired keys on `hidden_p` entries until the provider has
+  republished the set to the new one; otherwise every hidden member loses access at the rotation.
 
 A host's kind:3 contact list is not a membership source. It is one list per account, so it cannot
 describe more than one circle, and it already means something else to every client that reads it —
@@ -677,8 +737,18 @@ moment — which is outside this protocol's reach.
 A `follow_set`-policy circle draws membership from a public follow set. Anyone watching that set, not
 just fellow members, can learn who's eligible to request a wallet, even before they request one. The
 set's `title` and `description` tags, if the host sets them, are public too. Hosts who need membership
-itself to stay private SHOULD use the `allowlist` mechanism instead; a follow set's private items do not
-help, since the Hub cannot count them (§Membership).
+itself to stay private SHOULD use `hidden_p` entries (§Hidden Members) or the `allowlist` mechanism
+instead; NIP-51's own private items do not help, since the Hub cannot count them (§Membership).
+
+**What `hidden_p` hides, and what it does not.** It hides who a hidden member is from everyone except
+the provider and the Hub, including the circle's other members. It does not hide how many hidden
+entries a set has, nor when the set was republished, which roughly dates joins and removals. A hidden
+member who joins over the standard transport puts their pubkey in a request every co-member can read
+(above), so a hidden member SHOULD join over §Private Join. A leaked inbox key exposes every hidden
+member that key ever covered, in every past version of the set a relay still holds, not only the
+current one. And a generic NIP-51 client that republishes the set may drop tags it does not know,
+silently removing every hidden member; a host SHOULD edit a circle's set only with a client that
+preserves `hidden_p`.
 
 **`get_info` discloses which mechanism a Hub uses.** Any holder of the shared Hub connection string — which
 is broadcast to everyone who might join, so in practice anyone who has been told about the circle — can read
@@ -689,7 +759,8 @@ auto-refused, and the same fact is discoverable anyway by attempting once.
 What it costs is worth naming rather than leaving implicit. It tells someone outside the circle which
 approach could get them in — get added to the host's follow set for a `follow_set` Hub, or that there is no
 such path for an `allowlist` one. It does **not** reveal who the members are: `allowlist` contents are never
-exposed, and a `follow_set` Hub's set was already public by construction (above). A host who considers even
+exposed, a `follow_set` Hub's `p` tags were already public by construction (above), and its `hidden_p`
+entries stay unreadable. A host who considers even
 the mechanism sensitive has no way to hide it while still answering `get_info`, and SHOULD treat the Hub's
 connection string as the access-controlled secret it effectively is.
 
