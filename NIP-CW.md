@@ -228,6 +228,14 @@ applied, so the member is never left assuming a cap they do not have.
 the requester's own pubkey, and every term describing the issued wallet MUST be inside it. A Hub MUST NOT
 place any of them beside the ciphertext.
 
+**It is encrypted from the Hub's connection key**, on either transport: the NIP-44 conversation key is the
+one between the requester's `pubkey` and the Hub's own pubkey (the wallet pubkey of its connection string,
+`circlehub1...` type `0`). A client MUST decrypt it with exactly that conversation key and MUST reject a
+response whose `encrypted_details` does not decrypt under it. Only the Hub holds that key's secret — the
+secret every member is given belongs to the connection's client key — so this is what makes the wallet
+details authentic even when the envelope around them came from somewhere a client trusts less, such as a
+private-transport inbox (§Private Join).
+
 The reason is that the Hub connection is *shared*: it is broadcast to everyone who might join, so every
 co-member can decrypt the transport layer of this response. Anything outside `encrypted_details` is
 therefore published to the whole circle, not just to the member who asked. That includes
@@ -542,6 +550,12 @@ remains authoritative.
 `circle_policy` is different in kind: it discloses the Hub's **admission mechanism**, not its terms. This is
 a deliberate disclosure, and §Privacy Considerations states what it costs.
 
+`identity` is the pubkey that signs the Hub's kind-11190 announcement (§The Hub Announcement in NIP-CASH):
+its node identity, the same key a cash bill's mint signature recovers to, so every Hub on one node shares
+one announcement. A Hub that offers §Private Join MUST report it, and one that does not MUST omit it. It is
+the only way a prospective member learns it: the field travels in a response signed by the Hub's own key,
+which the connection string already pins, so it needs nothing added to `circlehub1...`.
+
 `circlehub1...` packages the same pairing data as an ordinary `nostr+walletconnect://` string, wrapped in
 a NIP-19-style bech32 identifier — the same technique NIP-CASH uses for its own cash token, applied here to
 a Hub connection instead. Wire format: a human-readable prefix (`circlehub`), the digit `1`, then
@@ -600,6 +614,23 @@ specific to joining.
 A Hub that offers it MUST continue accepting the standard transport, since a prospective
 member may hold nothing but the Hub connection string and a client that does not implement the
 private transport.
+
+### Finding the Private Transport
+
+A prospective member already calls `get_info` to read the Hub's terms (§The Circle Wallet Hub
+Connection). Its `circle_wallet.identity` is what reaches the private transport:
+
+1. If `identity` is absent, the Hub does not offer Private Join; the client joins over the standard
+   transport.
+2. Otherwise the client fetches the Hub's kind-11190 announcement and verifies it against `identity`,
+   under NIP-CASH's rules unchanged: reject one signed by anyone else, adopt only the newest, never move
+   backwards (§The Hub Announcement in NIP-CASH). A client MUST NOT take the identity from anywhere else
+   — not a URI parameter, a QR caption or a profile — since whoever supplies it chooses the inbox the
+   join is encrypted to.
+3. A client SHOULD then join over the private transport, without asking the member to choose.
+4. If no announcement can be found or verified, a client MAY fall back to the standard transport, and
+   when it does it SHOULD tell the member the join was not private. It MUST NOT fall back silently:
+   a member who expected Private Join may not want their pubkey on the shared connection.
 
 ### What differs from a bill operation
 
@@ -704,6 +735,14 @@ its details are still encrypted to them, so this cannot take a wallet, but it ca
 up the Hub's commitment ceiling. A member who cares SHOULD join over §Private Join, where the requester's
 own item proof binds every param.
 
+**The private-transport inbox is trusted through `get_info`, and the reply through the Hub's key.** A
+client encrypts a private join to whatever inbox the announcement names, and trusts the announcement only
+because `identity` came from a `get_info` response signed by the Hub's connection key (§Finding the Private
+Transport). Taking `identity` from anywhere else lets whoever supplied it receive the join, learning who
+asked. It cannot also plant a wallet: `encrypted_details` decrypts only under the Hub's own connection key
+(§Response), so a reply from any other inbox is rejected rather than accepted as a wallet whose incoming
+payments the sender would collect.
+
 **The Hub never holds a member's connection secret** (§Pairing Connection). A compromise of the Hub's
 storage, logs or retained traffic therefore yields no member's connection. It does not make the host
 powerless — the host's node holds and moves the funds — but impersonating a member over their own
@@ -749,6 +788,12 @@ member that key ever covered, in every past version of the set a relay still hol
 current one. And a generic NIP-51 client that republishes the set may drop tags it does not know,
 silently removing every hidden member; a host SHOULD edit a circle's set only with a client that
 preserves `hidden_p`.
+
+**Reading the terms before a private join is not itself private, but it is anonymous.** The `get_info`
+call that yields `identity` travels on the standard transport, `p`-tagged with the Hub's shared pubkey, so a
+relay observer learns that someone looked at the circle and when. It is authored by the connection's
+client key, which every prospective member shares, so it does not say who. The join that follows, which
+carries the requester's own pubkey, goes over the private transport.
 
 **`get_info` discloses which mechanism a Hub uses.** Any holder of the shared Hub connection string — which
 is broadcast to everyone who might join, so in practice anyone who has been told about the circle — can read
