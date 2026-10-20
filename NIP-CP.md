@@ -107,13 +107,3 @@ The balance is the sum of `amount` over entries in state `live`. A wallet refres
 ## Privacy Considerations
 
 Relays see gift wraps addressed to the user at randomized times, the same as DMs, and deletions signed by one-time keys. The number of wraps still grows with activity; a wallet MAY batch changes to hide it. Refreshing states contacts each Hub, not relays.
-
-## Relation to Other NIPs
-
-**[NIP-CASH](./NIP-CASH.md)**: defines the tokens a Pocket holds and the `cash_status` that refreshes them.
-
-**[NIP-CZ](./NIP-CZ.md)**: where most held cash arrives; its `9522` is the entry's `source`.
-
-**[NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md)** and **[NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md)**: the wrapping and inbox relays reused here.
-
-**[NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md)** (Cashu Wallet): the same role for Cashu.

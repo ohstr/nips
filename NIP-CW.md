@@ -156,15 +156,18 @@ sequenceDiagram
     participant Wallet as new Circle Wallet connection
 
     Member->>Member: generate the connection keypair locally (secret never leaves)
-    Member->>Hub: create_circle_wallet {pubkey, connection_pubkey, max_amount, expiry, budget_renewal?, identity_event}
-    Hub->>Hub: verify identity proof
-    Hub->>Hub: authorize requester as a circle member
-    Hub->>Hub: check one active wallet per (Hub, identity)
-    Hub->>Hub: validate requested budget and expiry
-    Hub->>Hub: check available balance
-    Hub->>Wallet: create wallet authorizing connection_pubkey, record membership, in one transaction
-    Hub-->>Member: {encrypted_details}  %% one ciphertext; every term is inside it, no secret
-    Member->>Member: build the connection string from wallet_pubkey, relays and its own secret
+    Member->>Hub: create_circle_wallet {pubkey, connection_pubkey, max_amount, expiry?, budget_renewal?, identity_event}
+    Hub->>Hub: validate pubkey and connection_pubkey (step 1)
+    Hub->>Hub: verify the identity proof, then burn its event ID (steps 2–3)
+    Hub->>Hub: authorize the requester as a circle member (step 4)
+    Hub->>Hub: check one active wallet per (Hub, identity) (step 5)
+    Hub->>Hub: validate max_amount, budget_renewal and expiry (step 6)
+    Hub->>Hub: rate-limit, and guard concurrent requests (steps 7–8)
+    Hub->>Wallet: in one transaction: check committed max_amount against balance, create the wallet authorizing connection_pubkey, record membership (step 9)
+    Hub->>Wallet: after commit, publish its relay subscription (step 10)
+    Hub-->>Member: {encrypted_details} (step 11)
+    Note over Hub,Member: one NIP-44 ciphertext from the Hub key: every wallet term, no secret
+    Member->>Member: decrypt, then build the connection string from wallet_pubkey, relays and its own secret
 ```
 
 ### Request
