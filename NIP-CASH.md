@@ -15,7 +15,7 @@ coin this format extends to. It mints **cash tokens**: bech32 strings (`lokicash
 `satscash1...` for Bitcoin) that carry real, spendable value the moment they're minted, as a
 specially-scoped NWC connection (§The Cash Token).
 
-Send one the way you'd hand over a bill — in a zap, a chat message, read out loud, even to someone offline
+Send one the way you'd hand over a bill — in a zap ([NIP-CZ](./NIP-CZ.md)), a chat message, read out loud, even to someone offline
 with no wallet set up yet. Redeem it to a Lightning invoice, hand the whole thing on, or split off part of
 it while keeping the rest (§Transferring and Splitting a Slice) — no Lightning hop, no node of the recipient's own required.
 
@@ -1968,7 +1968,7 @@ document does not prescribe the rates; it requires only that exceeding them is r
 
 ## The Cash Token (`lokicash1...`, `satscash1...`, ...)
 
-One recognizable string is all a recipient needs — hand it over in a chat message, embed it in a zap, read
+One recognizable string is all a recipient needs — hand it over in a chat message, embed it in a zap ([NIP-CZ](./NIP-CZ.md)), read
 it out loud. Under the hood it's the same pairing data as `pairing_uri`, a plain NWC
 `nostr+walletconnect://` string, wrapped in a NIP-19-style bech32 identifier: `lokicash1...` for a
 flokicoin-backed Cash Wallet, `satscash1...` for a Bitcoin-backed one, and so on for any other coin this

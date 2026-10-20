@@ -40,6 +40,8 @@ AltZap solves all three by adding a mandatory `chain` tag (replay-safety across 
 | `9523` | On-Behalf AltZap Request | Proxy Agent | LNURL-Pay |
 | `9521` | AltZap Receipt | LNURL server | — |
 
+Kind `9522` is the Cash Zap, defined in [NIP-CZ](./NIP-CZ.md): the same zap paid with a cash token instead of an invoice.
+
 ### LNURL Chain Advertisement
 
 AltZap's multi-chain support has an LNURL-side counterpart to the event-level `chain` tag: a client needs to know which chains an endpoint accepts *before* it builds and signs a request. This is signaled through the standard LUD-06/LUD-16 `metadata` array, extended with `chain/<name>` entries — a backward-compatible addition existing Bitcoin-only wallets simply ignore.
@@ -241,3 +243,5 @@ AltZap is intentionally **not** wire-compatible with NIP-57: a client that only 
 **NIP-57**: AltZap extends NIP-57's conceptual request/receipt/LNURL flow but is a distinct, non-interoperable wire format (see Backwards Compatibility).
 
 **[NIP-IC](./NIP-IC.md)** (Identity Connection, `kind:35521`/`kind:35522`): AltZap's ConnectionKey mechanism is protocol-agnostic about *how* a key gets resolved to a pubkey — resolving `r`/`R` via a NIP-IC identity connection is one way to do it, not a requirement of this spec.
+
+**[NIP-CZ](./NIP-CZ.md)** (Cash Zaps, `kind:9522`/`kind:10522`): the cash counterpart of AltZap. It reuses this NIP's `chain` tag, 3-element `p`/`P` tag, ConnectionKey and Proxy Agent semantics.
