@@ -542,7 +542,9 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
   "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
   "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
-  "identity": "<hex x-only>"   // OPTIONAL: present iff the Hub offers §Private Join
+  "identity": "<hex x-only>",  // OPTIONAL: present iff the Hub offers §Private Join
+  "per_wallet_max_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_amount (§Data Model)
+  "min_budget_renewal": "monthly"  // OPTIONAL: the Hub's renewal floor (§Budget Renewal Floor)
 }
 ```
 
@@ -550,6 +552,14 @@ The first three are the Hub's **terms**: a prospective member needs them before 
 and a Hub that withheld them would only push the question into a support channel. `available_millis` is a
 snapshot, not a reservation — it MAY be stale by the time a request lands, and step 9's commitment check
 remains authoritative.
+
+`per_wallet_max_millis` and `min_budget_renewal` are the two remaining limits step 6 checks a request
+against, so a client can fill in or validate `max_amount` and `budget_renewal` before sending instead of
+learning them from a refusal. A Hub SHOULD report both. `per_wallet_max_millis` is in the same unit as
+`max_amount`. `min_budget_renewal` is one of `daily`, `weekly`, `monthly`, `yearly` or `never`; a request
+whose resolved `budget_renewal` is tighter than it is refused (§Budget Renewal Floor). Both are terms, not
+guarantees: a client MAY use them, but MUST still handle the Hub refusing a request, since the Hub's
+limits can change between `get_info` and the request.
 
 `circle_policy` is different in kind: it discloses the Hub's **admission mechanism**, not its terms. This is
 a deliberate disclosure, and §Privacy Considerations states what it costs.
