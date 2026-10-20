@@ -553,13 +553,10 @@ and a Hub that withheld them would only push the question into a support channel
 snapshot, not a reservation — it MAY be stale by the time a request lands, and step 9's commitment check
 remains authoritative.
 
-`per_wallet_max_millis` and `min_budget_renewal` are the two remaining limits step 6 checks a request
-against, so a client can fill in or validate `max_amount` and `budget_renewal` before sending instead of
-learning them from a refusal. A Hub SHOULD report both. `per_wallet_max_millis` is in the same unit as
-`max_amount`. `min_budget_renewal` is one of `daily`, `weekly`, `monthly`, `yearly` or `never`; a request
-whose resolved `budget_renewal` is tighter than it is refused (§Budget Renewal Floor). Both are terms, not
-guarantees: a client MAY use them, but MUST still handle the Hub refusing a request, since the Hub's
-limits can change between `get_info` and the request.
+`per_wallet_max_millis` (same unit as `max_amount`) and `min_budget_renewal` (`daily` | `weekly` |
+`monthly` | `yearly` | `never`) are the other limits step 6 checks, so a client can validate a request
+before sending it. A Hub SHOULD report both. They can change after `get_info`, so a client MUST still
+handle a refusal.
 
 `circle_policy` is different in kind: it discloses the Hub's **admission mechanism**, not its terms. This is
 a deliberate disclosure, and §Privacy Considerations states what it costs.
