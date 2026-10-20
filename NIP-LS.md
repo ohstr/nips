@@ -6,7 +6,7 @@ Local Signer: NIP-46 over a Unix Socket
 
 `draft` `optional`
 
-**Depends on**: [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md), [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md)
+**Depends on**: [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) (Nostr Remote Signing)
 
 ## Abstract
 
