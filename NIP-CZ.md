@@ -122,7 +122,10 @@ Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent act
   "content": "",
   "tags": [
     ["chain", "bitcoin"],
-    ["mint", "<minter-node-pubkey>", "bitcoin"],
+    ["chain", "<other-chain>"],
+    ["mint", "<bitcoin-minter-node-pubkey>", "bitcoin"],
+    ["mint", "<bitcoin-backup-minter-node-pubkey>", "bitcoin"],
+    ["mint", "<other-chain-minter-node-pubkey>", "<other-chain>"],
     ["relay", "wss://relay.example.com"]
   ],
   "pubkey": "<recipient-pubkey>",
@@ -134,7 +137,9 @@ Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent act
 
 - `chain`: one per accepted chain. None means any chain.
 - `mint`: `["mint", "<minter-node-pubkey>", "<chain>"]`, zero or more — the minters the recipient trusts. Cash Zaps from a listed minter are **verified** (§Counting). With no `mint` for a chain, Cash Zaps on it are accepted but unverified. A `mint` for a chain not accepted is ignored.
-- `relay`: one or more relays the recipient's wallet reads Cash Zaps from.
+- `relay`: one or more relays the recipient's wallet reads Cash Zaps from, for every chain.
+
+The example accepts Bitcoin and one other energy-backed chain, trusting two Bitcoin minters and one for the other chain. A Lightning node serves one chain, so a minter is normally listed under one chain only.
 
 A recipient with no `10522`, including every ConnectionKey, accepts any chain, and all their Cash Zaps are unverified.
 
