@@ -40,7 +40,7 @@ AltZap solves all three by adding a mandatory `chain` tag (replay-safety across 
 | `9523` | On-Behalf AltZap Request | Proxy Agent | LNURL-Pay |
 | `9521` | AltZap Receipt | LNURL server | — |
 
-Kind `9522` is the Cash Zap, defined in [NIP-CZ](./NIP-CZ.md): the same zap paid with a cash token instead of an invoice.
+Kind `9522` is the Cash Zap, defined in [NIP-CZ](./NIP-CZ.md): the same zap paid with a cash token instead of an invoice. Kind `9525` is the Pocket Entry, defined in [NIP-CP](./NIP-CP.md).
 
 ### LNURL Chain Advertisement
 
