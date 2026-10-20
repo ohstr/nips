@@ -24,6 +24,6 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 
 **NIP-CZ**: zaps paid with a cash token instead of a Lightning invoice.
 
-**NIP-IC**: links a Nostr pubkey to a Discord, X, email or other account, attested by Identity Authorities.
+**NIP-IC**: links a Nostr pubkey to a Web Identity, attested by Identity Authorities.
 
 **NIP-LS**: NIP-46 signing over a local unix socket, with no relay.
