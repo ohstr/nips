@@ -6,7 +6,7 @@ Cash Hub
 
 `draft` `optional` `nwc`
 
-**Depends on**: NIP-47 (Nostr Wallet Connect)
+**Depends on**: [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect)
 
 ## Abstract
 

@@ -6,8 +6,8 @@ Identity Connection: Web Identity Linking
 
 `draft` `optional`
 
-**Depends on**: [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md), [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp), [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) (Event Deletion)
-**Related**: [NIP-AZ](./NIP-AZ.md) (AltZap) — consumes this NIP's Kind 35521 to populate the `r`/`R` resolved-identity tags on an AltZap Receipt.
+**Depends on**: [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) (Event Deletion), [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp)
+**Related**: [NIP-AZ](./NIP-AZ.md) (AltZap), [NIP-CZ](./NIP-CZ.md) (Cash Zaps)
 
 ## Abstract
 
