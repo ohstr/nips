@@ -11,19 +11,19 @@ Cash Pocket
 
 ## Abstract
 
-A Cash Pocket stores the NIP-CASH cash tokens a wallet holds. Each token is a kind `9525` Pocket Entry, gift-wrapped to the user's own pubkey, so relays see only a gift wrap addressed to the user, like a DM.
+A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM.
 
 ## Motivation
 
-1. **Lost devices**: held cash survives losing the device that received it.
-2. **Every device**: the same balance wherever the user signs in.
-3. **No tracking**: nobody can tell who holds cash, how many notes, or when they move.
+1. **Lost devices**: held cash survives.
+2. **Every device**: one balance everywhere.
+3. **No tracking**: nobody sees who holds cash, how much, or when it moves.
 
 ## Terminology
 
-- **Pocket**: all of a user's Pocket Entries.
-- **Pocket Entry**: a kind `9525` rumor describing one held token.
-- **wrap key**: the one-time secret key that signed the gift wrap carrying an entry.
+- **Pocket**: a user's Pocket Entries.
+- **Pocket Entry**: one held token, as a kind `9525` rumor.
+- **wrap key**: the one-time key of an entry's gift wrap.
 
 ## Specification
 
@@ -58,16 +58,16 @@ A Cash Pocket stores the NIP-CASH cash tokens a wallet holds. Each token is a ki
 ```
 
 **Required tags**:
-- `w`: the token's wallet pubkey (TLV `0`), identifying the note.
-- `v`: a positive integer, raised by one on every change.
-- `cash`: the cash token.
-- `amount`: the slice amount in the chain's milli-unit (`msats` for `bitcoin`).
-- `chain`: the coin behind the token, e.g. `bitcoin`. Works the same for any energy-backed coin NIP-CASH supports.
-- `identity`: who can claim the slice — `["identity", "pubkey", "<pubkey>"]`, `["identity", "connection_key", "<ConnectionKey>", "<ia-pubkey>"]` or `["identity", "cash"]`.
-- `state`: `["state", "<state>", "<checked-at>"]`, with `<state>` one of `live`, `spent`, `expired`, `reclaimed`, `unknown`, and `<checked-at>` the unix seconds of the last `cash_status` answer.
-- `wrap_key`: the hex secret key of the gift wrap carrying this entry.
+- `w`: token wallet pubkey (TLV `0`).
+- `v`: version, +1 on every change.
+- `cash`: the token.
+- `amount`: milli-units (`msats` for `bitcoin`).
+- `chain`: e.g. `bitcoin`; any energy-backed coin works the same.
+- `identity`: who can claim it — `pubkey <pubkey>`, `connection_key <ConnectionKey> <ia-pubkey>` or `cash`.
+- `state`: `live`, `spent`, `expired`, `reclaimed` or `unknown`, plus the last check time.
+- `wrap_key`: secret key of this entry's gift wrap, in hex.
 
-**Optional tags**: `mint` (the Minter, NIP-CZ), `expires_at` (from the mint response), `source` (the `9522` it arrived in), `secret` (a `cash`-mode slice's `cash_secret`).
+**Optional tags**: `mint` (Minter), `expires_at`, `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
 
 ### Wrapping
 
