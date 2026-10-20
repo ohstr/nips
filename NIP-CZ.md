@@ -170,6 +170,7 @@ Rules 1–8 only show that a trusted node minted the amount. Only rule 9 proves 
 - A wallet MUST NOT contact a Minter missing from the recipient's `mint` tags without their approval, since contacting it reveals their identity and IP to that minter.
 - A wallet MUST try the token from every copy sharing a `w` before calling it unclaimable: relay hints and the connection secret are unsigned.
 - A token's state comes from `cash_status` only (NIP-CASH §Answering About a Destroyed Bill). A timeout MUST NOT be reported as spent.
+- A wallet SHOULD keep the tokens it holds in a [NIP-CP](./NIP-CP.md) Cash Pocket.
 - A wallet SHOULD claim promptly, since the sender can revoke until then. An external redemption pays `net_redeemable_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node (NIP-CASH §The Redeem Fee).
 - Clients SHOULD NOT publish when a Cash Zap was claimed.
 
