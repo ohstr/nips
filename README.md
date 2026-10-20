@@ -14,7 +14,7 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Web Identity Linking | `35521`, `35522` | `draft` |
 | [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
 
-**NIP-AZ**: zaps that settle on any energy-backed Lightning chain, to recipients with or without a Nostr key.
+**NIP-AZ**: zaps that settle on any energy-backed Lightning chain.
 
 **NIP-CASH**: ecash for energy-backed Lightning coins, as cash tokens a Hub mints and holders hand over, split and redeem.
 
