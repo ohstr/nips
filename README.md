@@ -8,19 +8,22 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 |-----|-------|-------|--------|
 | [NIP-AZ](./NIP-AZ.md) | AltZap: Cross-Chain Lightning Zaps | `9520`, `9521`, `9523` | `draft` |
 | [NIP-CASH](./NIP-CASH.md) | Cash Hub | `11190`, `23190`–`23193` | `draft` |
+| [NIP-CP](./NIP-CP.md) | Cash Pocket | `9525` | `draft` |
 | [NIP-CW](./NIP-CW.md) | Circle Wallet | `23199` | `draft` |
 | [NIP-CZ](./NIP-CZ.md) | Cash Zaps | `9522`, `10522` | `draft` |
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Web Identity Linking | `35521`, `35522` | `draft` |
 | [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
 
-**NIP-AZ** extends [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) so a zap can settle on any energy-backed Lightning-routable chain (not just Bitcoin) and target a recipient who doesn't have a Nostr keypair yet.
+**NIP-AZ**: zaps that settle on any energy-backed Lightning chain.
 
-**NIP-CASH** is a Chaumian ecash system for energy-backed Lightning coins: a Hub mints cash tokens (`lokicash1...`, `satscash1...`) as specially-scoped [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) connections that can be handed over, split, consolidated and redeemed, with a private transport for moving bills.
+**NIP-CASH**: ecash for energy-backed Lightning coins, as cash tokens a Hub mints and holders hand over, split and redeem.
 
-**NIP-CW** defines Circle Wallets: shared, self-service NIP-47 wallets a Hub issues to members of a circle, who prove membership with a signed identity event.
+**NIP-CP**: a private, multi-device store for the cash tokens a wallet holds.
 
-**NIP-CZ** lets a user zap with cash instead of Lightning: the sender mints a NIP-CASH token bound to the recipient and publishes it in a `9522` event, which clients count per note and wallets index to find incoming cash. It works for Bitcoin and any other energy-backed coin.
+**NIP-CW**: shared wallets a Hub issues to the members of a circle.
 
-**NIP-IC** defines how a user cryptographically links their Nostr pubkey to an account on a non-Nostr platform (Discord, X, email, ...), witnessed by a permissionless network of Identity Authorities — the mechanism NIP-AZ and NIP-CZ rely on to resolve a `ConnectionKey` back to a verified identity.
+**NIP-CZ**: zaps paid with a cash token instead of a Lightning invoice.
 
-**NIP-LS** lets a process on the same host sign through a key it can't read: a local signer answers the [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) method set as newline-delimited JSON over a unix socket (`bunker+unix:///path.sock`), with no relay and no encryption, and its own policy decides what gets signed.
+**NIP-IC**: links a Nostr pubkey to a Web Identity, attested by Identity Authorities.
+
+**NIP-LS**: NIP-46 signing over a local unix socket, with no relay.
