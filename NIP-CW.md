@@ -6,7 +6,7 @@ Circle Wallet
 
 `draft` `optional` `nwc`
 
-**Depends on**: NIP-47 (Nostr Wallet Connect), NIP-51 (Lists), NIP-44 (Encrypted Payloads)
+**Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect), [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) (Lists)
 
 ## Abstract
 
