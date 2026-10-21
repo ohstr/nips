@@ -374,14 +374,14 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   from now (the 5-minute freshness window plus its 1-minute future allowance); a later one is treated as
   now plus 6 minutes. A client that misstates `deadline` misleads only itself, since a late join is
   refused anyway. A lookup MUST NOT write state.
-- **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH (§The
-  Record in NIP-CASH):
-  - `pending`, with `retry_after` = `deadline`, while `deadline` is ahead;
+- **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH
+  (§Looking Up a Call in NIP-CASH). `deadline` has passed when now > `deadline`.
+  - `pending`, with `retry_after` = `deadline` + 1, while `deadline` has not passed;
   - `unknown` while now is at most `deadline` plus 6 minutes: the join was not made and never will be;
   - `expired` after that: the outcome can no longer be known. A client MUST NOT join again automatically
     with that `connection_pubkey`, and SHOULD show the join to the member.
-- **A late `unknown` proves nothing once the wallet is gone.** The record is dropped when the wallet is
-  deleted, so after that an `unknown` no longer shows the join failed (§The Record in NIP-CASH).
+- **An `unknown` received after the wallet was deleted proves nothing.** The record is dropped when the
+  wallet is deleted, so after that an `unknown` no longer shows the join failed (§The Record in NIP-CASH).
 
 A Hub that serves it lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
 (§Scope Surface in NIP-CASH), and MUST keep each wallet's `encrypted_details` while the wallet exists.
