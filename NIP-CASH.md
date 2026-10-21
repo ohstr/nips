@@ -1296,7 +1296,7 @@ proof that does not verify is still omitted. A verifying item is then answered `
 `expired`, never omitted: the rightful caller of a call that has not arrived yet gets an answer.
 
 For a join lookup, a record is matched on (signer, `connection_pubkey`) (§Lost Join Reply in NIP-CW); with
-no match the answer is by deadline as above, not an omission.
+no match the answer is by `deadline` as below, with 6 minutes in place of `H`, not an omission.
 
 The answer is one of:
 
@@ -1307,23 +1307,25 @@ The answer is one of:
 {"status": "expired"}
 ```
 
-The Hub decides the status on its own clock.
+The Hub decides the status on its own clock, and `deadline` has passed when now > `deadline`.
 
 - **`done`** — the call committed. `result` is the original response, rebuilt: the same fields and the same
   tokens byte for byte, each encrypted to the same keys as originally (§Delivery — Nested Encryption, Not a
   New Channel). Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
   (§Answering About a Destroyed Bill) in place of its token, never as a token.
 - **`pending`** — the call may still commit. Either the Hub holds it and has not finished it, or it has no
-  record and `deadline` has not passed. `retry_after` is the deadline, in absolute unix seconds: the
-  recorded one, or the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a join
-  lookup by `connection_pubkey`, at most 6 minutes from now (the 5-minute kind-23199 freshness window plus
-  its 1-minute future allowance; §Lost Join Reply in NIP-CW).
+  record and `deadline` has not passed. `retry_after` is the deadline plus 1, in absolute unix seconds: the
+  recorded deadline, or the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a
+  join lookup by `connection_pubkey`, at most 6 minutes from now (the 5-minute kind-23199 freshness window
+  plus its 1-minute future allowance; §Lost Join Reply in NIP-CW).
 - **`unknown`** — the call was not applied and never will be: the Hub has no record, `deadline` has passed,
-  and now is no later than `deadline` plus `H`, so a record the call left would still be held (§The Record,
-  Retention). A copy of the original arriving later is refused, because the Hub never commits a call past
-  its own deadline.
+  and now is no later than `deadline` plus `H` (6 minutes in place of `H` for a join lookup by
+  `connection_pubkey`), so a record the call left would still be held (§The Record, Retention). A copy of
+  the original arriving later is refused, because the Hub never commits a call past its own deadline.
 - **`expired`** — the outcome can no longer be known: the Hub has no record, and now is later than
-  `deadline` plus `H`, so a record the call left may have been dropped.
+  `deadline` plus `H` (6 minutes in place of `H` for a join lookup by `connection_pubkey`), so a record the
+  call left may have been dropped. This lookup status is not the slice state `expired` (§Lifecycle and
+  Deletion).
 
 A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
 misstates `deadline` only misleads itself.
