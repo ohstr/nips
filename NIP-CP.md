@@ -126,7 +126,7 @@ A device MUST write a final state only from a definitive result (its own spend, 
 
 ## Sweeping and Spending
 
-- A wallet SHOULD claim received cash into the user's own Hub promptly. A claim is fee-free only when the user's Hub runs on the minting node; otherwise the redeem fee applies, and a bill at or below the base fee must first be consolidated with others. The entry then becomes `spent`. The Pocket holds cash until claimed; a held bill returns to its minting Hub at `expires_at`.
+- A wallet SHOULD claim received cash into the user's own Hub promptly. A claim is fee-free only when the user's Hub runs on the minting node; otherwise the redeem fee applies, and a bill at or below the base fee has to be consolidated first. The entry then becomes `spent`. The Pocket holds cash until claimed; a held bill returns to its minting Hub at `expires_at`.
 - A wallet MUST show `expires_at`, and SHOULD warn and claim or redeem before it.
 - A wallet SHOULD transfer a received cash-mode bill to the user's pubkey, so no `secret` is stored.
 - To pay, a wallet SHOULD spend held tokens first (`cash_transfer`, whole or split), then mint from the user's Hub. A split leaves a new token for the remainder, which gets its own entry.
