@@ -152,8 +152,8 @@ request MUST be rejected when its requested renewal is tighter than the Hub's fl
 `monthly` floor allows `monthly`/`yearly`/`never` and rejects `daily`/`weekly`.
 
 A budget period starts when the wallet is created and repeats every day, week, calendar month or year
-after that, in UTC. A monthly period starting on a day the next month lacks ends on that month's last day.
-At the start of each period the wallet's spend cap is available again in full. With `never`, the wallet's
+after that, in UTC. Monthly periods stay anchored to the creation day, clamped to the month's last day;
+yearly periods likewise (Feb 29 → Feb 28). At the start of each period the wallet's spend cap is available again in full. With `never`, the wallet's
 whole life is one period.
 
 ## Creating a Circle Wallet
@@ -455,9 +455,9 @@ A `follow_set` Hub MUST apply these rules:
   this circle (e.g. `circle-<random>`), and SHOULD use a provider key that ordinary social clients do not
   hold. Whoever can edit the set grants wallet access, so a set a social client might write to by name,
   or a key such a client holds, hands that power to the client.
-- **Which relays.** The Hub reads the set from the relays it is configured to read the set from, and the
-  host publishes it there. A relay keeps only the newest version of an addressable event, so an older
-  version cannot be served there in place of a newer one.
+- **Which relays.** The Hub reads the set from its configured relays, and the host publishes it there. A
+  relay keeps only the newest version of an addressable event, so an older version cannot be served there
+  in place of a newer one.
 - **Which event.** Only a kind-`30000` event whose signature verifies, whose author is the provider
   pubkey and whose `d` tag equals the configured identifier. Of those, the one with the highest
   `created_at` wins; on a tie, the lowest `id` (NIP-01's rule for addressable events). An event from
