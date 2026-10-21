@@ -1253,11 +1253,12 @@ Connection secrets are re-derived (§The Pairing Connection), so the Hub stores 
 the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
 not MUST store them.
 
-**Retention.** The Hub keeps a `request_id` at least until its call's deadline, so a repeat is refused for
-as long as it could still commit. It keeps the full record while any bill the call created is live, plus
-that bill's tombstone window (§Answering About a Destroyed Bill). After both, it MAY drop the record, and a
-lookup is then answered as for a `request_id` it never saw — so a late `unknown` no longer proves the call
-was not applied. A client SHOULD look up a lost reply promptly, and well before any bill it might have
+**Retention.** The Hub keeps every `request_id` record at least until its call's deadline plus `H`, so a
+repeat is refused for as long as it could still commit, and a lookup within `H` of the deadline finds it.
+It keeps the full record while any bill the call created is live, plus that bill's tombstone window
+(§Answering About a Destroyed Bill). After both, it MAY drop the record, and a lookup is then answered as
+for a `request_id` it never saw — so a late `unknown` no longer proves the call was not applied (§Looking Up
+a Call, Finality). A client SHOULD look up a lost reply promptly, and well before any bill it might have
 created could expire.
 
 ### Looking Up a Call (`cash_lookup`)
@@ -1312,10 +1313,11 @@ The answer is one of:
 A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
 misstates `deadline` only misleads itself.
 
-**Finality.** `done` and `unknown` are final. A client MUST NOT resend the original after either; after
-`unknown` it MAY place the call again with a new `request_id`. A client MUST NOT read an omitted
-`cash_lookup` as `unknown`. Once the record is past its retention (§The Record), a late `unknown` no longer
-proves the call was not applied.
+**Finality.** `done` and `unknown` are final. A client MUST NOT resend the original after either. A client
+MUST NOT place the call again after `unknown` unless that `unknown` arrived no later than the call's
+deadline plus `H`; it then MAY, with a new `request_id`. A later `unknown` may follow a dropped record
+(§The Record, Retention), so the client MUST NOT place the call again automatically, and surfaces it to its
+user instead. A client MUST NOT read an omitted `cash_lookup` as `unknown`.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token).
