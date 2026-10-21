@@ -313,8 +313,8 @@ On receiving `mint_cash`, the Hub MUST, in order:
    Hub's own expiry ceiling; otherwise it MUST NOT exceed that ceiling.
 5. Verify the Hub's own available balance is at least the sum of all recipients' amounts.
 6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed and
-   lies within `max_request_age`, and that the `request_id` is unused (§Lost Replies). **A used `request_id` MUST be refused rather than mint
-   again.** Checked here, after validation and before any state is created: a request that was never going
+   lies within `max_request_age`, and that the `request_id` is unused (§Lost Replies). **A used
+   `request_id` MUST be refused rather than mint again.** Checked here, after validation and before any state is created: a request that was never going
    to succeed records nothing, so it cannot lock out the caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis` and `redeem_fee_ppm` defaults (§Data Model) and a one-way commitment of
