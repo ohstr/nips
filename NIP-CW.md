@@ -153,8 +153,8 @@ request MUST be rejected when its requested renewal is tighter than the Hub's fl
 
 A budget period starts when the wallet is created and repeats every day, week, calendar month or year
 after that, in UTC. Monthly periods stay anchored to the creation day, clamped to the month's last day;
-yearly periods likewise (Feb 29 → Feb 28). At the start of each period the wallet's spend cap is available again in full. With `never`, the wallet's
-whole life is one period.
+yearly periods likewise (Feb 29 → Feb 28). At the start of each period the wallet's spend cap is
+available again in full. With `never`, the wallet's whole life is one period.
 
 ## Creating a Circle Wallet
 
@@ -362,7 +362,7 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   proof's `created_at` plus the 5-minute freshness window (§Identity Proof), and the Hub MUST NOT create a
   wallet whose proof is past it, checked at commit (step 9). With no record of the `connection_pubkey`,
   the Hub answers `pending` with `retry_after` = `deadline` while `deadline` is in the future, and
-  `unknown`, which is final, once it has passed. A `deadline` is capped at most 6 minutes from now (the
+  `unknown`, which is final, once it has passed. A `deadline` counts as at most 6 minutes from now (the
   freshness window); a later one is treated as now plus 6 minutes. A client that misstates `deadline`
   misleads only itself, since a late join is refused anyway. A lookup MUST NOT write state.
 - **A late `unknown` proves nothing once the wallet is gone.** The record is dropped when the wallet is
