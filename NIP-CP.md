@@ -86,7 +86,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
 - **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet saves a `pending` entry holding the call's `request_id` (NIP-CASH) and any cash secret it generated, with `w` set to the `request_id`. On the reply it adds an entry for each new bill and removes the pending one. If the reply is lost, the wallet recovers it with `cash_lookup` and MUST NOT resend the call.
-- **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`.
+- **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`), so the user can see why a note left.
 - **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
 
@@ -126,4 +126,4 @@ A device MUST write a final state only from a definitive result (its own spend, 
 
 ## Privacy Considerations
 
-Relays see gift wraps addressed to the user at randomized times, the same as DMs, and deletions signed by one-time keys. The number of wraps still grows with activity; a wallet MAY batch changes to hide it. Refreshing states contacts each Hub, not relays.
+Relays see gift wraps addressed to the user at randomized times, the same as DMs, and deletions signed by one-time keys at randomized times. The number of wraps still grows with activity; a wallet MAY batch changes to hide it. Refreshing states contacts each Hub, not relays.
