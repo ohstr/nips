@@ -1337,9 +1337,9 @@ never a fresh one: the lowercase hex of `sha256("retry:" ‖ <replaced request_i
 `retry:` followed by the replaced call's `request_id` as sent. Two attempts to re-place the same call then
 send the same `request_id`, and the Hub refuses the second with `REQUEST_REUSED`. A client MUST NOT place a
 call again if it has already placed that call's derived id, or holds a written-ahead record of it (NIP-CP
-§Writing); it only closes the older call. After `expired` a client
-MUST NOT place the call again automatically, and surfaces it to its user instead. A client MUST NOT read an
-omitted `cash_lookup` as `unknown`.
+§Writing); it only closes the older call. After `expired` a client MUST NOT place the call again
+automatically, and surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as
+`unknown`.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token).
