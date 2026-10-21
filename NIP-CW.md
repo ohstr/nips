@@ -117,6 +117,7 @@ A Circle Wallet Hub MUST maintain, for itself:
 - a ceiling on the amount a member may request for their own wallet;
 - a floor on how tight a member's requested budget-renewal period may be (§Budget Renewal Floor);
 - a ceiling on, and default value for, an issued wallet's lifetime;
+- the grace period a member gets before their wallet is deleted (§Lifecycle and Deletion);
 - an optional ceiling on the combined commitment across every currently-active wallet it has issued
   (§Creating a Circle Wallet's own Processing Algorithm, step 9), separate from and in addition to its own
   real balance.
@@ -133,8 +134,8 @@ Connection).
 
 For each member who currently holds an active Circle Wallet under a given Hub, an implementation MUST
 be able to determine that fact. §Membership's one-active-wallet-per-member rule is checked against it.
-That fact MUST stop being true once the member's wallet is disabled (§Membership) or its connection is
-deleted, freeing them to request a new one.
+That fact MUST stop being true once the member's wallet stops being active (§Lifecycle and Deletion),
+freeing them to request a new one.
 
 A Hub that serves §Lost Join Reply keeps, for each Circle Wallet, the `encrypted_details` it returned.
 
@@ -199,7 +200,8 @@ sequenceDiagram
 - `max_amount` — REQUIRED, the spend cap per budget period, in the chain's milli-unit (msats on Bitcoin,
   the same milli-unit for any other energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own
   per-wallet ceiling (§Data Model).
-- `expiry` — OPTIONAL; if omitted or zero, it MUST default to the Hub's own expiry ceiling.
+- `expiry` — OPTIONAL, the wallet's lifetime in seconds; if omitted or zero, it MUST default to the Hub's
+  own default lifetime (§Data Model), not its ceiling.
 - `budget_renewal` — OPTIONAL, one of NIP-47's `daily` | `weekly` | `monthly` | `yearly` | `never`, with
   periods as §Budget Renewal Floor defines them; if omitted, it MUST default to `never`. Whether omitted
   or explicit, the resolved value MUST satisfy the Hub's own renewal floor (§Budget Renewal Floor).
@@ -286,8 +288,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    (§Errors) if the identity already holds an active Circle Wallet under this Hub.
 6. Validate `max_amount` against the Hub's own per-wallet ceiling, the resolved `budget_renewal` against
    the Hub's own renewal floor, and, if `expiry` was explicitly supplied (non-zero), that it does not
-   exceed the Hub's own expiry ceiling (§Data Model). A request over any of these limits is refused with
-   `LIMIT_EXCEEDED` (§Errors), whose message names the field.
+   exceed the Hub's own expiry ceiling (§Data Model), where a ceiling of `0` means no limit. A request
+   over any of these limits is refused with `LIMIT_EXCEEDED` (§Errors), whose message names the field.
 7. Rate-limit per requester `pubkey`. A Hub SHOULD bound how often one member may ask, and MUST answer a
    throttled request with a distinct rate-limit error rather than a generic failure, so a caller can tell
    "slow down" from "you are not a member" — the same distinguishability §Identity Proof's ordering exists
@@ -328,7 +330,7 @@ codes for them, on either transport:
 |---|---|---|
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
-| `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it is deleted |
+| `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it stops being active (§Lifecycle and Deletion) |
 | `LIMIT_EXCEEDED` | `max_amount`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other terms |
 | `RATE_LIMITED` | the requester has asked too often (step 7) | yes, later |
 | `INSUFFICIENT_CAPACITY` | the Hub cannot commit that much now (step 9) | yes, later or for less |
@@ -535,8 +537,8 @@ Independent of which admission mechanism a Hub uses, a member MUST hold at most 
 Wallet per Hub at a time. This is enforced twice: a pre-check immediately after authorization, which
 short-circuits the common case before further work, and the membership table's unique constraint as the
 authoritative guard inside the creation transaction. The membership row MUST be removed when its Circle
-Wallet is disabled, and MUST cascade-delete when the wallet's connection record is deleted, freeing the
-identity to request a new wallet.
+Wallet stops being active (§Lifecycle and Deletion), and in any case MUST cascade-delete when the wallet's
+connection record is deleted, freeing the identity to request a new wallet.
 
 ## In-Circle Transfers
 
@@ -777,16 +779,35 @@ allowlist.
 ```mermaid
 stateDiagram-v2
     [*] --> Active: created (self-service, one step)
-    Active --> Deleted: member or host delete (balance swept)
-    Active --> Deleted: bulk Hub teardown (balance NOT swept)
+    Active --> Disabled: member no longer resolved (§Membership)
+    Active --> Expired: expiry reached
+    Active --> Closing: host delete, or bulk Hub teardown
+    Disabled --> Closing: host delete, or bulk Hub teardown
+    Expired --> Deleted: grace period over (balance swept)
+    Closing --> Deleted: grace period over (balance swept)
+    Active --> Deleted: member deletes it (balance swept)
+    Disabled --> Deleted: member deletes it (balance swept)
     Deleted --> [*]
 ```
 
-There's no claimed/unclaimed distinction here: a Circle Wallet is simply active until it's deleted.
-Per-member deletion MUST sweep any remaining balance back to the Circle Wallet Hub before the connection
-record is removed, and MUST be available regardless of the wallet's spend state. Deleting the whole Hub in
-bulk-teardown mode MAY destroy members' balances with no sweep. That's a distinct, explicitly-chosen
-deletion mode, not the per-member path's default.
+There's no claimed/unclaimed distinction here. A Circle Wallet is active from creation until one of these
+happens:
+
+- **Disabled.** Its pubkey is no longer resolved as a member (§Membership).
+- **Expired.** Its `expires_at` has passed. The wallet stops spending against the Hub, and the member may
+  join again.
+- **Closing.** The host has deleted it, on its own or by tearing down the whole Hub.
+
+A wallet in any of these states is no longer active: it can no longer draw on the Hub's balance, and can
+only pay out its own received balance.
+
+**Member balances.** Before a wallet is deleted, whether by the host, at its expiry or in a bulk teardown,
+the Hub MUST give the member a grace period (e.g. 7 days) during which the wallet can only pay out its own
+received balance. For an expired wallet it starts at expiry; for a closing one, when the host deletes it.
+Bulk teardown without that grace is forbidden. A deletion the member asks for needs none.
+
+Deletion MUST sweep any remaining balance back to the Circle Wallet Hub before the connection record is
+removed, and MUST be available regardless of the wallet's spend state.
 
 ## Security Considerations
 
