@@ -42,8 +42,10 @@ Every client hashing a ConnectionKey for the same account MUST get the same hash
 |---|---|---|
 | X | `x` | The numeric account ID, in decimal. Not the handle. |
 | Discord | `discord` | The numeric account ID, in decimal. Not the username. |
-| Email | `email` | The address, lowercased. |
-| Any other | its platform name | Its stable numeric or opaque account ID, never a handle or display name. |
+| Email | `email` | The whole address, lowercased and trimmed. |
+| DNS domain | `dns` | The domain, lowercased, without a trailing dot. |
+
+No canonical form is defined here for other platforms.
 
 No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
 
