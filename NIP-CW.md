@@ -151,10 +151,11 @@ monthly, yearly, never), a
 request MUST be rejected when its requested renewal is tighter than the Hub's floor. For example, a
 `monthly` floor allows `monthly`/`yearly`/`never` and rejects `daily`/`weekly`.
 
-A budget period starts when the wallet is created and repeats every day, week, calendar month or year
-after that, in UTC. Monthly periods stay anchored to the creation day, clamped to the month's last day;
-yearly periods likewise (Feb 29 → Feb 28). At the start of each period the wallet's spend cap is
-available again in full. With `never`, the wallet's whole life is one period.
+A budget period starts when the wallet is created, in UTC. Daily and weekly periods start at the
+creation instant plus k×86400 or k×604800 seconds. Monthly periods stay anchored to the creation day,
+clamped to the month's last day; yearly periods likewise (Feb 29 → Feb 28). A monthly or yearly period
+starts at the creation's UTC time of day on that date. At the start of each period the wallet's spend cap
+is available again in full. With `never`, the wallet's whole life is one period.
 
 ## Creating a Circle Wallet
 
@@ -306,15 +307,17 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 9. Inside one transaction, verify that the Hub's commitment does not exceed its own current balance (and
    its optional aggregate ceiling, if configured). The commitment is the sum, over every currently-active
    wallet the Hub has issued, of that wallet's remaining cap for its current budget period (§Budget
-   Renewal Floor), plus this request's `max_amount`. This limits what members can draw in one period, not
-   across renewals. Then create the Circle Wallet connection, authorizing `connection_pubkey` as its
-   client key, and insert its membership row. The membership row's uniqueness
-   constraint is the authoritative guard for step 5, so a conflict here, a `connection_pubkey` already
-   authorized for another connection on this node, or a balance/ceiling check failing, MUST roll back the
-   entire transaction, including the just-created connection and permission rows. A failing balance or
-   ceiling check is refused with `INSUFFICIENT_CAPACITY` (§Errors). The transaction MUST NOT commit once
-   the proof is past its freshness window (§Identity Proof), checked at commit (§Lost Join Reply). On any
-   rollback, the step-3 replay record is not rolled back.
+   Renewal Floor), plus this request's `max_amount`. A wallet's remaining cap is max(0, `max_amount` −
+   what the wallet has drawn on the Hub's balance in the current period); payouts of the wallet's own
+   received balance do not count. This limits what members can draw in one period, not across renewals.
+   Then create the Circle Wallet connection, authorizing `connection_pubkey` as its client key, and insert
+   its membership row. The membership row's uniqueness constraint is the authoritative guard for step 5,
+   so a conflict here, a `connection_pubkey` already authorized for another connection on this node, or a
+   balance/ceiling check failing, MUST roll back the entire transaction, including the just-created
+   connection and permission rows. A failing balance or ceiling check is refused with
+   `INSUFFICIENT_CAPACITY` (§Errors). The transaction MUST NOT commit once the proof is past its freshness
+   window (§Identity Proof), checked at commit (§Lost Join Reply). On any rollback, the step-3 replay
+   record is not rolled back.
 
    Step 8's guard is not sufficient on its own: it is process-local, so two Hub processes sharing one
    database could still both pass this check. Making the read-and-create genuinely atomic requires a
