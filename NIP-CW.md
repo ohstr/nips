@@ -7,6 +7,7 @@ Circle Wallet
 `draft` `optional` `nwc`
 
 **Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect), [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) (Lists)
+**Related**: [NIP-CASH](./NIP-CASH.md) (Cash Hub), [NIP-IC](./NIP-IC.md) (Identity Connection)
 
 ## Abstract
 
@@ -340,7 +341,7 @@ codes for them, on either transport:
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
 | `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it stops being active (§Lifecycle and Deletion) |
-| `LIMIT_EXCEEDED` | `max_amount`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other terms |
+| `LIMIT_EXCEEDED` | `max_amount`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other values |
 | `RATE_LIMITED` | the requester has asked too often (step 7) | yes, later |
 | `INSUFFICIENT_CAPACITY` | the Hub cannot commit that much now (step 9) | yes, later or for less |
 
@@ -455,8 +456,8 @@ A Circle Identity's admission mechanism (§Terminology) supports two forms:
 **Removing a member disables their wallet.** Whichever form it uses, a Hub MUST, within its staleness
 bound, disable the Circle Wallet of any pubkey no longer resolved as a member. A disabled wallet can no
 longer draw on the Hub's balance, but keeps, and can still pay out, any money it received itself. It is
-no longer an active wallet: it stops counting toward step 9's commitment and the one-active-wallet rule,
-so a pubkey that becomes a member again may join again.
+no longer an active wallet: it stops counting toward step 9's commitment and the one-active-wallet rule.
+A disabled wallet is never re-enabled; a re-added member joins again.
 
 A `follow_set` Hub MUST apply these rules:
 
@@ -825,6 +826,8 @@ happens:
 - **Expired.** Its `expires_at` has passed. The wallet stops spending against the Hub, and the member may
   join again.
 - **Closing.** The host has deleted it, on its own or by tearing down the whole Hub.
+
+There is no Expired → Closing edge: an expired wallet is already in its grace period.
 
 A wallet in any of these states is no longer active: it can no longer draw on the Hub's balance, and can
 only pay out its own received balance.
