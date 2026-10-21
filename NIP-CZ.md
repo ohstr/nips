@@ -7,7 +7,7 @@ Cash Zaps
 `draft` `optional`
 
 **Depends on**: [NIP-CASH](./NIP-CASH.md) (Cash Hub)
-**Related**: [NIP-AZ](./NIP-AZ.md) (AltZap), [NIP-IC](./NIP-IC.md) (Identity Connection)
+**Related**: [NIP-AZ](./NIP-AZ.md) (AltZap), [NIP-IC](./NIP-IC.md) (Identity Connection), [NIP-CP](./NIP-CP.md) (Cash Pocket)
 
 ## Abstract
 
@@ -65,7 +65,7 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
 
    For a pubkey `p` and a zap on an event, the sender SHOULD set `zap_target` (required for the zap to be counted) to the target's `a` coordinate, or else its `e` id, from a bill bound to the pubkey that will sign the `9522`. If the `9522` carries an `a` tag, `zap_target` MUST equal that tag's value byte for byte; otherwise it MUST equal the `e` tag's value. A sender whose bill was signed over an `e` id MUST NOT add an `a` tag. The Hub then issues a new bill with a zap signature, even for a full transfer; its `issued_at` and `expires_at` go in the `9522`. A transfer reply without `issued_at` comes from a Hub that ignored `zap_target`; the bill carries no zap signature and the zap will not be counted. `zap_target` requires a pubkey `p`: a ConnectionKey zap carries none. A ConnectionKey zap MUST NOT be sent on a platform with no canonical form in NIP-IC (§Canonical Platform User IDs).
 
-   A Hub owner zaps the same way: they mint a bill to themselves (NIP-CASH §Minting Cash), then transfer it. `new_identity` MUST NOT be `cash`: its secret is not in the token, so only the sender could redeem it. The sender SHOULD send a `request_id`, so a lost reply can be recovered. A bill keeps its expiry when transferred, so the sender SHOULD pick one with a long remaining life, above all for a ConnectionKey `p`.
+   A Hub owner zaps the same way: they mint a bill to themselves (NIP-CASH §Minting Cash), then transfer it. `new_identity` MUST NOT be `cash`: its secret is not in the token, so only the sender could redeem it. The sender SHOULD send a `request_id`, so a lost reply can be recovered (NIP-CASH §Lost Replies). A bill keeps its expiry when transferred, so the sender SHOULD pick one with a long remaining life, above all for a ConnectionKey `p`.
 3. Publish to the recipient's `10522` relays (else their [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) read relays) and to the sender's write relays. For a ConnectionKey `p`, also publish to its NIP-IC identity connection's relays if known; the sender MAY also notify the recipient on their platform, in fixed client text with no sender-supplied link (e.g. "open any Nostr wallet").
 
 ### Kind 9522 — Cash Zap
@@ -100,11 +100,11 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
 - `w`: exactly one, the token's wallet pubkey (TLV `0`), so every copy of a token can be found with `#w`.
 - `ia`: exactly one if `p` is a ConnectionKey, else none.
 
-**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires, and is informational on a token without TLV `8` = `2`, taken from `cash_status`).
+**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires). On a token without TLV `8` = `2`, both are informational, `expires_at` taken from `cash_status`.
 
 A `9522` MUST NOT carry a NIP-40 `expiration` tag: relays could drop it before the recipient sees it.
 
-Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent acting for `P`, and `P` MUST be a ConnectionKey: a Nostr user signs their own zaps. The bill's signed sender is the Proxy Agent's own key; `P` is display only, e.g. "via @bot for discord:carol". Nothing proves `P`, so a client SHOULD credit `P` only if it trusts the signer, and otherwise show the zap as sent via the signer.
+Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent acting for `P`, and `P` MUST be a ConnectionKey: a Nostr user signs their own zaps. The bill is transferred from the Proxy Agent's own key; `P` is display only, e.g. "via @bot for discord:carol". Nothing proves `P`, so a client SHOULD credit `P` only if it trusts the signer, and otherwise show the zap as sent via the signer.
 
 ```json
 {
@@ -204,7 +204,7 @@ A client MAY total Cash Zaps per note, shown apart from Lightning zaps. It count
 - it passes rules 1–8, so its Minter is trusted by the reader or listed in the recipient's `10522`;
 - its `expires_at` is `0` (never), or `expires_at − issued_at` is at least the reader's minimum life, measured from `issued_at`, a client setting (e.g. 30 days).
 
-A count means "issued to the recipient by a trusted Hub", not "received". ConnectionKey zaps, and zaps that fail these checks, MAY be listed, never totalled.
+A count means "issued to the recipient by a trusted Hub", not "received". ConnectionKey zaps, and zaps that fail these checks, MAY be listed, never totalled. Cash Zaps whose token lacks TLV `8` = `2`, including all published before zap signatures, MAY be listed but are never totalled.
 
 A token counts once, however many copies share its `w`.
 
