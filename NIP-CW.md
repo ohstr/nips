@@ -125,8 +125,8 @@ A Circle Wallet Hub MUST maintain, for itself:
 A member's `max_amount` is a spend cap, not a pre-funded transfer: a Circle Wallet starts at zero
 balance and draws against the Hub's own underlying balance as it spends, up to that cap. The Hub MUST
 maintain this cap-vs-balance invariant atomically with every new wallet it creates (§Creating a Circle
-Wallet's own Processing Algorithm, step 9). A wallet's expiry determines when it stops counting toward
-this sum.
+Wallet's own Processing Algorithm, step 9). A wallet stops counting toward the commitment when it stops
+being active (§Lifecycle and Deletion).
 
 For each Circle Wallet it issues, a Hub records the member's `connection_pubkey` (§Request) and authorizes
 it as that wallet's client key. It never generates, receives or stores the matching secret (§Pairing
@@ -600,8 +600,9 @@ traffic contains it, and no response to the member carries it. The owner still c
 funds — the wallet runs on the host's node — but cannot act as the member over the member's connection.
 
 It follows that there is no "reveal connection again" capability, for the host or anyone else. A member
-who loses the secret has lost the connection: the member (or the host) deletes the wallet, which sweeps its balance
-back to the Hub (§Lifecycle and Deletion) and frees the member to request a new one with a new keypair.
+who loses the secret has lost the connection: the member (or the host) deletes the wallet, which sweeps its
+balance back to the Hub and frees the member to request a new one with a new keypair. A deletion by the
+host passes through the grace period first (§Lifecycle and Deletion).
 
 ## The Circle Wallet Hub Connection (`circlehub1...`)
 
@@ -794,6 +795,8 @@ stateDiagram-v2
     Closing --> Deleted: grace period over (balance swept)
     Active --> Deleted: member deletes it (balance swept)
     Disabled --> Deleted: member deletes it (balance swept)
+    Expired --> Deleted: member deletes it (balance swept)
+    Closing --> Deleted: member deletes it (balance swept)
     Deleted --> [*]
 ```
 
@@ -811,7 +814,9 @@ only pay out its own received balance.
 **Member balances.** Before a wallet is deleted, whether by the host, at its expiry or in a bulk teardown,
 the Hub MUST give the member a grace period (e.g. 7 days) during which the wallet can only pay out its own
 received balance. For an expired wallet it starts at expiry; for a closing one, when the host deletes it.
-Bulk teardown without that grace is forbidden. A deletion the member asks for needs none.
+Bulk teardown without that grace is forbidden. A deletion the member asks for needs none, but before
+sending it the client MUST warn the member that any remaining balance returns to the host, and SHOULD pay
+it out first.
 
 Deletion MUST sweep any remaining balance back to the Circle Wallet Hub before the connection record is
 removed, and MUST be available regardless of the wallet's spend state.
