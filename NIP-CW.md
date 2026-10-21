@@ -310,7 +310,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    authorized for another connection on this node, or a balance/ceiling check failing, MUST roll back the
    entire transaction, including the just-created connection and permission rows. A failing balance or
    ceiling check is refused with `INSUFFICIENT_CAPACITY` (§Errors). The transaction MUST NOT commit once
-   the proof is past its freshness window (§Identity Proof), checked at commit (§Lost Join Reply).
+   the proof is past its freshness window (§Identity Proof), checked at commit (§Lost Join Reply). On any
+   rollback, the step-3 replay record is not rolled back.
 
    Step 8's guard is not sufficient on its own: it is process-local, so two Hub processes sharing one
    database could still both pass this check. Making the read-and-create genuinely atomic requires a
@@ -798,6 +799,7 @@ stateDiagram-v2
     Active --> Expired: expiry reached
     Active --> Closing: host delete, or bulk Hub teardown
     Disabled --> Closing: host delete, or bulk Hub teardown
+    Disabled --> Expired: expiry reached
     Expired --> Deleted: grace period over (balance swept)
     Closing --> Deleted: grace period over (balance swept)
     Active --> Deleted: member deletes it (balance swept)
