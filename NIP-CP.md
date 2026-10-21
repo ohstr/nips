@@ -66,10 +66,11 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `identity`: who can claim it — `pubkey <pubkey>`, `connection_key <ConnectionKey> <ia-pubkey>` or `cash`.
 - `state`: `live`, `pending`, `spent`, `expired`, `reclaimed` or `unknown`, plus the last check time.
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
+- `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`.
 
 A `pending` entry leaves out `cash` and `identity` and carries `request_id` instead (§Writing).
 
-**Optional tags**: `mint` (Minter), `expires_at`, `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token), `request_id` (of the call that creates the token).
+**Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token), `request_id` (of the call that creates the token).
 
 **Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published on its own. Relays SHOULD reject a signed `9525`.
 
@@ -85,6 +86,7 @@ Wraps go to the user's NIP-17 inbox relays (kind `10050`), else their NIP-65 wri
 - **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet saves a `pending` entry holding the call's `request_id` (NIP-CASH) and any cash secret it generated, with `w` set to the `request_id`. On the reply it adds an entry for each new bill and removes the pending one. If the reply is lost, the wallet recovers it with `cash_lookup` and MUST NOT resend the call.
 - **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`), so the user can see why a note left.
+- **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
 
 ## Reading
 
@@ -99,7 +101,8 @@ The balance is the sum of `amount` over entries in state `live`. A wallet refres
 
 ## Sweeping and Spending
 
-- A wallet SHOULD claim received cash into the user's own Hub promptly; a same-node claim is fee-free. The entry then becomes `spent`. The Pocket is for users without a Hub, and for cash they choose to carry.
+- A wallet SHOULD claim received cash into the user's own Hub promptly; a same-node claim is fee-free. The entry then becomes `spent`. The Pocket holds cash until claimed; a held bill returns to its minting Hub at `expires_at`.
+- A wallet MUST show `expires_at`, and SHOULD warn and claim or redeem before it.
 - To pay, a wallet SHOULD spend held tokens first (`cash_transfer`, whole or split), then mint from the user's Hub. A split leaves a new token for the remainder, which gets its own entry.
 - If two devices spend the same token, the Hub accepts the first; the other device sees the token `spent` on its next refresh.
 
