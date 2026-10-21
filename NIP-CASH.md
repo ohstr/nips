@@ -2001,12 +2001,13 @@ one-byte length field. The entries:
 | `5` | mint signature | 65 raw bytes — a compact recoverable ECDSA signature: 1 recovery byte, 32-byte R, 32-byte S (§Mint Provenance) | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `6` | attested amount | 8 bytes, big-endian millis — the value the mint signature commits to | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `7` | hub group | 4 raw bytes — the issuing Cash Hub's fingerprint (§The Hub Group Fingerprint) | zero or one, OPTIONAL |
+| `8` | signature scheme | 1 byte: `1` = `satscash-mint:v2`, `2` = `satscash-zap:v1` — what the mint signature signs (§Mint Provenance) | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 
 Type numbers `0` and `1` carry the same meaning NIP-19 already gives them for `nprofile`/`nevent`/`naddr`
-(`0` is the token's primary identifier, `1` is a relay hint); types `2`–`3` and `5`–`7` are specific to
+(`0` is the token's primary identifier, `1` is a relay hint); types `2`–`3` and `5`–`8` are specific to
 this token family. A decoder MUST ignore any TLV entry of an unrecognized type rather than rejecting the
 token, so a future field can be added without breaking older decoders — again mirroring NIP-19. Types `3`,
-`5`, `6`, and `7` are themselves examples of this: a token minted before they existed simply omits them, and a
+`5`, `6`, `7` and `8` are themselves examples of this: a token minted before they existed simply omits them, and a
 decoder written before they existed correctly ignores them if present. Type `4` is reserved and MUST NOT be
 assigned a new meaning — a decoder ignores it as an unrecognized type on any token that carries it, per the
 general rule above. (A future revision MAY add a `min_transfer_millis` hint type following the same
@@ -2018,9 +2019,13 @@ commits to the amount and cannot be verified without it. A decoder that finds on
 treat the token as carrying no valid provenance (§Mint Provenance) — never as a hard decode failure, since
 provenance is never a spending credential.
 
+Type `8` belongs to the same provenance: it says which payload the signature covers. A token without it is a
+legacy token (§Mint Provenance). A wrong-length, repeated or unknown-valued type `8` MUST be treated as no
+valid provenance, exactly like a malformed `5`/`6`.
+
 A decoder MUST reject a token missing either required field (`0` or `2`), carrying a wrong-length value for
-any of the typed fields above **except the provenance pair `5`/`6` and the hub group `7`**, or repeating any
-of them except those.
+any of the typed fields above **except the provenance fields `5`, `6` and `8` and the hub group `7`**, or
+repeating any of them except those.
 
 Type `7` gets the same tolerance as the provenance pair, for a related reason: it is a grouping hint, not a
 credential. A decoder meeting a wrong-length or repeated hub group MUST drop it and leave the token
@@ -2031,12 +2036,12 @@ let a caller construct a token that decodes ambiguously, into a connection nobod
 metadata that could mislead a client about how to attempt a call. Truncated or malformed TLV data MUST
 also be rejected rather than read out of bounds.
 
-**Why `5`, `6` and `7` are carved out.** They are the only fields whose corruption says nothing about
+**Why `5`–`8` are carved out.** They are the only fields whose corruption says nothing about
 whether the token can be dialed. The wallet pubkey, secret and relay hints are all still intact, so
 rejecting the whole token would leave real money unreachable to punish a malformed field that is not a
 credential — provenance is never a spending credential (§Mint Provenance), and the hub group is only a
 grouping hint (§The Hub Group Fingerprint).
-A decoder MUST therefore treat a wrong-length, duplicated or unpaired `5`/`6` as **no valid provenance**
+A decoder MUST therefore treat a wrong-length, duplicated or unpaired `5`/`6`, or a malformed `8`, as **no valid provenance**
 and decode the rest normally, exactly as §Mint Provenance requires. This is the one place where "malformed
 input" and "unusable token" come apart, which is why it is stated rather than left to the general rule.
 
@@ -2198,12 +2203,61 @@ MUST do so before committing any funds, so a refusal costs the caller nothing. T
 request parameter to opt in or out: the earlier `mint_signature` field is gone from `mint_cash`,
 `cash_transfer` and `cash_consolidate`.
 
-- **What is signed.** The canonical ASCII string `lokicash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>`
-  — the token's HRP, wallet pubkey, and committed amount. Binding the amount is only sound because a
-  wallet's amount is immutable for its whole life (§Transferring and Splitting a Slice, §Spinning a Slice Off Into a
-  Dedicated Wallet), so the value the signature commits to always matches the wallet it names. Each wallet — freshly minted, split-off, or
-  consolidated — carries its own signature over its own pubkey and its own fixed amount, independent of
-  whether the wallet it split from or was merged out of had one.
+- **What is signed.** A canonical ASCII payload, chosen by the token's signature scheme (TLV type `8`):
+
+  | TLV `8` | payload |
+  |---|---|
+  | `1` | `satscash-mint:v2:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>` |
+  | `2` | `satscash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>:<recipient>:<sender>:<target_hash>:<issued_at>:<expires_at>` |
+  | absent | `lokicash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>` (legacy) |
+
+  `<hrp>` is the token's HRP, `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
+  committed amount (TLV `6`) in decimal. Binding the amount is only sound because a wallet's amount is
+  immutable for its whole life (§Transferring and Splitting a Slice, §Spinning a Slice Off Into a Dedicated
+  Wallet), so the value the signature commits to always matches the wallet it names. Each wallet — freshly
+  minted, split-off, or consolidated — carries its own signature over its own pubkey and its own fixed
+  amount, independent of whether the wallet it split from or was merged out of had one.
+
+  `<relay_hash>` is the lowercase hex `sha256` of every relay hint (TLV `1`) in encoded order, each written
+  as a 1-byte length followed by its ASCII bytes, then the 32-byte connection secret (TLV `2`):
+
+  ```
+  relay_hash = hex(SHA256(len(relay_1) ‖ relay_1 ‖ … ‖ len(relay_n) ‖ relay_n ‖ secret))
+  ```
+
+  It is what makes a token's hints and secret part of what the minter signed. Without it, a copy of a token
+  carrying other relays still verifies, and a holder trying every copy it sees would dial relays an attacker
+  chose. A verifier hashes every TLV `1` entry exactly as encoded, including one a client would skip when
+  dialing. A client choosing among copies of one bill SHOULD use only a copy whose provenance verifies;
+  a legacy token's hints are not signed.
+
+  A Hub that issues a bill's token again with different relay hints signs it afresh; a token issued earlier
+  keeps verifying. A Hub that has moved is found through its announcement's `relays` (§The Hub
+  Announcement), which a client prefers over a token's hints anyway, so signing the hints strands no bill.
+
+  Scheme `2` is used only for a bill created by a zap transfer (§Transferring and Splitting a Slice,
+  `zap_target`); every other bill is signed under scheme `1`. Its extra fields:
+  - `<recipient>` — the bill's registered identity, the transfer's `new_identity`;
+  - `<sender>` — the source slice's registered identity, whose proof authorized the transfer;
+  - both written as `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`;
+  - `<target_hash>` — the lowercase hex `sha256` of the UTF-8 `zap_target` string, so the colons of an `a`
+    coordinate cannot make the payload ambiguous;
+  - `<issued_at>` — the Hub's clock, in unix seconds, when it created the bill;
+  - `<expires_at>` — the bill's expiry in unix seconds, inherited from the source (§Eligibility and
+    Limits), or `0` if it never expires.
+
+  The Hub keeps a zap bill's `issued_at` for the bill's life, so the payload can be rebuilt. A token does
+  not carry the scheme-`2` extra fields. A verifier rebuilds them from the Cash Zap that carries the token,
+  as [NIP-CZ](./NIP-CZ.md) specifies, and a holder with only the token finds that Cash Zap by its
+  `w` tag. Until it does, the bill has no verifiable provenance.
+
+  Legacy tokens carry no type `8` and were signed over the scheme above without a relay hash. A verifier
+  checks them as before; an encoder MUST NOT produce one.
+
+  Example, scheme `1`: a `satscash` bill of 21000 millis with relay hints `wss://relay.example.com` and
+  `wss://backup.example.net`, and the connection secret `000102…1f` (the 32 bytes `0x00`–`0x1f`), has
+  `relay_hash` `487f70e79899e5f04dabdeaa62db4654d0d005db40496df0930c5e12e8d2775c`, and signs
+  `satscash-mint:v2:satscash:<wallet_pubkey_hex>:21000:487f70e79899e5f04dabdeaa62db4654d0d005db40496df0930c5e12e8d2775c`.
 - **What is actually hashed.** The signature does not cover the payload bytes directly. A minting node
   signs through its Lightning implementation's own signed-message convention, which wraps the payload
   before hashing:
@@ -2219,14 +2273,13 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   The prefix is the implementation's, not this document's, so it is chain-qualified rather than fixed:
 
-  | backend | prefix |
-  |---|---|
-  | lnd (Bitcoin) | `Lightning Signed Message:` |
-  | flnd (Flokicoin) | `Flokicoin Lightning Signed Message:` |
+  | HRP | chain | signed-message prefix |
+  |---|---|---|
+  | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
-  Bitcoin's is the unqualified original; other chains prepend their own name. A verifier MUST therefore
-  select the prefix from the token's own HRP (§The Cash Token), which is precisely what identifies the base
-  asset — `satscash1...` verifies under lnd's prefix, `lokicash1...` under flnd's. An implementation
+  Bitcoin's is the unqualified original. Other energy-backed coins list their own HRP, chain name and
+  signing prefix. A verifier MUST therefore select the prefix from the token's own HRP (§The Cash Token),
+  which is precisely what identifies the base asset. An implementation
   encountering an HRP it has no prefix for MUST treat the token as carrying no valid provenance rather than
   guessing, and MUST NOT refuse to decode it.
 
@@ -2236,13 +2289,17 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   reconstructs the signer's pubkey from the signature itself, so the minter's pubkey need NOT be carried
   separately in the token. It is a 65-byte compact signature — one recovery byte followed by 32-byte R and
   32-byte S — and TLV type `5` MUST be exactly that length (§The Cash Token). Verification is purely local:
-  recompute the payload from the token's own HRP, pubkey (`0`), and attested amount (`6`), wrap it in the
-  prefix above, hash twice, recover the signer, and compare it to whichever minter pubkey the
+  recompute the payload for the token's scheme (`8`) from its own HRP, pubkey (`0`), attested amount (`6`),
+  relay hints (`1`) and secret (`2`) — plus, for a zap bill, the Cash Zap's tags — wrap it in the prefix above, hash twice, recover the signer, and compare it to whichever minter pubkey the
   holder expects or trusts. A type-`5`/`6` pair that doesn't recover to a valid pubkey over its own payload
   MUST be treated as carrying no valid provenance — never as a hard decode failure.
 - **Required, but never a spending credential.** Every minter MUST include it, for the reason above. It
   authorizes nothing: its presence changes nothing about how `cash_redeem`/`cash_transfer` authorize a
   call, and a token whose provenance a decoder cannot verify still decodes.
+
+**A Hub MUST NOT reuse its node identity across networks.** No payload names the network, and the same seed
+gives the same node key on every network, so a test-network bill would verify as one from the main network.
+Trust is anchored on the node key, so a separate key per network is what keeps them apart.
 
 **Provenance is not custody.** A mint signature proves who *minted* a token; it does not, by itself, prove
 the funds still exist or that any given node can pay them out. Only the node currently custodying a wallet
