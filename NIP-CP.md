@@ -120,6 +120,8 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
   less than or equal to its own; an entry with a higher `v`, written after a definitive `cash_status` result,
   supersedes it (a bill returned by an in-place transfer keeps its `w`). Otherwise the highest `v` wins; on a tie,
   the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
+- **Older entries**: a wallet SHOULD fill a missing `expires_at` from `cash_status` and rewrite the entry. A reader
+  MUST ignore an entry whose `state` it does not recognise.
 - **Resync**: drop the local copy and run a full sync.
 
 ## Balance
@@ -153,3 +155,6 @@ A device MUST write a final state only from a definitive result (its own spend, 
 ## Privacy Considerations
 
 Relays see gift wraps addressed to the user at randomized times, the same as DMs, and deletions signed by one-time keys at randomized times. The number of wraps still grows with activity; a wallet MAY batch changes to hide it. Refreshing states contacts each Hub, not relays.
+
+A wrap carrying NIP-40 `expiration` is distinguishable from a DM and reveals roughly when its bill expires; a wallet
+that wants wraps indistinguishable omits it.
