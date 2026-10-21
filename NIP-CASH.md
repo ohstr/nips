@@ -100,6 +100,7 @@ and thereafter fixed on that slice and inherited unchanged across splits (§The 
 | `cash_transfer` | a recipient, proof-gated against their current registered identity | `cash_transfer` | Reassign an unredeemed slice's identity, or split part of its value off into a new cash token — see §Transferring and Splitting a Slice |
 | `cash_consolidate` | a recipient controlling every source slice, proof-gated against each | `cash_consolidate` | Combine several same-hub slices this node custodies into one new cash token — see §Consolidating Tokens |
 | `cash_status` | any holder of the Cash Wallet connection | `cash_redeem` | The bill's state: the read-only roster of every recipient, including each slice's redeem fee quote, or a tombstone for a destroyed bill — see §Cash Status |
+| `cash_lookup` | whoever authorized the original call | none | Read the outcome of a `mint_cash`, `cash_transfer` or `cash_consolidate` whose reply was lost — see §Lost Replies |
 
 `cash_redeem`, `cash_transfer`, and `cash_consolidate` each take a `proof` (or, for a `cash` slice,
 `cash_secret`) authenticating the caller against the slice they're acting on. That proof, when present,
@@ -201,7 +202,8 @@ sequenceDiagram
     {"identity_type": "pubkey", "identity_value": "<hex pubkey>", "amount_millis": 21000},
     {"identity_type": "connection_key", "identity_value": "abc123", "ia_pubkey": "<hex IA pubkey>", "amount_millis": 5000}
   ],
-  "expiry": 86400 // seconds
+  "expiry": 86400, // seconds
+  "request_id": "<32+ lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
 
@@ -212,7 +214,7 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 ```jsonc
 {
   "recipients": [
-    {"identity_type": "cash", "amount_millis": 3000}
+    {"identity_type": "cash", "identity_value": "<hex sha256 commitment the caller generated>", "amount_millis": 3000}
   ]
 }
 ```
@@ -223,7 +225,8 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   whole, never partially fulfilled: a caller cannot be left guessing which recipients were funded. Each
   entry's `identity_type` MUST be `pubkey`,
   `connection_key`, or `cash`. A `connection_key` entry MUST also carry `ia_pubkey`. A `cash` entry
-  MUST carry neither `identity_value` nor `ia_pubkey` — the Hub generates its secret (§Cash-Mode Slices). A
+  MUST carry `identity_value`, the `sha256` commitment of a secret the caller generated, and MUST NOT carry
+  `ia_pubkey` or `cash_secret` (§Creating a Cash-Mode Slice). A
   `cash` entry MUST be the request's only entry; a request mixing a `cash` entry with any other entry
   MUST be rejected in its entirety, not just that one recipient.
 - `expiry` — OPTIONAL. If omitted or zero, it MUST default to the Hub's own expiry ceiling (§Data Model) —
@@ -235,6 +238,13 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   caller would legitimately request, and a request exceeding it MUST be rejected rather than silently
   clamped. For example, a bound of 100 years stays clear of a nanosecond-resolution timestamp's
   wraparound.
+- `request_id` — OPTIONAL, and any caller that retries SHOULD send one (§Lost Replies). `mint_cash` is the
+  only value-creating method with no replay protection of its own: a `cash_transfer` or `cash_consolidate`
+  source carries a signed proof whose nonce the Hub burns, while `mint_cash`'s parameters have nothing unique
+  in them. A caller whose retry logic reads a timeout as "it failed" would mint and fund a **second** wallet.
+  A timeout does not mean the mint did not happen: the Hub's funding is durable before any response is
+  built. A request carrying `request_id` MUST also carry a NIP-47 `expiration` tag, and the Hub MUST NOT
+  commit it after that instant, checked at commit time (§Lost Replies).
 
 `min_transfer_millis` is deliberately NOT a request field here — it's a Hub-level setting (§Data Model),
 applied uniformly to every recipient of a freshly-minted wallet from the Hub's own current configuration,
@@ -247,7 +257,7 @@ separate Cash Hub with its own settings, rather than overriding it per call.
 {
   "wallet_pubkey": "<hex>",
   "pairing_uri": "nostr+walletconnect://...",
-  "cash_token": "lokicash1...",
+  "cash_token": "satscash1...",
   "expires_at": 1720000000, // omitted entirely if this wallet never expires — see §Data Model and this
                              // section's own Processing Algorithm, step 4
   "recipients": [
@@ -267,42 +277,15 @@ tempting response is to emit `""` and rely on `pairing_uri` still being valid. T
 that prefers the token, or that treats the field's presence as meaning it is usable, receives something that
 looks like a credential and is not, with nothing indicating which of the two failed. A Hub that cannot
 produce the token MUST fail the mint, and SHOULD build the token before committing any funds so that the
-failure costs the caller nothing. This matters most for a single-`cash` recipient, whose secret is shown
-exactly once: a response that silently carries half a credential can lose that value irrecoverably.
+failure costs the caller nothing.
 
-For the single-`cash`-recipient request shape above, the response's `recipients` entry instead carries
-the generated secret:
+For the single-`cash`-recipient request shape above, the response's `recipients` entry echoes the caller's
+commitment. It never carries a secret: the caller generated it and already holds it (§Creating a Cash-Mode
+Slice).
 
 ```jsonc
-{"identity_type": "cash", "cash_secret": "<opaque, high-entropy, shown once>", "amount_millis": 3000}
+{"identity_type": "cash", "identity_value": "<the caller's commitment>", "amount_millis": 3000}
 ```
-
-A `cash` recipient's `cash_secret` appears in this response and nowhere else, ever (§Cash-Mode Slices).
-
-#### `idempotency_key`
-
-**OPTIONAL, and any caller that retries SHOULD send one.**
-
-`mint_cash` is the only value-creating method with no replay protection of its own. A
-`cash_transfer` or `cash_consolidate` source carries a signed proof whose nonce the Hub burns, so a
-resend is refused by construction; `mint_cash`'s parameters are plain identity and amount fields with
-nothing unique in them. A caller whose retry logic reads a timeout as "it failed" therefore resends
-the same logical request and the Hub mints and funds a **second** wallet.
-
-A timeout does not mean the mint did not happen. The Hub's funding step is complete and durable
-before any response is built, so the usual case is a response the caller never saw rather than work
-the Hub never did.
-
-The key is scoped to the Cash Hub connection that received it. One node may host several Cash Hubs, each
-its own ledger, and one Hub's key MUST NOT affect another's. It is opaque to the Hub, which MUST NOT derive meaning from its contents.
-
-**A repeat MUST be refused, not answered with the original result.** This is a deliberate limit
-rather than an implementation shortcut: a `cash`-mode mint's secret exists only in the reply the
-caller missed, because the Hub keeps a one-way commitment and never the secret (§Cash-Mode Slices),
-so there is nothing for it to replay. A Hub MUST NOT store recipients' secrets in order to make
-replay possible — that trades a double-mint for a worse exposure. What an `idempotency_key` buys is
-that the money is not created twice; recovering a lost `cash_secret` is not something this protocol
-can offer, and a caller that cannot tolerate losing one SHOULD mint to a `pubkey` recipient instead.
 
 ### Processing Algorithm
 
@@ -319,29 +302,26 @@ On receiving `mint_cash`, the Hub MUST, in order:
    request otherwise (§Cash-Mode Slices, §Redemption Metadata).
 3. For each `connection_key`-mode recipient, verify its `ia_pubkey` is on the wallet owner's trusted
    Identity Authority allowlist right now. An untrusted or unknown IA MUST reject the entire request, not
-   just that recipient. For each `cash`-mode recipient, generate its secret now, with enough entropy
-   that guessing it is infeasible (§Cash-Mode Slices). A request carrying a `cash_secret` on any recipient
-   MUST be refused whole, not have the field ignored — the Hub is the only party that can vouch for the
-   entropy behind it.
+   just that recipient. For each `cash`-mode recipient, verify `identity_value` is a well-formed
+   commitment (§Cash-Mode Slices). A request carrying a `cash_secret` on any recipient MUST be refused
+   whole, not have the field ignored: a raw secret never belongs in a request.
 4. Resolve `expiry`. If the Hub's own expiry ceiling is "never," an omitted/zero `expiry` here MUST produce
    a Cash Wallet with no expiry at all — never a zero-duration, already-expired one — and any explicit,
    positive `expiry` the caller does supply MUST be honored exactly, since there's no Hub-configured ceiling
    to check it against, subject only to the implementation's own representational bound (§Minting, `expiry`). Otherwise (the Hub's own ceiling is a real, positive value): if omitted or zero, set it to the
    Hub's own expiry ceiling; otherwise it MUST NOT exceed that ceiling.
 5. Verify the Hub's own available balance is at least the sum of all recipients' amounts.
-6. If the request carries an `idempotency_key`, and this Hub has already served one with the same
-   key, **the Hub MUST refuse rather than mint again**, and SHOULD name the Cash Wallet that key
-   already produced. Checked here, after validation and before any state is created: a request that
-   was never going to succeed has nothing to be idempotent about, and recording a key for a mint
-   that did not happen would lock out the caller's legitimate retry.
+6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed, and
+   that the `request_id` is unused (§Lost Replies). **A used `request_id` MUST be refused rather than mint
+   again.** Checked here, after validation and before any state is created: a request that was never going
+   to succeed records nothing, so it cannot lock out the caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis` and `redeem_fee_ppm` defaults (§Data Model) and a one-way commitment of
    the secret for `cash`-mode slices, never the secret itself — and perform a single internal transfer
    from the Hub to the new connection for the full sum. This MUST be atomic: a failure at any point after
-   this step MUST leave no partial state. If an `idempotency_key` was supplied, record it against the
-   wallet now, in the same atomic step.
-8. Return the pairing connection string and the resolved recipient list, with each `cash` slice's
-   plaintext secret included this one time.
+   this step MUST leave no partial state. If a `request_id` was supplied, write its record (§Lost Replies)
+   now, in the same atomic step, checking `request_id` and `expiration` again as it commits.
+8. Return the pairing connection string and the resolved recipient list.
 
 A request that fails any check above MUST be rejected before step 7. No partial wallet, slice, or
 transfer is ever observable from a rejected request.
@@ -408,7 +388,7 @@ kind-23198 proof.
 - `attestation_event` — REQUIRED additionally when the slice's identity is `connection_key`: a
   currently-trusted Identity Authority's attestation (§Terminology).
 - `cash_secret` — REQUIRED instead of all of the above when the slice's identity is `cash`
-  (§Cash-Mode Slices). It is the whole proof, which is why §Cash-Mode Slices requires Hub-generated entropy.
+  (§Cash-Mode Slices). It is the whole proof, which is why its entropy matters (§Creating a Cash-Mode Slice).
 
 ### Processing Algorithm
 
@@ -701,7 +681,8 @@ omission is information-free by design, so it is the single answer a Hub gives f
 hold, a proof that did not verify, a possession proof it could not confirm, and a method it will not
 serve. A client MUST NOT resend an omitted `cash_redeem`, `cash_transfer` or `cash_consolidate` blind —
 it cannot be told apart from a request that WAS applied and whose reply was lost, so resending may pay
-twice. `cash_status` is safe to retry, since it moves nothing.
+twice. A client that sent a `request_id` asks for the outcome with `cash_lookup` instead (§Lost Replies).
+`cash_status` and `cash_lookup` are safe to retry, since they move nothing.
 
 ## Transferring and Splitting a Slice (`cash_transfer`)
 
@@ -809,7 +790,8 @@ sequenceDiagram
                         // remainder is not left behind on it, but re-emerges as its own brand-new
                         // dedicated wallet alongside the carved-off one — see this section's
                         // own "Split off a piece" description above.
-  "zap_target": "<event id hex, or kind:pubkey:d coordinate>" // OPTIONAL — makes this a zap transfer
+  "zap_target": "<event id hex, or kind:pubkey:d coordinate>", // OPTIONAL — makes this a zap transfer
+  "request_id": "<32+ lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
 
@@ -856,6 +838,7 @@ sequenceDiagram
   (§Mint Provenance). When present, the source slice MUST be identity-bound (`pubkey` or `connection_key`,
   never `cash`), and `new_identity` MUST be `pubkey` or `connection_key`. Like every param, it is bound by
   the item proof's `ph` (§Item Proofs).
+- `request_id` — OPTIONAL (§Lost Replies). A used `request_id` MUST be refused.
 
 ### Response
 
@@ -868,7 +851,7 @@ sequenceDiagram
   // for a full transfer that spins off ONE new wallet (cash mode on a multi-recipient-history
   // wallet), additionally:
   //   "new_wallet_pubkey": "<the new wallet's WalletPubkey, in the clear>",
-  //   "new_wallet_token": "<lokicash1... token, NIP-44 encrypted — see below>"
+  //   "new_wallet_token": "<satscash1... token, NIP-44 encrypted — see below>"
   // for a PARTIAL split, which spins off TWO new wallets, additionally:
   //   "remaining_amount_millis": 15000,   // what the caller keeps, now in its own new wallet
   //   "new_wallet_pubkey":      "<clear>",  "new_wallet_token":      "<encrypted>", // the carved piece -> new_identity (same field names as the single-wallet spin-off above)
@@ -926,6 +909,10 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
 7. Return the slice's resulting amount together with its new registered identity (in-place), or the new
    wallet connection(s) — one for a full-transfer spin-off, two for a partial split — see the Response
    format above and §Spinning a Slice Off Into a Dedicated Wallet.
+
+If the request carries a `request_id`, the Hub refuses a used one before step 5 or 6, and writes its record
+(§Lost Replies) in the same atomic step as step 5's reassignment or step 6's source claim. A rollback that
+restores the source claim removes the record with it.
 
 A request that fails step 1, 2, 3, or 4 MUST be rejected before step 5 or 6. A rejected `cash_transfer`
 never leaves a slice partially transferred, partially split, or claimed.
@@ -1135,6 +1122,7 @@ sequenceDiagram
      "attestation_event": "{...}"}         // connection_key source only, kind-35522
   ],
   "new_identity": {"identity_type": "pubkey", "identity_value": "<hex pubkey>"},
+  "request_id": "<32+ lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
 
@@ -1156,6 +1144,7 @@ sequenceDiagram
   for `connection_key`; a caller-supplied, never wallet-minted, commitment for `cash` (§Cash-Mode Slices).
   The merged wallet is owned by this identity; its token is delivered to the caller, who hands it on —
   see Response below for how delivery differs by type.
+- `request_id` — OPTIONAL (§Lost Replies). A used `request_id` MUST be refused.
 
 ### Response
 
@@ -1163,7 +1152,7 @@ sequenceDiagram
 {
   "amount_millis": 25000,                       // the sum of every source
   "new_wallet_pubkey": "<clear>",
-  "new_wallet_token": "<lokicash1... — encoding depends on new_identity's type, see below>",
+  "new_wallet_token": "<satscash1... — encoding depends on new_identity's type, see below>",
   "expires_at": 1720000000                      // earliest expiry among the sources; omitted if all never expire
 }
 ```
@@ -1207,8 +1196,100 @@ On receiving `cash_consolidate`, the node MUST, in order:
    source's signer) for a `pubkey` `new_identity` (§Spinning a Slice Off), in the clear for
    `connection_key`/`cash` (see Response above).
 
+If the request carries a `request_id`, the node refuses a used one before step 7, and writes its record
+(§Lost Replies) in step 7's atomic claim. A rollback that restores the claims removes the record with it.
+
 A request that fails steps 1–6 MUST be rejected before step 7. A rejected `cash_consolidate` never leaves
 any source consumed or partially merged.
+
+## Lost Replies
+
+A call that creates a bill — `mint_cash`, a spin-off `cash_transfer`, a `cash_consolidate` — returns the new
+bill's token only in its reply. A reply lost to a crash or a dropped relay strands that bill, and resending
+the call does not help: a transfer's source is already claimed, and a resent mint would mint again. A
+`request_id` on the call, and a `cash_lookup` by it afterwards, recovers the reply.
+
+### `request_id`
+
+`mint_cash`, `cash_transfer` and `cash_consolidate` take an OPTIONAL `request_id`: lowercase hex, at least
+16 bytes (32 hex characters) from a CSPRNG, fresh for every call. A caller that sends one SHOULD first save
+it durably, with the call and any cash secret it generated for it (§Security Considerations for Cash-Mode
+Slices), so the record survives a crash between sending and the reply.
+
+**A repeat MUST be refused, never applied twice.** A call carrying a `request_id` already used on this node,
+by any call to any of its Cash Hubs, MUST be refused, whether or not the parameters match. The outcome of the
+first call is read with `cash_lookup`, not by resending it.
+
+A Hub MUST NOT commit a call carrying a `request_id` after its deadline: the envelope's `not_after` on the
+private transport (§Envelopes), or the NIP-47 `expiration` that `mint_cash` then requires (§Minting Cash).
+This is checked when the call commits, not only when it arrives.
+
+### The Record
+
+In the same atomic step that commits the call, the Hub records against its `request_id`:
+
+- the call's target: the bill its item named, or for `mint_cash` the Cash Hub connection;
+- its authorizer: the signer of the slice proof (the first source's, for `cash_consolidate`), the cash
+  commitment for a cash-mode source, or for `mint_cash` the Cash Hub connection's client pubkey;
+- the bills it created;
+- whatever it needs to rebuild their tokens exactly as issued and cannot re-derive — at least the relay
+  hints used, which every signature covers (§Mint Provenance), and each zap bill's `issued_at`.
+
+Connection secrets are re-derived (§The Pairing Connection), so the Hub stores no secret. It MAY also store
+the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
+not MUST store them.
+
+### Looking Up a Call (`cash_lookup`)
+
+`cash_lookup` is served on the private transport only (§The Private Transport). Its item names the original
+call's target, which the Hub MUST serve even if it has since destroyed it; its bill proof is signed with
+that target's connection secret, as for any item (§Bill Proofs).
+
+```jsonc
+{"request_id": "<hex>"}
+```
+
+The item proof MUST be signed by the recorded authorizer. When the authorizer is a cash commitment, the item
+omits `proof` and carries the matching `cash_secret` in `params`, as a bearer item does (§Bearer Items).
+Anything else — another signer, another target, a secret that does not match — MUST be omitted. NIP-CW
+defines a second key, `connection_pubkey`, for a lost join reply (§Private Join in NIP-CW); a lookup carries
+exactly one of the two.
+
+The answer is one of:
+
+```jsonc
+{"status": "done", "result": { /* the original response */ }}
+{"status": "pending", "retry_after": 1720000060}
+{"status": "unknown"}
+```
+
+- **`done`** — the call committed. `result` is the original response, rebuilt: the same fields and the same
+  tokens byte for byte, each encrypted to the same keys as originally (§Delivery — Nested Encryption, Not a
+  New Channel). Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
+  (§Answering About a Destroyed Bill) in place of its token, never as a token.
+- **`pending`** — the Hub holds the call but has not committed or refused it yet. `retry_after` is no later
+  than the call's deadline.
+- **`unknown`** — the call was not applied and never will be. Either it reached its deadline uncommitted,
+  or the Hub has no record of the `request_id` at all. In the second case the Hub MUST first record the
+  `request_id` as used, atomically, so that a copy of the original arriving later is refused.
+
+**Finality.** `done` and `unknown` are final. A client MUST NOT resend the original after either; after
+`unknown` it MAY place the call again with a new `request_id`. A client MUST NOT read an omitted
+`cash_lookup` as `unknown`.
+
+The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
+authorized the call, and a token is not a spending credential (§The Cash Token).
+
+**Retention.** The Hub keeps the full record while any bill the call created is live or inside its tombstone
+window. After that it MAY drop all but the `request_id`, the target and the authorizer, which it MUST keep
+permanently, and then answers `done` without `result`. A forgotten `request_id` would turn a late lookup into
+`unknown` and, for `mint_cash`, let the original be applied as a second mint.
+
+### Support
+
+A Hub that serves `cash_lookup` lists it in `private_methods` (§Scope Surface). A client SHOULD send a
+`request_id` only to such a Hub; otherwise it behaves as without one, and a lost reply needs the Hub
+operator.
 
 ## Cash-Mode Slices
 
@@ -1235,24 +1316,26 @@ recipient, not merely one still-unclaimed one, for the reasons §Transferring an
 multi-recipient wallet's slice, though: it always has the split path available instead, whether it wants
 to move all of its value into a cash note or just part of it.
 
-Unlike `mint_cash`'s cash-mode recipient, `cash_transfer`'s cash-mode target does NOT get a
-wallet-generated secret. The caller supplies the commitment themselves — an implementation MUST NOT mint
-one and return it in the `cash_transfer` response. This is a deliberate, load-bearing difference from
-creation, not an oversight: see §Security Considerations for why.
+No entry point generates a cash secret for the caller. `mint_cash`, `cash_transfer` and `cash_consolidate`
+all take a commitment the caller supplies — an implementation MUST NOT mint a secret and return it in any
+response. See §Security Considerations for why.
 
 ### Creating a Cash-Mode Slice
 
-A `cash`-mode entry in `mint_cash`'s `recipients[]` (§Minting Cash) carries no
-`identity_value` and no `ia_pubkey` — only an amount. It MUST also be the request's only entry: a cash-mode
+A `cash`-mode entry in `mint_cash`'s `recipients[]` (§Minting Cash) carries an amount and an
+`identity_value`: the `sha256` commitment of a secret the caller generated, exactly as a `cash_transfer`
+cash-mode target does. It carries no `ia_pubkey`. It MUST also be the request's only entry: a cash-mode
 slice's wallet is always single-recipient, never mixed with an identity-bound slice or a second cash-mode
 slice (§Data Model, §Redemption Metadata) — mixing them would let a co-recipient on the same shared
-connection decrypt and steal a cash secret the moment it's used (§Security Considerations). The Hub MUST
-generate the slice's `cash_secret` itself, with enough entropy that guessing it is infeasible; a request
-carrying a `cash_secret` MUST be refused, not have the field ignored, since the caller has no way to prove
-its entropy. The
-response's matching entry MUST carry that `cash_secret` in plaintext, exactly once (§Minting Cash,
-Response). There MUST be no way to retrieve a cash-mode slice's secret again after that response.
-Losing it is equivalent to losing the funds — same as losing any cash-mode ecash note.
+connection decrypt and steal a cash secret the moment it's used (§Security Considerations). A request
+carrying a raw `cash_secret` MUST be refused, not have the field ignored.
+
+The caller SHOULD generate the secret from a CSPRNG with at least 256 bits of entropy, since guessing it is
+the only attack on a cash-mode slice. The risk of a weak secret falls on the caller who chose it, and a
+recipient can re-key the slice to a secret of their own with `cash_transfer`. The Hub never learns the
+secret, so nothing can retrieve it: losing it is equivalent to losing the funds — same as losing any
+cash-mode ecash note. A caller-generated secret is what lets `cash_lookup` recover a lost mint reply (§Lost
+Replies): the token comes back from the Hub, and the secret was never in the reply.
 
 ### Redeeming a Cash-Mode Slice
 
@@ -1264,8 +1347,8 @@ Losing it is equivalent to losing the funds — same as losing any cash-mode eca
 
 No Identity Authority check, no signature to verify — presenting the correct secret is the entire proof.
 The processing algorithm in §Redeeming a Slice applies unchanged; step 2 becomes a direct secret comparison.
-This `cash_secret` is the value from §Creating a Cash-Mode Slice's mint response — never the token's own
-type-`2` connection secret; see §The Cash Token's Redemption Metadata for why the two are never
+This `cash_secret` is the secret behind the slice's commitment (§Creating a Cash-Mode Slice) — never the
+token's own type-`2` connection secret; see §The Cash Token's Redemption Metadata for why the two are never
 interchangeable.
 
 ### Presenting a Cash-Mode Slice as One String
@@ -1313,22 +1396,24 @@ relay learns.
 
 A Hub MUST serve `cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate` over the
 private transport, and MUST NOT serve them over kind 23194. A request for one of them on the
-standard transport MUST be refused with `NOT_IMPLEMENTED`.
+standard transport MUST be refused with `NOT_IMPLEMENTED`. The same holds for `cash_lookup`
+(§Lost Replies), for a Hub that serves it.
 
 Kind 23194 is not going away — it carries the whole NWC surface. What is removed from it is
-those four methods:
+those methods:
 
 | method | transport |
 |---|---|
-| `cash_status`, `cash_redeem`, `cash_transfer`, `cash_consolidate` | private ONLY |
+| `cash_status`, `cash_redeem`, `cash_transfer`, `cash_consolidate`, `cash_lookup` | private ONLY |
 | `mint_cash` | standard ONLY (see below) |
 | `create_circle_wallet` | either |
 | `get_balance`, `pay_invoice`, `get_info`, … | standard, unchanged |
 
-`mint_cash` stays on the standard transport and MUST NOT be offered on the private one. It has
-no retry idempotency, and that is precisely what makes the private transport's replay set safe
-to define as it is; it is also the Hub owner's own method on the Hub's own connection, where
-the linkability the private transport exists to remove does not arise. `create_circle_wallet`
+`mint_cash` stays on the standard transport and MUST NOT be offered on the private one. Its only
+retry guard is an optional `request_id` (§Lost Replies), so the private transport's replay set
+alone would not stop a double mint; it is also the Hub owner's own method on the Hub's own
+connection, where the linkability the private transport exists to remove does not arise. Its
+`cash_lookup` is a read, and travels on the private transport like the others. `create_circle_wallet`
 acts on a HUB rather than a bill, so there is no bill pubkey to leak and either transport is
 acceptable.
 
@@ -1898,8 +1983,8 @@ forever, and — worse — one that makes a genuinely complete answer look parti
 declare `total: 2`, send the complete genuine result in chunk 1, and never send chunk 2. An
 implementation that checks the transport error before the item's own outcome throws away the
 answer it was given — and for a spun-off wallet that answer contains the only copy of the new
-bill's token, which no one can recover afterwards. Incompleteness and a decided item outcome are
-independent facts, and a client MUST surface both.
+bill's token, which, without a `request_id` (§Lost Replies), no one can recover afterwards.
+Incompleteness and a decided item outcome are independent facts, and a client MUST surface both.
 
 **A client MUST bound its wait for a reply by the request envelope's own `not_after`.** Past that
 instant the Hub is contractually finished with the envelope, so nothing further is coming; a
@@ -1910,15 +1995,17 @@ envelope.** Collecting it and reporting the items as merely unanswered discards 
 makes a spend safe to send again, converting a retryable refusal into a permanent
 indeterminacy — the state a client is told never to resolve by retrying. This is safe to act on
 because every bill method carries its own idempotency guard (§Redemption, §Transferring and
-Splitting a Slice): a second application finds the slice already claimed. **A Hub method added
+Splitting a Slice): a second application finds the slice already claimed, and `cash_lookup` moves
+nothing. **A Hub method added
 without such a guard MUST NOT be served over this transport**, or this rule becomes a way to
 induce a double application.
 
 ### Which Methods a Hub Serves
 
 A Hub MUST serve over this transport only the methods that operate on a **bill**:
-`cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate`. NIP-CW's
-`create_circle_wallet` MAY also be served here (§Private Join in NIP-CW).
+`cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate`, plus `cash_lookup`, which reads
+the outcome of one (§Lost Replies). NIP-CW's `create_circle_wallet` MAY also be served here
+(§Private Join in NIP-CW).
 
 **This MUST be an explicit allowlist, not a reuse of the Hub's ordinary method dispatch.** The
 distinction is a security boundary, not a style preference. A caller on this transport
@@ -1929,8 +2016,8 @@ reachable from a bearer key: a privilege escalation that arrives silently, as a 
 feature nobody asked for.
 
 `mint_cash` MUST NOT be served here. It is the Hub owner's method, gated by the Hub's own
-scope on the Hub's own connection, and it has no retry idempotency — a Hub whose replay
-memory is bounded (as above) could double-mint on a caller's retry. An item naming a method
+scope on the Hub's own connection, and its `request_id` is optional — without one, a Hub whose
+replay memory is bounded (as above) could double-mint on a caller's retry. An item naming a method
 the Hub does not serve MUST be omitted, exactly like an unverifiable one, so the allowlist
 itself discloses nothing.
 
@@ -1955,10 +2042,10 @@ secret is the opposite. It *is* the entire security of that slice. Storing it in
 access to that storage into a theft of every unredeemed cash-mode slice on the Hub.
 
 **A caller that generates a cash-mode secret MUST persist it before placing the call that commits it.**
-This is the mirror image of the rule above, and it binds the *caller* rather than the Hub. For a
-`cash_transfer`/`cash_consolidate` cash-mode target the caller supplies the commitment itself
-(§Cash-Mode Slices), so only a one-way commitment ever crosses the wire and the Hub never learns or returns
-the preimage. Between the request leaving and the caller recording it, that secret therefore exists in
+This is the mirror image of the rule above, and it binds the *caller* rather than the Hub. For every
+cash-mode target — `mint_cash`, `cash_transfer`, `cash_consolidate` — the caller supplies the commitment
+itself (§Cash-Mode Slices), so only a one-way commitment ever crosses the wire and the Hub never learns
+or returns the preimage. Between the request leaving and the caller recording it, that secret therefore exists in
 exactly one place: the caller's own volatile memory. If the caller dies in that window after the Hub has
 committed, the slice is real, funded and unspendable **by anyone** — the Hub cannot help, because it never
 had the preimage, and there is no protocol operation that can recover or replace it. Nothing about this is
@@ -1967,30 +2054,23 @@ forever. A caller MUST therefore write the secret to durable storage *before* th
 after the response comes back, and MUST NOT treat a successful response as the moment the secret becomes
 worth keeping.
 
-Persisting it is **necessary but not sufficient**, and an implementation MUST NOT present it as a complete
-recovery path. The destination's token is carried only in the response, so a caller holding a written-ahead
-secret for a call whose reply it never saw still needs the Hub's cooperation to learn which wallet that
-secret opens. An implementation SHOULD therefore persist the secret against a record identifying the call it
-belonged to, and SHOULD surface any such unreconciled secret to its user rather than leaving it where only
-the implementation can see it — a secret stored where nobody will look protects nothing. What the rule buys
-is the difference between a loss that is recoverable with the Hub's help and one that is not recoverable at
-all.
-
-The same hazard runs the other way for `mint_cash`, and is inherent rather than fixable by a caller: there
-the Hub generates the secret and the response is the only copy that will ever exist
-(§Creating a Cash-Mode Slice), so a reply lost in transit destroys it with no recourse for either side. A
-caller cannot write ahead what it has not yet been told. Implementations should understand that asymmetry as
-the reason `cash_transfer` deliberately does **not** let the Hub mint the target's secret.
+The destination's token is carried only in the response. A caller SHOULD therefore persist the secret
+together with the call's `request_id` (§Lost Replies): with both, a lost reply is recovered by `cash_lookup`,
+which returns the token the secret opens. Without a `request_id`, or from a Hub that does not serve
+`cash_lookup`, the written-ahead secret alone is **not** a complete recovery path, and an implementation
+MUST NOT present it as one: learning which wallet it opens then needs the Hub operator. Either way, an
+implementation SHOULD surface any unreconciled secret to its user rather than leaving it where only the
+implementation can see it — a secret stored where nobody will look protects nothing.
 
 **A cash-mode redemption MUST still be atomic and race-safe**, exactly like an identity-bound one (§Redeeming
 a Slice, step 4). First-redeem-wins is intentional for a cash-mode slice — that's the whole point — but two
 concurrent redemptions against the same secret MUST NOT both succeed.
 
 **Guessing MUST be made infeasible, not just unlikely.** A cash-mode slice has no signature to forge, so an
-attacker's only path is guessing the secret. Sufficient entropy at generation is necessary but not
-sufficient on its own; an implementation SHOULD also rate-limit or back off repeated failed
-`cash_redeem` attempts against the same wallet, the same way it would for any other credential-guessing
-surface.
+attacker's only path is guessing the secret. Sufficient entropy at generation — at least 256 bits from a
+CSPRNG (§Creating a Cash-Mode Slice) — is necessary but not sufficient on its own; an implementation
+SHOULD also rate-limit or back off repeated failed `cash_redeem` attempts against the same wallet, the same
+way it would for any other credential-guessing surface.
 
 **Rate limits are caller-visible and belong in both directions.** A Hub SHOULD bound `mint_cash` per
 calling connection, since minting commits real balance and a runaway caller can exhaust a Hub's funds as
@@ -2163,11 +2243,11 @@ only the NWC connection secret (§The Pairing Connection) — it lets anyone hol
 wallet and call read-only methods like `cash_status`, nothing more; mere possession of the
 connection is explicitly not a spending credential (§The Cash Token's own opening paragraph). The actual
 spending credential for a cash-mode slice is a separate, independently-generated
-value that exists *only* in `mint_cash`'s own response, returned exactly once (§Creating a Cash-mode
-Slice) — it is never encoded in this token and cannot be derived from it. A client presenting this
+value that only its caller ever held (§Creating a Cash-Mode Slice) — it is never encoded in this token
+and cannot be derived from it. A client presenting this
 token's type-`2` secret as `cash_secret` in a `cash_redeem`/`cash_transfer` call MUST expect
 `NOT_FOUND`, not success. Handing a cash-mode slice to its recipient therefore always means conveying two
-separate values out of band together — this token, and the `cash_secret` from the mint response — never
+separate values out of band together — this token, and the `cash_secret` — never
 one alone. See §Cash-Mode Slices → Presenting a Cash-Mode Slice as One String for how an implementation may
 package that handoff for the recipient.
 
@@ -2421,8 +2501,8 @@ A Cash Wallet connection MUST be granted only:
 - `get_balance`
 - `get_info` (an always-granted handshake method under NIP-47)
 
-**`get_info` MUST NOT advertise the four bill methods.** It answers "what may I call on THIS
-connection", and a connection is kind 23194, where those four are refused (§It is the ONLY transport for
+**`get_info` MUST NOT advertise the four bill methods, nor `cash_lookup`.** It answers "what may I call on
+THIS connection", and a connection is kind 23194, where those are refused (§It is the ONLY transport for
 the bill methods). Advertising them promises a caller something the transport will not do, and sends every
 client that reads `methods` down a path that cannot work.
 
@@ -2437,7 +2517,7 @@ connection does not itself serve:
 ```jsonc
 {
   "methods": ["get_balance", "get_info"],
-  "private_methods": ["cash_consolidate", "cash_redeem", "cash_status", "cash_transfer"]
+  "private_methods": ["cash_consolidate", "cash_lookup", "cash_redeem", "cash_status", "cash_transfer"]
 }
 ```
 
@@ -2452,6 +2532,11 @@ this particular bill does not have. The two lists MUST NOT overlap.
 
 `private_methods` is **informational**. A Hub still checks the same scopes per item on the private
 transport, and a client MUST NOT read a method's presence here as permission to call it.
+
+`cash_lookup` (§Lost Replies) has no scope: it is authorized by the original call's authorizer, and returns
+only what that call's reply carried. A Hub that serves it MUST list it in `private_methods` on every Cash
+Wallet connection and on its Cash Hub connection, and this listing is how a client learns the Hub supports
+`request_id` at all. A client that does not find it falls back to calling without a `request_id`.
 
 Note this concerns advertising only. The scopes above still GRANT these methods — an implementation that
 dropped the scopes instead would refuse every real call while appearing to satisfy this rule.
@@ -2657,12 +2742,13 @@ sufficient to succeed with one.
 The paragraph above is usually read as being about requests, but the shared connection's decryptability is
 symmetric: every recipient who can decrypt a request on this connection can equally decrypt every
 *response* the wallet ever sends on it, including responses to a different recipient's own call. This is
-why a cash-mode slice's secret is always caller-generated, never wallet-generated-and-returned, at every
-entry point that shares this connection: `mint_cash` mints a cash-mode recipient's cash over the Hub's
-own separate, single-owner connection, so returning a fresh secret there is safe — but `cash_transfer`
-(§Transferring and Splitting a Slice) is called *over the shared cash_wallet connection itself*, so its
-cash-mode target's `identity_value` MUST be a commitment the caller already generated and kept, never a
-secret the implementation mints and hands back in that response. An implementation that generates a
+why a cash-mode slice's secret is always caller-generated, never wallet-generated-and-returned:
+`cash_transfer` (§Transferring and Splitting a Slice) is called *over the shared cash_wallet connection
+itself*, so its cash-mode target's `identity_value` MUST be a commitment the caller already generated and
+kept, never a secret the implementation mints and hands back in that response. `mint_cash` runs over the
+Hub's own single-owner connection, where a returned secret would not leak, but it takes a caller commitment
+too: a reply that carried the only copy of a secret could never be recovered by `cash_lookup` (§Lost
+Replies). An implementation that generates a
 cash secret at `cash_transfer` time and returns it lets any other current or former holder of the shared
 connection — including a recipient who already redeemed their own, unrelated slice — decrypt that response
 and redeem the transferred slice before its intended holder ever sees the secret.
@@ -2875,6 +2961,9 @@ recipients to stay unlinkable from each other, not just from third parties, SHOU
 connection through channels that don't also reveal who else received it.
 
 A zap transfer tells the minting Hub which event is being zapped. The Cash Zap makes that public anyway.
+
+A `request_id` links a call to the bills it created, but only for the Hub, which knows that link already.
+On the private transport a relay sees neither the call nor its lookup in the clear.
 
 A token carrying mint provenance (§Mint Provenance) additionally exposes, in the clear, its **minter node
 pubkey** (recoverable from the signature) and its **denomination** (the attested amount, TLV type `6`).
