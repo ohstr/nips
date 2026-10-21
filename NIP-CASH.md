@@ -314,8 +314,9 @@ On receiving `mint_cash`, the Hub MUST, in order:
 5. Verify the Hub's own available balance is at least the sum of all recipients' amounts.
 6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed and
    lies within `max_request_age`, and that the `request_id` is unused (§Lost Replies). **A used
-   `request_id` MUST be refused rather than mint again.** Checked here, after validation and before any state is created: a request that was never going
-   to succeed records nothing, so it cannot lock out the caller's legitimate retry.
+   `request_id` MUST be refused rather than mint again.** Checked here, after validation and before any
+   state is created: a request that was never going to succeed records nothing, so it cannot lock out the
+   caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis` and `redeem_fee_ppm` defaults (§Data Model) and a one-way commitment of
    the secret for `cash`-mode slices, never the secret itself — and perform a single internal transfer
@@ -739,7 +740,8 @@ An implementation MUST determine the outcome as follows, in this order:
 
 A **spin-off** is any outcome that lands value in brand-new dedicated wallets rather than reassigning in
 place: a partial split (two wallets), a full transfer to `cash` on a multi-recipient-history wallet (one
-wallet), or a zap transfer (one wallet, or two for a partial one). "Split" on its own always means the partial split.
+wallet), or a zap transfer (one wallet, or two for a partial one). "Split" on its own always means the
+partial split.
 
 ```mermaid
 sequenceDiagram
@@ -1298,17 +1300,20 @@ The answer is one of:
   (§Answering About a Destroyed Bill) in place of its token, never as a token.
 - **`pending`** — the call may still commit. Either the Hub holds it and has not finished it, or it has no
   record and `deadline` has not passed. `retry_after` is the deadline: the recorded one, or the lookup's
-  `deadline`, which the Hub treats as at most `H` from now.
-- **`unknown`** — the call was not applied and never will be: it reached its deadline uncommitted, or the Hub
-  has no record and `deadline` has passed. A copy of the original arriving later is refused, because the
-  Hub never commits a call past its own deadline.
+  `deadline`, which the Hub treats as at most `H` from now — or, for a join lookup by `connection_pubkey`, at
+  most the kind-23199 proof's freshness window from now (§Lost Join Reply in NIP-CW).
+- **`unknown`** — the call was not applied and never will be, as long as a record it left would still be
+  retained (§The Record): it reached its deadline uncommitted, or the Hub has no record and `deadline` has
+  passed. A copy of the original arriving later is refused, because the Hub never commits a call past its own
+  deadline.
 
 A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
 misstates `deadline` only misleads itself.
 
 **Finality.** `done` and `unknown` are final. A client MUST NOT resend the original after either; after
 `unknown` it MAY place the call again with a new `request_id`. A client MUST NOT read an omitted
-`cash_lookup` as `unknown`.
+`cash_lookup` as `unknown`. Once the record is past its retention (§The Record), a late `unknown` no longer
+proves the call was not applied.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token).
@@ -2076,14 +2081,13 @@ access to that storage into a theft of every unredeemed cash-mode slice on the H
 This is the mirror image of the rule above, and it binds the *caller* rather than the Hub. For every
 cash-mode target — `mint_cash`, `cash_transfer`, `cash_consolidate` — the caller supplies the commitment
 itself (§Cash-Mode Slices), so only a one-way commitment ever crosses the wire and the Hub never learns
-or returns the preimage. Between the request leaving and the caller recording it, that secret therefore exists in
-exactly one place: the caller's own volatile memory. If the caller dies in that window after the Hub has
-committed, the slice is real, funded and unspendable **by anyone** — the Hub cannot help, because it never
-had the preimage, and there is no protocol operation that can recover or replace it. Nothing about this is
-detectable afterwards: the Hub's state is perfectly consistent and the funds are simply unreachable
-forever. A caller MUST therefore write the secret to durable storage *before* the request goes out, not
-after the response comes back, and MUST NOT treat a successful response as the moment the secret becomes
-worth keeping.
+or returns the preimage. Between the request leaving and the caller recording it, that secret therefore exists
+in exactly one place: the caller's own volatile memory. If the caller dies in that window after the Hub has
+committed, the slice is real, funded and unspendable **by anyone** — the Hub cannot help, because it never had
+the preimage, and there is no protocol operation that can recover or replace it. Nothing about this is
+detectable afterwards: the Hub's state is perfectly consistent and the funds are simply unreachable forever. A
+caller MUST therefore write the secret to durable storage *before* the request goes out, not after the
+response comes back, and MUST NOT treat a successful response as the moment the secret becomes worth keeping.
 
 The destination's token is carried only in the response. A caller SHOULD therefore persist the secret
 together with the call's `request_id` (§Lost Replies): with both, a lost reply is recovered by `cash_lookup`,
@@ -2152,9 +2156,9 @@ Type numbers `0` and `1` carry the same meaning NIP-19 already gives them for `n
 (`0` is the token's primary identifier, `1` is a relay hint); types `2`–`3` and `5`–`8` are specific to
 this token family. A decoder MUST ignore any TLV entry of an unrecognized type rather than rejecting the
 token, so a future field can be added without breaking older decoders — again mirroring NIP-19. Types `3`,
-`5`, `6`, `7` and `8` are themselves examples of this: a token minted before they existed simply omits them, and a
-decoder written before they existed correctly ignores them if present. Type `4` is reserved and MUST NOT be
-assigned a new meaning — a decoder ignores it as an unrecognized type on any token that carries it, per the
+`5`, `6`, `7` and `8` are themselves examples of this: a token minted before they existed simply omits them,
+and a decoder written before they existed correctly ignores them if present. Type `4` is reserved and MUST NOT
+be assigned a new meaning — a decoder ignores it as an unrecognized type on any token that carries it, per the
 general rule above. (A future revision MAY add a `min_transfer_millis` hint type following the same
 convention; this document doesn't define one, since it's a best-effort hint an implementation MAY choose to
 surface via `cash_status` instead.)
@@ -2186,9 +2190,10 @@ whether the token can be dialed. The wallet pubkey, secret and relay hints are a
 rejecting the whole token would leave real money unreachable to punish a malformed field that is not a
 credential — provenance is never a spending credential (§Mint Provenance), and the hub group is only a
 grouping hint (§The Hub Group Fingerprint).
-A decoder MUST therefore treat a wrong-length, duplicated or unpaired `5`/`6`, or a malformed `8`, as **no valid provenance**
-and decode the rest normally, exactly as §Mint Provenance requires. This is the one place where "malformed
-input" and "unusable token" come apart, which is why it is stated rather than left to the general rule.
+A decoder MUST therefore treat a wrong-length, duplicated or unpaired `5`/`6`, or a malformed `8`, as **no
+valid provenance** and decode the rest normally, exactly as §Mint Provenance requires. This is the one place
+where "malformed input" and "unusable token" come apart, which is why it is stated rather than left to the
+general rule.
 
 ### Relay Hints Are Mandatory
 
@@ -2385,7 +2390,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   - `<recipient>` — the bill's registered identity, the transfer's `new_identity`, always a pubkey and
     written `pubkey/<hex>`;
   - `<sender>` — the source slice's registered identity, whose proof authorized the transfer, written
-    `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`;
+    `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`. NIP-CZ counts only zaps whose sender is a
+    `pubkey`;
   - `<target_hash>` — the lowercase hex `sha256` of the UTF-8 `zap_target` string, so the colons of an `a`
     coordinate cannot make the payload ambiguous;
   - `<issued_at>` — the Hub's clock, in unix seconds, when it created the bill;
@@ -2423,11 +2429,11 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   |---|---|---|
   | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
-  Bitcoin's is the unqualified original. Other energy-backed coins list their own HRP, chain name and
-  signing prefix: every other HRP is signed under its own implementation's signed-message prefix, which a
-  verifier must know to check it. A verifier MUST therefore select the prefix from the token's own HRP
-  (§The Cash Token), which is precisely what identifies the base asset. An implementation encountering an HRP it has no prefix for MUST treat the token as carrying no valid provenance rather than
-  guessing, and MUST NOT refuse to decode it.
+  Bitcoin's is the unqualified original. Every other energy-backed coin uses its own HRP, chain name and
+  its implementation's signed-message prefix, which a verifier must know to check it. A verifier MUST
+  therefore select the prefix from the token's own HRP (§The Cash Token), which is precisely what identifies
+  the base asset. An implementation encountering an HRP it has no prefix for MUST treat the token as
+  carrying no valid provenance rather than guessing, and MUST NOT refuse to decode it.
 
   Both hashes are required: the convention is double-SHA256, matching the `SingleHash = false` default of
   the LND `SignMessage` RPC this derives from.
@@ -2436,8 +2442,9 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   separately in the token. It is a 65-byte compact signature — one recovery byte followed by 32-byte R and
   32-byte S — and TLV type `5` MUST be exactly that length (§The Cash Token). Verification is purely local:
   recompute the payload for the token's scheme (`8`) from its own HRP, pubkey (`0`), attested amount (`6`),
-  relay hints (`1`) and secret (`2`) — plus, for a zap bill, the Cash Zap's tags — wrap it in the prefix above, hash twice, recover the signer, and compare it to whichever minter pubkey the
-  holder expects or trusts. A type-`5`/`6` pair that doesn't recover to a valid pubkey over its own payload
+  relay hints (`1`) and secret (`2`) — plus, for a zap bill, the Cash Zap's tags — wrap it in the prefix
+  above, hash twice, recover the signer, and compare it to whichever minter pubkey the holder expects or
+  trusts. A type-`5`/`6` pair that doesn't recover to a valid pubkey over its own payload
   MUST be treated as carrying no valid provenance — never as a hard decode failure.
 - **Required, but never a spending credential.** Every minter MUST include it, for the reason above. It
   authorizes nothing: its presence changes nothing about how `cash_redeem`/`cash_transfer` authorize a
