@@ -11,22 +11,23 @@ Cash Zaps
 
 ## Abstract
 
-A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoice. The sender mints a token for the recipient and publishes it in a kind `9522` event tagging the zapped note. A recipient lists the chains, minters and relays they accept in a kind `10522` event.
+A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoice. The sender transfers a bill they hold to the recipient's identity, a Nostr pubkey or a web account, and publishes the token in a kind `9522` event tagging the zapped note. The recipient redeems it to any Lightning invoice. A recipient lists the chains, minters and relays they accept in a kind `10522` event.
 
 ## Motivation
 
 1. **Zapping without Lightning**: a user holding cash zaps a note without paying an invoice.
 2. **Per-note tracking**: one public event per zap, counted beside `9521` receipts.
-3. **Recipients without a wallet**: a token bound to a ConnectionKey waits, until it expires, for its recipient to sign in and claim it.
+3. **Recipients without a Nostr key**: a token bound to a ConnectionKey waits, until it expires, for its recipient to sign in and claim it.
 
 ## Terminology
 
-- **Cash Zap**: a kind `9522` event carrying a cash token minted for its `p`.
+- **Cash Zap**: a kind `9522` event carrying a cash token issued to its `p`.
 - **cash token**: a NIP-CASH token, `satscash1...` for Bitcoin (NIP-CASH §The Cash Token).
-- **Minter**: the Lightning node that signed the token's mint signature (NIP-CASH §Mint Provenance), as a 33-byte compressed pubkey in hex.
-- **ConnectionKey**: `hex(SHA256("<platform>:<identifier>"))`, standing in for someone with no Nostr keypair yet. A Nostr identity MUST NOT be hashed into one.
+- **Minter**: the Lightning node that signed the token (NIP-CASH §Mint Provenance), as a 33-byte compressed pubkey in hex. It is the minting Hub's owner.
+- **Zap signature**: the signature over a `satscash-zap:v1` payload (TLV `8` = `2`) that a Hub puts on the bill it issues for a `cash_transfer` with `zap_target` (NIP-CASH §Mint Provenance, §Transferring and Splitting a Slice).
+- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, with the platform user ID normalized as in [NIP-IC](./NIP-IC.md), standing in for someone with no Nostr keypair yet. A Nostr identity MUST NOT be hashed into one.
 - **Proxy Agent**: a bot or service that signs a Cash Zap for a platform user whose keys it does not hold.
-- **Chain**: the coin behind the token, e.g. `bitcoin`. Cash Zaps work the same for any energy-backed coin NIP-CASH supports; examples use Bitcoin.
+- **Chain**: the coin behind the token, e.g. `bitcoin`, named by the token's prefix (§Chains). Cash Zaps work the same for any energy-backed coin NIP-CASH supports; examples use Bitcoin.
 
 ## Specification
 
@@ -36,6 +37,14 @@ A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoi
 |------|------|-----------|-------|
 | `9522` | Cash Zap | Sender, or a Proxy Agent | regular |
 | `10522` | Cash Zap Info | Recipient | replaceable |
+
+### Chains
+
+| Token prefix | Chain | Signing prefix |
+|---|---|---|
+| `satscash` | `bitcoin` | `Lightning Signed Message:` |
+
+Other energy-backed coins list their own token prefix, chain name and signing prefix. A token whose prefix has no entry carries no valid signature (rule 6).
 
 ### Identity Tags
 
