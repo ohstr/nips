@@ -230,5 +230,5 @@ Anyone holding the public token can poll `get_balance` and `cash_status` and lea
 
 Optional NIP-CASH upgrades, needing no change to these events:
 
-- irrevocable bills, turning counts from promised into committed;
+- irrevocable bills, so a counted zap could no longer be revoked;
 - an attestation parameter on `cash_status`, so a ConnectionKey recipient can check rule 9 without a transfer.
