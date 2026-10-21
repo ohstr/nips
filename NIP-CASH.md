@@ -1335,10 +1335,13 @@ authorized the call, and a token is not a spending credential (§The Cash Token)
 ### Support
 
 Every Hub that accepts `request_id` MUST record it and refuse a repeat as above, and MUST announce
-`max_request_age` (§The Hub Announcement). Only `cash_lookup` is OPTIONAL: a Hub that serves it lists it in
-`private_methods` (§Scope Surface). A client SHOULD send a `request_id` on every call that creates a bill,
-whether or not the Hub serves `cash_lookup`, because the refused repeat alone keeps a retry from applying
-the call twice. From a Hub that does not serve `cash_lookup`, a lost reply needs the Hub operator.
+`max_request_age` (§The Hub Announcement). A client MUST treat `request_id` as unhonoured by a Hub that does
+not announce `max_request_age`, and MUST NOT resend a bill-creating call to it whose reply was lost.
+
+Only `cash_lookup` is OPTIONAL: a Hub that serves it lists it in `private_methods` (§Scope Surface). A
+client SHOULD send a `request_id` on every call that creates a bill. On a Hub that announces
+`max_request_age`, the refused repeat alone keeps a retry from applying the call twice, whether or not the
+Hub serves `cash_lookup`. From a Hub that does not serve `cash_lookup`, a lost reply needs the Hub operator.
 
 ## Cash-Mode Slices
 
@@ -2595,8 +2598,8 @@ transport, and a client MUST NOT read a method's presence here as permission to 
 only what that call's reply carried. A Hub that serves it MUST list it in `private_methods` on every Cash
 Wallet connection and on its Cash Hub connection, and on a Circle Hub connection whose join lookups it
 serves (NIP-CW). This listing is how a client learns it can recover a lost reply. A client that does not
-find it still sends `request_id`, which still guards against a repeat (§Lost Replies, Support), but a lost
-reply then needs the Hub operator.
+find it still sends `request_id`, which guards against a repeat on a Hub that announces `max_request_age`
+(§Lost Replies, Support), but a lost reply then needs the Hub operator.
 
 Note this concerns advertising only. The scopes above still GRANT these methods — an implementation that
 dropped the scopes instead would refuse every real call while appearing to satisfy this rule.
