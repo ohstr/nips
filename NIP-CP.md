@@ -92,12 +92,22 @@ Wraps go to the user's NIP-17 inbox relays (kind `10050`), else their NIP-65 wri
 
 - **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525` whose seal `pubkey` and rumor `pubkey` are both the user. Other wraps (DMs) are ignored. A wallet MUST discard any other `9525`: anyone can gift-wrap to the user, but only the user can sign the seal.
 - **Incremental sync**: the same filter with `since` set to the last sync minus 2 days, since gift wraps carry randomized timestamps. Wraps already seen are skipped.
-- **Resolving**: the highest `v` per `w` wins; on a tie, the latest rumor `created_at`.
+- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`) wins over `live`, `unknown` or `pending`, whatever its `v`. Otherwise the highest `v` wins; on a tie, the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
 - **Resync**: drop the local copy and run a full sync.
 
 ## Balance
 
-The balance is the sum of `amount` over entries in state `live`. A wallet refreshes states with `cash_status` (NIP-CASH §Cash Status), batched per Hub, and updates entries whose state changed. No answer means `unknown`, never `spent`. Where the Hub quotes it, a wallet SHOULD show `net_redeemable_millis` rather than `amount`.
+The balance, per `chain`, is the sum of `amount` over entries in state `live`. A wallet refreshes states with `cash_status` (NIP-CASH §Cash Status), batched per Hub, and updates entries whose state changed:
+
+| Result | State |
+|--------|-------|
+| the wallet's own spend succeeded | `spent` |
+| a tombstone after `expires_at` | `expired` |
+| `NOT_FOUND` on a live bill | `reclaimed` |
+| any other tombstone | `spent` |
+| no answer | `unknown`, never `spent` |
+
+A device MUST write a final state only from a definitive result (its own spend, a tombstone, `NOT_FOUND`), never from a timeout or a cached view. Where the Hub quotes it, a wallet SHOULD show `net_redeemable_millis` rather than `amount`.
 
 ## Sweeping and Spending
 
@@ -110,7 +120,7 @@ The balance is the sum of `amount` over entries in state `live`. A wallet refres
 
 - **Custody**: a held token stays in its Minter's custody. Until claimed, the sender can revoke it (NIP-CZ §Security Considerations).
 - **Bearer secrets**: an entry with `secret` is spendable by anyone who reads it. Anyone who can decrypt the user's seals can take it.
-- **Stale wraps**: a wallet that fails to delete an old wrap leaves a stale copy behind. The highest `v` still wins.
+- **Stale wraps**: a wallet that fails to delete an old wrap leaves a stale copy behind. Resolving still picks the current one.
 
 ## Privacy Considerations
 
