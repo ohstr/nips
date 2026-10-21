@@ -48,7 +48,7 @@ Other energy-backed coins list their own token prefix, chain name and signing pr
 
 ### Identity Tags
 
-`p` (recipient) and `P` (sender):
+`p` (recipient) and `P` (sender, a ConnectionKey only):
 
 ```
 ["p", "<hex-pubkey-or-ConnectionKey>", "<platform>"]
@@ -58,13 +58,15 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
 
 ### Sending
 
-1. If `p` is a pubkey, fetch the recipient's `10522`. If it lists `chain` tags, the sender MUST use one; if it lists `mint` tags for that chain, the sender MUST mint from one of them.
-2. Call `mint_cash` (NIP-CASH §Minting Cash) with exactly one recipient and `amount_millis` equal to the zap amount:
+1. If `p` is a pubkey, fetch the recipient's `10522`. If it lists `chain` tags, the sender MUST use one; if it lists `mint` tags for that chain, the sender SHOULD send a bill minted by one of them.
+2. Call `cash_transfer` (NIP-CASH §Transferring and Splitting a Slice) on an identity-bound bill the sender holds, with `amount_millis` equal to the zap amount and `new_identity`:
    - pubkey `p`: `{"identity_type": "pubkey", "identity_value": "<p>"}`
-   - ConnectionKey `p`: `{"identity_type": "connection_key", "identity_value": "<p>", "ia_pubkey": "<ia>"}`, with `<ia>` an Identity Authority the sender's Hub trusts, also put in the `ia` tag.
+   - ConnectionKey `p`: `{"identity_type": "connection_key", "identity_value": "<p>", "ia_pubkey": "<ia>"}`, with `<ia>` an Identity Authority the minting Hub trusts, also put in the `ia` tag.
 
-   The sender MUST NOT mint a `cash`-mode recipient: its secret is not in the token, so only the sender could redeem it. On a retry, the sender SHOULD send an `idempotency_key`. For a ConnectionKey `p`, the sender SHOULD use the longest `expiry` the Hub allows.
-3. Publish to the recipient's `10522` relays (else their [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) read relays) and to the sender's write relays. For a ConnectionKey `p`, also publish to its NIP-IC identity connection's relays if known, and SHOULD notify the recipient on their platform with an `nevent`.
+   For a pubkey `p` and a zap on an event, the sender also sets `zap_target` to the target's `a` coordinate, or else its `e` id, from a bill bound to the pubkey that will sign the `9522`. The Hub then issues a new bill with a zap signature, even for a full transfer; its `issued_at` and `expires_at` go in the `9522`. A ConnectionKey zap carries no `zap_target`.
+
+   A Hub owner zaps the same way: they mint a bill to themselves (NIP-CASH §Minting Cash), then transfer it. `new_identity` MUST NOT be `cash`: its secret is not in the token, so only the sender could redeem it. The sender SHOULD send a `request_id`, so a lost reply can be recovered. A bill keeps its expiry when transferred, so the sender SHOULD pick one with a long remaining life, above all for a ConnectionKey `p`.
+3. Publish to the recipient's `10522` relays (else their [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) read relays) and to the sender's write relays. For a ConnectionKey `p`, also publish to its NIP-IC identity connection's relays if known. The sender MAY notify the recipient on their platform, in fixed client text with no sender-supplied link (e.g. "open any Nostr wallet").
 
 ### Kind 9522 — Cash Zap
 
@@ -79,7 +81,9 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
     ["amount", "21000"],
     ["chain", "bitcoin"],
     ["cash", "satscash1..."],
-    ["w", "<token-wallet-pubkey>"]
+    ["w", "<token-wallet-pubkey>"],
+    ["issued_at", "1760000000"],
+    ["expires_at", "1790000000"]
   ],
   "pubkey": "<sender-pubkey>",
   "created_at": "<unix-timestamp>",
@@ -95,12 +99,13 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
 - `cash`: exactly one.
 - `w`: exactly one, the token's wallet pubkey (TLV `0`), so every copy of a token can be found with `#w`.
 - `ia`: exactly one if `p` is a ConnectionKey, else none.
+- `issued_at`, `expires_at`: exactly one each if `p` is a pubkey and the event has `e` or `a`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires.
 
-**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `expires_at` (at most one, from the mint response, informational).
+**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `expires_at` (at most one, informational, where not required).
 
 A `9522` MUST NOT carry a NIP-40 `expiration` tag: relays could drop it before the recipient sees it.
 
-Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent acting for `P`, and implementations MUST NOT attribute the zap to `pubkey`. Nothing proves `P`, so a client SHOULD credit `P` only if it trusts the signer, and otherwise show the zap as sent via the signer.
+Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent acting for `P`, and `P` MUST be a ConnectionKey: a Nostr user signs their own zaps. The bill's signed sender is the Proxy Agent's own key; `P` is display only, e.g. "via @bot for discord:carol". Nothing proves `P`, so a client SHOULD credit `P` only if it trusts the signer, and otherwise show the zap as sent via the signer.
 
 ```json
 {
