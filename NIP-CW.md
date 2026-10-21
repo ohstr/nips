@@ -132,8 +132,8 @@ Connection).
 
 For each member who currently holds an active Circle Wallet under a given Hub, an implementation MUST
 be able to determine that fact. §Membership's one-active-wallet-per-member rule is checked against it.
-That fact MUST stop being true once the member's wallet connection is deleted, freeing them to request
-a new one.
+That fact MUST stop being true once the member's wallet is disabled (§Membership) or its connection is
+deleted, freeing them to request a new one.
 
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has
 already consumed for `create_circle_wallet` (§Identity Proof, §Security Considerations), since this
@@ -374,15 +374,30 @@ A Circle Identity's admission mechanism (§Terminology) supports two forms:
   provider pubkey that authors it and its `d` identifier. The provider is normally the host's own
   account, but can be any account the host controls. Because a follow set is addressable, one account
   can publish many, so one account can run several circles, each Circle Identity naming a different
-  `d`. Adding or removing someone from a circle is just editing that set — no separate action against
-  this protocol at all.
+  `d`. Adding or removing someone from a circle is just editing that set; the Hub acts on the change
+  itself (below).
+
+**Removing a member disables their wallet.** Whichever form it uses, a Hub MUST, within its staleness
+bound, disable the Circle Wallet of any pubkey no longer resolved as a member. A disabled wallet can no
+longer draw on the Hub's balance, but keeps, and can still pay out, any money it received itself. It is
+no longer an active wallet: it stops counting toward step 9's commitment and the one-active-wallet rule,
+so a pubkey that becomes a member again may join again.
 
 A `follow_set` Hub MUST apply these rules:
 
+- **Which address.** A host SHOULD give the set a `d` identifier that is unguessable and used only for
+  this circle (e.g. `circle-<random>`), and SHOULD use a provider key that ordinary social clients do not
+  hold. Whoever can edit the set grants wallet access, so a set a social client might write to by name,
+  or a key such a client holds, hands that power to the client.
+- **Which relays.** The Hub reads the set from its own relays, and the host publishes it there. A relay
+  keeps only the newest version of an addressable event, so an older version cannot be served there in
+  place of a newer one.
 - **Which event.** Only a kind-`30000` event whose signature verifies, whose author is the provider
   pubkey and whose `d` tag equals the configured identifier. Of those, the one with the highest
   `created_at` wins; on a tie, the lowest `id` (NIP-01's rule for addressable events). An event from
-  any other author MUST be ignored, whatever it claims.
+  any other author MUST be ignored, whatever it claims. A Hub MUST ignore a version whose `created_at` is
+  more than 15 minutes in the future, so one bad clock cannot freeze the set, and its relays SHOULD
+  reject one.
 - **Which members.** Exactly the pubkeys in that event's public `p` tags, plus any `hidden_p` entries
   the Hub can decrypt (§Hidden Members). NIP-51's private items in the encrypted `content` MUST NOT be
   counted: they are encrypted to the provider's own key, which the Hub does not hold, and a Hub that held
@@ -395,9 +410,10 @@ A `follow_set` Hub MUST apply these rules:
   recent resolution of it. An implementation MAY cache it and refresh it, and MUST bound that
   staleness.
 - **Unresolved is not empty.** A set the Hub has not found yet MUST be treated as unresolved, not as
-  empty (§Creating a Circle Wallet, step 4). A resolved set with no `p` tags is empty: nobody is a
-  member. A host who wants to close a circle SHOULD therefore publish the set with no `p` tags rather
-  than rely on a deletion request (NIP-09), which relays may not honor or propagate.
+  empty (§Creating a Circle Wallet, step 4). A resolved set with no members is empty: nobody is a
+  member, and every wallet issued under it is disabled (above).
+- **Deletion is ignored.** A Hub MUST ignore a NIP-09 deletion of the set; only a newer version changes
+  membership. To close a circle, a host publishes the set with no members.
 
 An example set, one of several the same account can publish:
 
@@ -406,7 +422,7 @@ An example set, one of several the same account can publish:
   "kind": 30000,
   "pubkey": "<provider pubkey>",
   "tags": [
-    ["d", "family"],
+    ["d", "circle-7k2m9q4x"],
     ["title", "Ada's Family Circle"],                 // display-only
     ["description", "Wallets for the family, on my node"], // display-only
     ["p", "<member pubkey>"],
@@ -418,7 +434,7 @@ An example set, one of several the same account can publish:
 }
 ```
 
-A Hub reading it is configured with the address `30000:<provider pubkey>:family`.
+A Hub reading it is configured with the address `30000:<provider pubkey>:circle-7k2m9q4x`.
 
 A host SHOULD give the set a `title`. When it does, a Hub SHOULD use that `title` as the default
 `label` of its `circlehub1...` string (§The Circle Wallet Hub Connection), so the invite and the set
@@ -468,8 +484,9 @@ anyone, for free. It asserts nothing a host can rely on.
 Independent of which admission mechanism a Hub uses, a member MUST hold at most one active Circle
 Wallet per Hub at a time. This is enforced twice: a pre-check immediately after authorization, which
 short-circuits the common case before further work, and the membership table's unique constraint as the
-authoritative guard inside the creation transaction. The membership row MUST cascade-delete when its
-Circle Wallet's connection record is deleted, freeing the identity to request a new wallet.
+authoritative guard inside the creation transaction. The membership row MUST be removed when its Circle
+Wallet is disabled, and MUST cascade-delete when the wallet's connection record is deleted, freeing the
+identity to request a new wallet.
 
 ## In-Circle Transfers
 
