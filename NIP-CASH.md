@@ -1608,7 +1608,7 @@ name **different wallets**, which is the whole point: see §Batching Across Bill
 {
   "v": 1,
   "not_after": 1720000060,       // unix seconds; this envelope's own expiry
-  "nonce": "<hex 32 bytes>",     // the single value a Hub stores for replay detection
+  "nonce": "<hex 32 bytes>",     // the per-envelope value a Hub stores for replay detection
   "reply_to": "<hex 32 bytes>",  // an opaque routing tag, NOT a pubkey
   "items": [
     {
@@ -1649,11 +1649,12 @@ links them disappears.
   Replay protection therefore has to live inside the ciphertext. A Hub MUST reject an envelope
   whose `not_after` has passed, and MUST reject one claiming to be valid further ahead than it
   is willing to remember nonces for.
-- **`nonce`** — REQUIRED, and the only per-request state a Hub must keep. A Hub MUST reject a
-  nonce it has already served. Because items bind to it (below), a Hub needs no per-item
-  replay state at all: an item lifted into a different envelope fails on the binding. A Hub
-  need only remember a nonce until its envelope could no longer be accepted anyway, which is
-  what bounds that memory.
+- **`nonce`** — REQUIRED, and the only per-envelope replay state a Hub keeps; `request_id`
+  records (§Lost Replies) are separate. A Hub MUST reject a nonce it has already served.
+  Because items bind to it (below), a Hub needs no per-item state to stop an item being
+  replayed: an item lifted into a different envelope fails on the binding. A Hub need only
+  remember a nonce until its envelope could no longer be accepted anyway, which is what bounds
+  that memory.
 - **`reply_to`** — REQUIRED, and **not a pubkey**, though it is deliberately shaped like one
   (32 bytes, lowercase hex) because it does two jobs: it is how the response is **addressed**
   (§Addressing the Response) as well as how it is keyed. The response is encrypted under a key
