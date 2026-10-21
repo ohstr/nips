@@ -837,7 +837,8 @@ sequenceDiagram
 - `zap_target` — OPTIONAL. The zapped event's `e` id or its `a` coordinate (`<kind>:<pubkey>:<d>`), as a
   non-empty string. The Hub does not look the event up or interpret the string; it signs its `sha256`
   (§Mint Provenance). When present, the source slice MUST be identity-bound (`pubkey` or `connection_key`,
-  never `cash`), and `new_identity` MUST be `pubkey` or `connection_key`. Like every param, it is bound by
+  never `cash`), and `new_identity` MUST be `pubkey`: a zap is signed to a Nostr recipient, and a value sent
+  to a `connection_key` carries no `zap_target`. Like every param, it is bound by
   the item proof's `ph` (§Item Proofs).
 - `request_id` — OPTIONAL (§Lost Replies). A used `request_id` MUST be refused.
 
@@ -889,7 +890,7 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
    `ia_pubkey` is on the wallet owner's trusted Identity Authority allowlist right now. For `cash`,
    verify `identity_value` is present and is a well-formed commitment — the implementation MUST NOT
    generate a secret on the wallet's behalf here (§Cash-Mode Slices, §Security Considerations). With
-   `zap_target`, a `cash` `new_identity` MUST be rejected.
+   `zap_target`, any `new_identity` other than `pubkey` MUST be rejected.
 3. Resolve `amount_millis` against the slice's current committed amount (read fresh, not from an earlier
    lookup) and determine the outcome per §Which outcome a request produces above. If `amount_millis` is
    present and exceeds the slice's current amount, reject.
@@ -2381,9 +2382,10 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   Scheme `2` is used only for a bill created by a zap transfer (§Transferring and Splitting a Slice,
   `zap_target`); every other bill is signed under scheme `1`. Its extra fields:
-  - `<recipient>` — the bill's registered identity, the transfer's `new_identity`;
-  - `<sender>` — the source slice's registered identity, whose proof authorized the transfer;
-  - both written as `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`;
+  - `<recipient>` — the bill's registered identity, the transfer's `new_identity`, always a pubkey and
+    written `pubkey/<hex>`;
+  - `<sender>` — the source slice's registered identity, whose proof authorized the transfer, written
+    `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`;
   - `<target_hash>` — the lowercase hex `sha256` of the UTF-8 `zap_target` string, so the colons of an `a`
     coordinate cannot make the payload ambiguous;
   - `<issued_at>` — the Hub's clock, in unix seconds, when it created the bill;
