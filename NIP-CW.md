@@ -237,9 +237,12 @@ return a secret, a `pairing_uri`, or anything else derived from one. `relays` MU
 non-empty relay URL, in failover order, for the same reason NIP-CASH requires one on every credential it
 defines (§Relay Hints Are Mandatory in NIP-CASH): the wallet is reachable nowhere else.
 
-`connection_pubkey` repeats the request's. A client MUST reject details whose `connection_pubkey` differs
-from the one in its request. Every join between the same member and Hub decrypts under the same
-conversation key, so without it an old genuine reply could be passed off as the answer to a new request.
+`connection_pubkey` repeats the request's. A client MUST reject details whose `connection_pubkey` is
+missing or differs from the one in its request. Every join between the same member and Hub decrypts under
+the same conversation key, so without it an old genuine reply could be passed off as the answer to a new
+request.
+
+`expires_at` is the wallet's expiry in unix seconds, or `0` when the wallet never expires.
 
 `max_amount` is the spend cap as the Hub resolved it, in the same milli-unit as the request. A Hub that
 adjusts the requested value, for example by rounding it to a unit its node can represent, reports what it
@@ -355,16 +358,19 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   proof signed with the Hub connection's secret, exactly as a join does (§What differs from a bill
   operation).
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
-  request that named this `connection_pubkey`. An item signed by anyone else MUST be omitted.
+  request that named this `connection_pubkey`. The record is keyed on (`pubkey`, `connection_pubkey`): a
+  lookup whose signer has no record for that `connection_pubkey` is answered `pending` or `unknown` by its
+  `deadline` as below, not omitted.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
   would have checked the reply (§Response).
 - **`deadline` is the join's deadline, as the client sent it.** A join's deadline is its kind-23199
   proof's `created_at` plus the 5-minute freshness window (§Identity Proof), and the Hub MUST NOT create a
-  wallet whose proof is past it, checked at commit (step 9). With no record of the `connection_pubkey`,
-  the Hub answers `pending` with `retry_after` = `deadline` while `deadline` is in the future, and
-  `unknown`, which is final, once it has passed. A `deadline` counts as at most 6 minutes from now (the
-  freshness window); a later one is treated as now plus 6 minutes. A client that misstates `deadline`
-  misleads only itself, since a late join is refused anyway. A lookup MUST NOT write state.
+  wallet whose proof is past it, checked at commit (step 9). With no record for the signer and that
+  `connection_pubkey`, the Hub answers `pending` with `retry_after` = `deadline` while `deadline` is in
+  the future, and `unknown`, which is final, once it has passed. A `deadline` counts as at most 6 minutes
+  from now (the 5-minute freshness window plus its 1-minute future allowance); a later one is treated as
+  now plus 6 minutes. A client that misstates `deadline` misleads only itself, since a late join is
+  refused anyway. A lookup MUST NOT write state.
 - **A late `unknown` proves nothing once the wallet is gone.** The record is dropped when the wallet is
   deleted, so after that an `unknown` no longer shows the join failed (§The Record in NIP-CASH).
 
