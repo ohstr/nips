@@ -119,7 +119,7 @@ A cleartext JSON (v1) string:
 | `version` | number | Always `1`. |
 | `platform` | string | Web Identity platform name. |
 | `auth_type` | string | How the IA verified control of the account. `"public_post"` is defined below; IAs MAY use other values (e.g. a one-time code sent to an email address). |
-| `user_id` | string | The platform account identifier, in its canonical form (Canonical Platform User IDs). |
+| `user_id` | string | The platform account identifier, in its canonical form (§Canonical Platform User IDs). |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
 | `evidence_url` | string | `public_post` only: URL of the public post carrying the challenge. |
