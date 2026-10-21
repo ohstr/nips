@@ -1543,7 +1543,8 @@ on every refresh.
 So a client MUST compare `created_at` across every candidate it gathers, adopt only the newest,
 and never move backwards. Concretely: a relay replaying a Hub's pre-change announcement
 reinstates whatever that policy allowed — a wider padding bucket takes 1–8 items from three
-distinguishable wire sizes back to four, which is the batch-count leak §Padding exists to close.
+distinguishable wire sizes back to four, which is the batch-count leak padding exists to close
+(§Envelopes).
 And once a Hub rotates its inbox key, being able to pin a client to the retired one would defeat
 rotation entirely, which is the only remedy a Hub has for a leaked inbox.
 
@@ -2040,11 +2041,10 @@ client that waits on the caller's deadline instead lets a Hub choose how long it
 envelope.** Collecting it and reporting the items as merely unanswered discards the one fact that
 makes a spend safe to send again, converting a retryable refusal into a permanent
 indeterminacy — the state a client is told never to resolve by retrying. This is safe to act on
-because every bill method carries its own idempotency guard (§Redemption, §Transferring and
+because every bill method carries its own replay guard (§Redeeming a Slice, §Transferring and
 Splitting a Slice): a second application finds the slice already claimed, and `cash_lookup` moves
-nothing. **A Hub method added
-without such a guard MUST NOT be served over this transport**, or this rule becomes a way to
-induce a double application.
+nothing. **A Hub method added without such a guard MUST NOT be served over this transport**, or
+this rule becomes a way to induce a double application.
 
 ### Which Methods a Hub Serves
 
