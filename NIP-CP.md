@@ -58,13 +58,13 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 ```
 
 **Required tags**:
-- `w`: token wallet pubkey (TLV `0`), or the `request_id` for a `pending` entry.
+- `w`: token wallet pubkey (TLV `0`), or the `request_id` for a `pending` entry and the `done` entry that closes it.
 - `v`: version, +1 on every change.
 - `cash`: the token.
 - `amount`: milli-units (`msats` for `bitcoin`).
 - `chain`: e.g. `bitcoin`; any energy-backed coin works the same.
 - `identity`: who can claim it — `pubkey <pubkey>`, `connection_key <ConnectionKey> <ia-pubkey>` or `cash`.
-- `state`: `live`, `pending`, `spent`, `expired`, `reclaimed` or `unknown`, plus the last check time.
+- `state`: `live`, `pending`, `spent`, `expired`, `reclaimed`, `done` or `unknown`, plus the last check time.
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
 - `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
@@ -88,20 +88,30 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 ## Writing
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
-- **Write ahead**: when the Hub lists `cash_lookup` in `private_methods`, then before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet stores a `pending` entry holding the call's `request_id`, `deadline`, `target` and any cash secret it generated, and reads it back before sending the call. On the reply it adds an entry for each new bill and removes the pending one. If the reply is lost, the wallet sends `cash_lookup` with `request_id` and `deadline` to that target, and MUST NOT resend the call:
-  - `done`: add an entry for each new bill (a tombstone in place of a token sets that entry's state per §Balance) and remove the pending entry.
+- **Write ahead**: when the Hub lists `cash_lookup` in `private_methods`, then before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet stores a `pending` entry holding the call's `request_id`, `deadline`, `target` and any cash secret it generated, and reads it back before sending the call. On the reply it adds an entry for each new bill and marks the pending entry `done`. If the reply is lost, the wallet sends `cash_lookup` with
+  `request_id` and `deadline` to that target, and MUST NOT resend the call:
+  - `done`: add an entry for each new bill (a tombstone in place of a token sets that entry's state per §Balance)
+    and mark the pending entry `done`.
   - `pending`: ask again after `retry_after`.
-  - `unknown`: remove the pending entry; the wallet MAY place the call again with a new `request_id`. An omitted answer is not `unknown`.
+  - `unknown`: the wallet MAY place the call again with a new `request_id` only if the `unknown` arrived no later
+    than the call's `deadline` plus the Hub's `max_request_age`; otherwise it MUST NOT place it again automatically
+    and SHOULD show the call to the user. Then it marks the pending entry `done`. An omitted answer is not `unknown`.
+- **Close** a pending entry by publishing it at `v` + 1 in state `done`, then deleting the old wrap as for any change;
+  never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until
+  the pending entry is `done`.
 - **Without `cash_lookup`**: the wallet still stores any cash secret it generated in a `pending` entry before sending the call, with a fresh random `request_id` as its `w` and no `deadline` or `target`.
 - **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
-- **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`), so the user can see why a note left.
+- **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`, `done`), so the user can see why a note left.
 - **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
 
 ## Reading
 
 - **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525` whose seal `pubkey` and rumor `pubkey` are both the user. Other wraps (DMs) are ignored. A wallet MUST discard any other `9525`: anyone can gift-wrap to the user, but only the user can sign the seal.
 - **Incremental sync**: the same filter with `since` set to the last sync minus 2 days, since gift wraps carry randomized timestamps. Wraps already seen are skipped.
-- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`) wins over `live` or `unknown`, whatever its `v`. Otherwise the highest `v` wins; on a tie, the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
+- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`, `done`) wins only over entries whose `v` is
+  less than or equal to its own; an entry with a higher `v`, written after a definitive `cash_status` result,
+  supersedes it (a bill returned by an in-place transfer keeps its `w`). Otherwise the highest `v` wins; on a tie,
+  the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
 - **Resync**: drop the local copy and run a full sync.
 
 ## Balance
