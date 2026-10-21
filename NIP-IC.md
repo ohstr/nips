@@ -28,11 +28,24 @@ Splitting these apart — rather than having a single self-attested event — me
 
 - **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
 - **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
-- **ConnectionKey**: `SHA256("<platform>:<platform-user-id>")` — see NIP-AZ. The `d` tag of both event kinds in this NIP.
+- **ConnectionKey**: `SHA256("<platform>:<platform-user-id>")` — see NIP-AZ. `<platform-user-id>` MUST be the canonical form given in Canonical Platform User IDs. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
 ## Specification
+
+### Canonical Platform User IDs
+
+Every client hashing a ConnectionKey for the same account MUST get the same hash, so `<platform-user-id>` has one canonical form per platform:
+
+| Platform | `<platform>` | `<platform-user-id>` |
+|---|---|---|
+| X | `x` | The numeric account ID, in decimal. Not the handle. |
+| Discord | `discord` | The numeric account ID, in decimal. Not the username. |
+| Email | `email` | The address, lowercased. |
+| Any other | its platform name | Its stable numeric or opaque account ID, never a handle or display name. |
+
+No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
 
 ### Event Kinds
 
@@ -102,7 +115,7 @@ A cleartext JSON (v1) string:
 | `version` | number | Always `1`. |
 | `platform` | string | Web Identity platform name. |
 | `auth_type` | string | How the IA verified control of the account. `"public_post"` is defined below; IAs MAY use other values (e.g. a one-time code sent to an email address). |
-| `user_id` | string | The normalized platform account identifier. |
+| `user_id` | string | The platform account identifier, in its canonical form (Canonical Platform User IDs). |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
 | `evidence_url` | string | `public_post` only: URL of the public post carrying the challenge. |
