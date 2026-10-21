@@ -25,7 +25,7 @@ A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoi
 - **cash token**: a NIP-CASH token, `satscash1...` for Bitcoin (NIP-CASH §The Cash Token).
 - **Minter**: the Lightning node that signed the token (NIP-CASH §Mint Provenance), as a 33-byte compressed pubkey in hex. It is the minting Hub's owner.
 - **Zap signature**: the signature over a `satscash-zap:v1` payload (TLV `8` = `2`) that a Hub puts on the bill it issues for a `cash_transfer` with `zap_target` (NIP-CASH §Mint Provenance, §Transferring and Splitting a Slice).
-- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, with the platform user ID normalized as in [NIP-IC](./NIP-IC.md), standing in for someone with no Nostr keypair yet. A Nostr identity MUST NOT be hashed into one.
+- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, with the platform user ID in its canonical form ([NIP-IC](./NIP-IC.md) §Canonical Platform User IDs), standing in for someone with no Nostr keypair yet. A Nostr identity MUST NOT be hashed into one.
 - **Proxy Agent**: a bot or service that signs a Cash Zap for a platform user whose keys it does not hold.
 - **Chain**: the coin behind the token, e.g. `bitcoin`, named by the token's prefix (§Chains). Cash Zaps work the same for any energy-backed coin NIP-CASH supports; examples use Bitcoin.
 
@@ -100,7 +100,7 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
 - `w`: exactly one, the token's wallet pubkey (TLV `0`), so every copy of a token can be found with `#w`.
 - `ia`: exactly one if `p` is a ConnectionKey, else none.
 
-**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the zap is meant to be counted, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires, and is informational otherwise).
+**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires, and is informational on a token without TLV `8` = `2`, taken from `cash_status`).
 
 A `9522` MUST NOT carry a NIP-40 `expiration` tag: relays could drop it before the recipient sees it.
 
@@ -171,12 +171,12 @@ Signature verification MUST come before trusting any tag.
 | 3 | `cash` decodes per NIP-CASH §Wire Format. | MUST | MUST |
 | 4 | The token's prefix matches `chain` (§Chains). | MUST | MUST |
 | 5 | The token's identity-required hint (TLV `3`), if present, is `1`. | MUST | MUST |
-| 6 | The token's signature recovers a Minter over the payload of its signature scheme (TLV `8`; NIP-CASH §Mint Provenance; for TLV `8` = `2`, the payload rebuilt in rule 7), and its attested amount (TLV `6`) equals `amount`. | MUST; TLV `8` = `2` to count it | MUST; a token without TLV `8` is accepted |
-| 7 | `issued_at` and `expires_at` are present, and the zap signature verifies over the payload rebuilt below; `p` is the target's author; for an `e` target, `issued_at` is not earlier than the target's `created_at`. | to count it | — |
+| 6 | The token's signature recovers a Minter over the payload of its signature scheme (TLV `8`; NIP-CASH §Mint Provenance; for TLV `8` = `2`, the payload rebuilt in rule 7), and its attested amount (TLV `6`) equals `amount`. | MUST; TLV `8` = `2` to count it | MUST; a token without TLV `8` verifies over the legacy payload |
+| 7 | `issued_at` and `expires_at` are present, and the zap signature verifies over the payload rebuilt below; `p` is the target's author; when the target is the `e` id (no `a` tag), `issued_at` is not earlier than the target's `created_at`. | to count it | — |
 | 8 | The Minter is trusted for `chain`: by the reader, or in the recipient's `10522` `mint` tags. | to count it | MUST, unless the recipient approves it |
 | 9 | The recipient's slice is unclaimed and its `amount_millis` equals `amount`. For a pubkey `p`, `cash_status` with `scope: mine` (NIP-CASH §Cash Status) returns it; for a ConnectionKey `p`, a full in-place `cash_transfer` to the recipient's pubkey, using the attestation from `ia`, succeeds first. | — | MUST |
 
-For rule 7, the client rebuilds the `satscash-zap:v1` payload (NIP-CASH §Mint Provenance) from the token and this event, and verifies the signature against it:
+For rules 6 and 7, a verifier rebuilds the `satscash-zap:v1` payload (NIP-CASH §Mint Provenance) from the token and this event, and verifies the signature against it:
 
 ```
 satscash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount>:<relay_hash>:pubkey/<p>:pubkey/<pubkey>:<sha256(target)>:<issued_at>:<expires_at>
@@ -202,7 +202,7 @@ Rules 1–8 show that a trusted Hub issued the amount to `p`, from the signer, f
 A client MAY total Cash Zaps per note, shown apart from Lightning zaps. It counts a Cash Zap only if:
 
 - it passes rules 1–8, so its Minter is trusted by the reader or listed in the recipient's `10522`;
-- its `expires_at` is `0` (never), or `expires_at − issued_at` is at least the reader's minimum remaining life, a client setting (e.g. 30 days).
+- its `expires_at` is `0` (never), or `expires_at − issued_at` is at least the reader's minimum life, measured from `issued_at`, a client setting (e.g. 30 days).
 
 A count means "issued to the recipient by a trusted Hub", not "received". ConnectionKey zaps, and zaps that fail these checks, MAY be listed, never totalled.
 
