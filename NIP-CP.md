@@ -11,13 +11,13 @@ Cash Pocket
 
 ## Abstract
 
-A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM.
+A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM, with no author, kind or amount.
 
 ## Motivation
 
 1. **Lost devices**: held cash survives.
 2. **Every device**: one balance everywhere.
-3. **No tracking**: nobody sees who holds cash, how much, or when it moves.
+3. **No tracking, no extra key**: nobody sees who holds cash or how much, and the user's own key both claims and stores it.
 
 ## Terminology
 
