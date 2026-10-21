@@ -40,7 +40,7 @@ A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoi
 
 ### Chains
 
-| Token prefix | Chain | Signing prefix |
+| Token prefix (HRP) | Chain | Signing prefix |
 |---|---|---|
 | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
@@ -63,10 +63,10 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
    - pubkey `p`: `{"identity_type": "pubkey", "identity_value": "<p>"}`
    - ConnectionKey `p`: `{"identity_type": "connection_key", "identity_value": "<p>", "ia_pubkey": "<ia>"}`, with `<ia>` an Identity Authority the minting Hub trusts, also put in the `ia` tag.
 
-   For a pubkey `p` and a zap on an event, the sender also sets `zap_target` to the target's `a` coordinate, or else its `e` id, from a bill bound to the pubkey that will sign the `9522`. The Hub then issues a new bill with a zap signature, even for a full transfer; its `issued_at` and `expires_at` go in the `9522`. A ConnectionKey zap carries no `zap_target`.
+   For a pubkey `p` and a zap on an event, the sender SHOULD set `zap_target` (required for the zap to be counted) to the target's `a` coordinate, or else its `e` id, from a bill bound to the pubkey that will sign the `9522`. The Hub then issues a new bill with a zap signature, even for a full transfer; its `issued_at` and `expires_at` go in the `9522`. `zap_target` requires a pubkey `p`: a ConnectionKey zap carries none.
 
    A Hub owner zaps the same way: they mint a bill to themselves (NIP-CASH §Minting Cash), then transfer it. `new_identity` MUST NOT be `cash`: its secret is not in the token, so only the sender could redeem it. The sender SHOULD send a `request_id`, so a lost reply can be recovered. A bill keeps its expiry when transferred, so the sender SHOULD pick one with a long remaining life, above all for a ConnectionKey `p`.
-3. Publish to the recipient's `10522` relays (else their [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) read relays) and to the sender's write relays. For a ConnectionKey `p`, also publish to its NIP-IC identity connection's relays if known. The sender MAY notify the recipient on their platform, in fixed client text with no sender-supplied link (e.g. "open any Nostr wallet").
+3. Publish to the recipient's `10522` relays (else their [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) read relays) and to the sender's write relays. For a ConnectionKey `p`, also publish to its NIP-IC identity connection's relays if known; the sender MAY also notify the recipient on their platform, in fixed client text with no sender-supplied link (e.g. "open any Nostr wallet").
 
 ### Kind 9522 — Cash Zap
 
@@ -194,7 +194,7 @@ Rules 1–8 show that a trusted Hub issued the amount to `p`, from the signer, f
 - A wallet uses only copies of a token whose signature verifies (rule 6). With TLV `8`, the signature covers the relay hints and the connection secret through the relay hash, so a copy carrying other ones fails, and a wallet MUST NOT contact its relays. A token without TLV `8` has unsigned relay hints, so a wallet SHOULD prefer the relays in the minting Hub's announcement (NIP-CASH §The Hub Announcement).
 - A token's state comes from `cash_status` only (NIP-CASH §Answering About a Destroyed Bill). A timeout MUST NOT be reported as spent.
 - A wallet SHOULD keep the tokens it holds in a [NIP-CP](./NIP-CP.md) Cash Pocket.
-- A wallet SHOULD claim promptly, since the minting Hub's owner can revoke until then. An external redemption pays `net_redeemable_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node (NIP-CASH §The Redeem Fee).
+- A wallet SHOULD claim promptly, since the minting Hub's owner can revoke until then. An external redemption pays `net_redeemable_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node (NIP-CASH §The Redeem Fee). Wallets MAY show such a zap as "below the withdrawal fee, combine with others".
 - Clients SHOULD NOT publish when a Cash Zap was claimed.
 
 ## Counting
