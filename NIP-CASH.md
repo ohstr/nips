@@ -2425,9 +2425,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   Bitcoin's is the unqualified original. Other energy-backed coins list their own HRP, chain name and
   signing prefix: every other HRP is signed under its own implementation's signed-message prefix, which a
-  verifier must know to check it. A verifier MUST therefore select the prefix from the token's own HRP (§The Cash Token),
-  which is precisely what identifies the base asset. An implementation
-  encountering an HRP it has no prefix for MUST treat the token as carrying no valid provenance rather than
+  verifier must know to check it. A verifier MUST therefore select the prefix from the token's own HRP
+  (§The Cash Token), which is precisely what identifies the base asset. An implementation encountering an HRP it has no prefix for MUST treat the token as carrying no valid provenance rather than
   guessing, and MUST NOT refuse to decode it.
 
   Both hashes are required: the convention is double-SHA256, matching the `SingleHash = false` default of
