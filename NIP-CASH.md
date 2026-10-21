@@ -2371,11 +2371,14 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   | absent | `lokicash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>` (legacy) |
 
   `<hrp>` is the token's HRP, `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
-  committed amount (TLV `6`) in decimal. Binding the amount is only sound because a wallet's amount is
-  immutable for its whole life (§Transferring and Splitting a Slice, §Spinning a Slice Off Into a Dedicated
-  Wallet), so the value the signature commits to always matches the wallet it names. Each wallet — freshly
-  minted, split-off, or consolidated — carries its own signature over its own pubkey and its own fixed
-  amount, independent of whether the wallet it split from or was merged out of had one.
+  committed amount (TLV `6`) in decimal. Every integer in a payload is unsigned decimal ASCII with no leading
+  zeros (`0` for zero); every hex value is lowercase; `<ia_pubkey_hex>` is the 32-byte x-only key.
+
+  Binding the amount is only sound because a wallet's amount is immutable for its whole life
+  (§Transferring and Splitting a Slice, §Spinning a Slice Off Into a Dedicated Wallet), so the value the
+  signature commits to always matches the wallet it names. Each wallet — freshly minted, split-off, or
+  consolidated — carries its own signature over its own pubkey and its own fixed amount, independent of
+  whether the wallet it split from or was merged out of had one.
 
   `<relay_hash>` is the lowercase hex `sha256` of every relay hint (TLV `1`) in encoded order, each written
   as a 1-byte length followed by its ASCII bytes, then the 32-byte connection secret (TLV `2`):
@@ -2401,8 +2404,9 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   - `<sender>` — the source slice's registered identity, whose proof authorized the transfer, written
     `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`. NIP-CZ counts only zaps whose sender is a
     `pubkey`;
-  - `<target_hash>` — the lowercase hex `sha256` of the UTF-8 `zap_target` string, so the colons of an `a`
-    coordinate cannot make the payload ambiguous;
+  - `<target_hash>` — the lowercase hex `sha256` of the UTF-8 `zap_target` string, hashed exactly as sent,
+    so the colons of an `a` coordinate cannot make the payload ambiguous. NIP-CZ requires `zap_target` to
+    equal the Cash Zap's target tag byte for byte;
   - `<issued_at>` — the Hub's clock, in unix seconds, when it created the bill;
   - `<expires_at>` — the bill's expiry in unix seconds, inherited from the source (§Eligibility and
     Limits), or `0` if it never expires.
