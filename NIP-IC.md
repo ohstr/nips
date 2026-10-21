@@ -42,10 +42,12 @@ Every client hashing a ConnectionKey for the same account MUST get the same hash
 |---|---|---|
 | X | `x` | The numeric account ID, in decimal. Not the handle. |
 | Discord | `discord` | The numeric account ID, in decimal. Not the username. |
-| Email | `email` | The whole address, lowercased and trimmed. |
-| DNS domain | `dns` | The domain, lowercased, without a trailing dot. |
+| Email | `email` | The whole address, trimmed and lowercased, its domain part as IDNA A-labels. |
+| DNS domain | `dns` | The domain as IDNA A-labels, lowercased, without a trailing dot. |
 
 No canonical form is defined here for other platforms.
+
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed.
 
 No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
 
