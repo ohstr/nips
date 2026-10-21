@@ -1334,10 +1334,11 @@ misstates `deadline` only misleads itself.
 original after any of them. Only the client that placed the call MAY place it again (NIP-CP binds this to
 one device), and only after `unknown`. A re-placed call always uses the derived id of the call it replaces,
 never a fresh one: the lowercase hex of `sha256("retry:" ‖ <replaced request_id>)`, over the ASCII bytes of
-`retry:` followed by the replaced call's `request_id` as sent. Two attempts to re-place the same call then
-send the same `request_id`, and the Hub refuses the second with `REQUEST_REUSED`. A client MUST NOT place a
-call again if it has already placed that call's derived id, or holds a written-ahead record of it (NIP-CP
-§Writing); it only closes the older call. After `expired` a client MUST NOT place the call again
+`retry:` followed by the replaced call's `request_id` as sent. Two attempts to re-place the same call send
+the same `request_id`; the Hub refuses the second only once it has committed the first, so a client also
+relies on the rule below and on its own record of the ids it has placed (NIP-CP §Writing). A client MUST NOT
+place a call again if it has already placed that call's derived id, or holds a written-ahead record of it
+(NIP-CP §Writing); it only closes the older call. After `expired` a client MUST NOT place the call again
 automatically, and surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as
 `unknown`.
 
