@@ -203,7 +203,7 @@ sequenceDiagram
     {"identity_type": "connection_key", "identity_value": "abc123", "ia_pubkey": "<hex IA pubkey>", "amount_millis": 5000}
   ],
   "expiry": 86400, // seconds
-  "request_id": "<32+ lowercase hex chars>" // OPTIONAL — §Lost Replies
+  "request_id": "<32–64 lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
 
@@ -238,14 +238,15 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   caller would legitimately request, and a request exceeding it MUST be rejected rather than silently
   clamped. For example, a bound of 100 years stays clear of a nanosecond-resolution timestamp's
   wraparound.
-- `request_id` — OPTIONAL, and any caller that retries SHOULD send one (§Lost Replies). `mint_cash` is the
+- `request_id` — OPTIONAL, and a caller SHOULD send one on every call (§Lost Replies). `mint_cash` is the
   only value-creating method with no replay protection of its own: a `cash_transfer` or `cash_consolidate`
   source carries a signed proof whose nonce the Hub burns, while `mint_cash`'s parameters have nothing unique
   in them. A caller whose retry logic reads a timeout as "it failed" would mint and fund a **second** wallet.
   A timeout does not mean the mint did not happen: the Hub's funding is durable before any response is
   built. A request carrying `request_id` MUST also carry a NIP-47 `expiration` tag no more than the Hub's
   `max_request_age` ahead, and the Hub MUST NOT commit it after that instant, checked at commit time
-  (§Lost Replies, Deadlines).
+  (§Lost Replies, Deadlines). A Hub MUST refuse a request carrying `idempotency_key`, the field an earlier
+  draft used for this, so a caller written against that draft is refused rather than left unguarded.
 
 `min_transfer_millis` is deliberately NOT a request field here — it's a Hub-level setting (§Data Model),
 applied uniformly to every recipient of a freshly-minted wallet from the Hub's own current configuration,
@@ -313,10 +314,10 @@ On receiving `mint_cash`, the Hub MUST, in order:
    Hub's own expiry ceiling; otherwise it MUST NOT exceed that ceiling.
 5. Verify the Hub's own available balance is at least the sum of all recipients' amounts.
 6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed and
-   lies within `max_request_age`, and that the `request_id` is unused (§Lost Replies). **A used
-   `request_id` MUST be refused rather than mint again.** Checked here, after validation and before any
-   state is created: a request that was never going to succeed records nothing, so it cannot lock out the
-   caller's legitimate retry.
+   lies within `max_request_age`, and that the `request_id` is well formed and unused (§Lost Replies).
+   **A used `request_id` MUST be refused rather than mint again.** Checked here, after validation and before
+   any state is created: a request that was never going to succeed records nothing, so it cannot lock out
+   the caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis` and `redeem_fee_ppm` defaults (§Data Model) and a one-way commitment of
    the secret for `cash`-mode slices, never the secret itself — and perform a single internal transfer
@@ -794,7 +795,7 @@ sequenceDiagram
                         // dedicated wallet alongside the carved-off one — see this section's
                         // own "Split off a piece" description above.
   "zap_target": "<event id hex, or kind:pubkey:d coordinate>", // OPTIONAL — makes this a zap transfer
-  "request_id": "<32+ lowercase hex chars>" // OPTIONAL — §Lost Replies
+  "request_id": "<32–64 lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
 
@@ -842,7 +843,7 @@ sequenceDiagram
   never `cash`), and `new_identity` MUST be `pubkey`: a zap is signed to a Nostr recipient, and a value sent
   to a `connection_key` carries no `zap_target`. Like every param, it is bound by
   the item proof's `ph` (§Item Proofs).
-- `request_id` — OPTIONAL (§Lost Replies). A used `request_id` MUST be refused.
+- `request_id` — OPTIONAL, and a caller SHOULD send one (§Lost Replies). A used `request_id` MUST be refused.
 
 ### Response
 
@@ -1126,7 +1127,7 @@ sequenceDiagram
      "attestation_event": "{...}"}         // connection_key source only, kind-35522
   ],
   "new_identity": {"identity_type": "pubkey", "identity_value": "<hex pubkey>"},
-  "request_id": "<32+ lowercase hex chars>" // OPTIONAL — §Lost Replies
+  "request_id": "<32–64 lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
 
@@ -1148,7 +1149,7 @@ sequenceDiagram
   for `connection_key`; a caller-supplied, never wallet-minted, commitment for `cash` (§Cash-Mode Slices).
   The merged wallet is owned by this identity; its token is delivered to the caller, who hands it on —
   see Response below for how delivery differs by type.
-- `request_id` — OPTIONAL (§Lost Replies). A used `request_id` MUST be refused.
+- `request_id` — OPTIONAL, and a caller SHOULD send one (§Lost Replies). A used `request_id` MUST be refused.
 
 ### Response
 
@@ -1215,9 +1216,10 @@ the call does not help: a transfer's source is already claimed, and a resent min
 
 ### `request_id`
 
-`mint_cash`, `cash_transfer` and `cash_consolidate` take an OPTIONAL `request_id`: lowercase hex, at least
-16 bytes (32 hex characters) from a CSPRNG, fresh for every call. A caller that sends one SHOULD first save
-it durably, with the call and any cash secret it generated for it (§Security Considerations for Cash-Mode
+`mint_cash`, `cash_transfer` and `cash_consolidate` take an OPTIONAL `request_id`: an even number of
+lowercase hex characters, 32 to 64 inclusive (16 to 32 bytes), from a CSPRNG, fresh for every call. A Hub
+MUST refuse a `request_id` of any other length or form. A caller that sends one SHOULD first save it
+durably, with the call and any cash secret it generated for it (§Security Considerations for Cash-Mode
 Slices), so the record survives a crash between sending and the reply.
 
 **A repeat MUST be refused, never applied twice.** A call carrying a `request_id` already used on this node,
@@ -1320,9 +1322,11 @@ authorized the call, and a token is not a spending credential (§The Cash Token)
 
 ### Support
 
-A Hub that serves `cash_lookup` lists it in `private_methods` (§Scope Surface). A client SHOULD send a
-`request_id` only to such a Hub; otherwise it behaves as without one, and a lost reply needs the Hub
-operator.
+Every Hub that accepts `request_id` MUST record it and refuse a repeat as above, and MUST announce
+`max_request_age` (§The Hub Announcement). Only `cash_lookup` is OPTIONAL: a Hub that serves it lists it in
+`private_methods` (§Scope Surface). A client SHOULD send a `request_id` on every call that creates a bill,
+whether or not the Hub serves `cash_lookup`, because the refused repeat alone keeps a retry from applying
+the call twice. From a Hub that does not serve `cash_lookup`, a lost reply needs the Hub operator.
 
 ## Cash-Mode Slices
 
@@ -1499,8 +1503,8 @@ needed.
   signing device that can sign but cannot perform ECDH needs a *separate* decryption key, so
   the announcement carries the inbox explicitly and a client MUST use whatever it says.
 - **`limits`** — the envelope limits a Hub will actually accept: `max_bytes`, `max_items`,
-  `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`, and, for a Hub serving
-  `cash_lookup`, `max_request_age` (§Lost Replies, Deadlines).
+  `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`, and `max_request_age`
+  (§Lost Replies, Deadlines), which every Hub that accepts `request_id` MUST announce.
 - **`relays`** — OPTIONAL. Where the Hub reads its inbox. A bill's own token already carries relay
   hints (§The Cash Token), but those were fixed when the bill was minted and a Hub may have moved
   since; a bill minted years earlier is exactly the case this field exists for. When present a
@@ -2575,8 +2579,9 @@ transport, and a client MUST NOT read a method's presence here as permission to 
 `cash_lookup` (§Lost Replies) has no scope: it is authorized by the original call's authorizer, and returns
 only what that call's reply carried. A Hub that serves it MUST list it in `private_methods` on every Cash
 Wallet connection and on its Cash Hub connection, and on a Circle Hub connection whose join lookups it
-serves (NIP-CW). This listing is how a client learns the Hub supports
-`request_id` at all. A client that does not find it falls back to calling without a `request_id`.
+serves (NIP-CW). This listing is how a client learns it can recover a lost reply. A client that does not
+find it still sends `request_id`, which still guards against a repeat (§Lost Replies, Support), but a lost
+reply then needs the Hub operator.
 
 Note this concerns advertising only. The scopes above still GRANT these methods — an implementation that
 dropped the scopes instead would refuse every real call while appearing to satisfy this rule.
