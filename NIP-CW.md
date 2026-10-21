@@ -163,10 +163,10 @@ sequenceDiagram
     Member->>Member: generate the connection keypair locally (secret never leaves)
     Member->>Hub: create_circle_wallet {pubkey, connection_pubkey, max_amount, expiry?, budget_renewal?, identity_event}
     Hub->>Hub: validate pubkey and connection_pubkey (step 1)
-    Hub->>Hub: verify the identity proof, then burn its event ID (steps 2–3)
+    Hub->>Hub: verify the identity proof and its terms, then burn its event ID (steps 2–3)
     Hub->>Hub: authorize the requester as a circle member (step 4)
     Hub->>Hub: check one active wallet per (Hub, identity) (step 5)
-    Hub->>Hub: validate max_amount, budget_renewal and expiry (step 6)
+    Hub->>Hub: validate max_amount, budget_renewal and expiry against the Hub's limits (step 6)
     Hub->>Hub: rate-limit, and guard concurrent requests (steps 7–8)
     Hub->>Wallet: in one transaction: check the commitment (remaining caps + max_amount) against balance, create the wallet authorizing connection_pubkey, record membership (step 9)
     Hub->>Wallet: after commit, publish its relay subscription (step 10)
@@ -260,14 +260,15 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 
 1. Validate that `pubkey` and `connection_pubkey` are well-formed 64-character lowercase-hex strings,
    that `connection_pubkey` is a valid x-only secp256k1 pubkey, and that the two differ.
-2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–6: the kind is 23199, the event's
+2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–7: the kind is 23199, the event's
    own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
-   `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, and the `connection` tag equals
-   the requested `connection_pubkey`. The `id` check is not optional — without it the replay guard in
+   `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, the `connection` tag equals
+   the requested `connection_pubkey`, and the `terms` tag equals the requested `max_amount`, `expiry` and
+   `budget_renewal`. The `id` check is not optional — without it the replay guard in
    step 3 is bypassable by mutating only that field.
-3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 7). A
+3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 8). A
    previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
-   window.
+   window. The proof's ID is recorded as used here, before any later check.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
    direct lookup, while a `follow_set`-policy Hub resolves the current version of its follow set
    (§Membership). A Hub that cannot resolve that list yet — it fetches from relays and so has a startup
@@ -278,7 +279,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    (§Errors) if the identity already holds an active Circle Wallet under this Hub.
 6. Validate `max_amount` against the Hub's own per-wallet ceiling, the resolved `budget_renewal` against
    the Hub's own renewal floor, and, if `expiry` was explicitly supplied (non-zero), that it does not
-   exceed the Hub's own expiry ceiling (§Data Model).
+   exceed the Hub's own expiry ceiling (§Data Model). A request over any of these limits is refused with
+   `LIMIT_EXCEEDED` (§Errors), whose message names the field.
 7. Rate-limit per requester `pubkey`. A Hub SHOULD bound how often one member may ask, and MUST answer a
    throttled request with a distinct rate-limit error rather than a generic failure, so a caller can tell
    "slow down" from "you are not a member" — the same distinguishability §Identity Proof's ordering exists
@@ -296,7 +298,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    client key, and insert its membership row. The membership row's uniqueness
    constraint is the authoritative guard for step 5, so a conflict here, a `connection_pubkey` already
    authorized for another connection on this node, or a balance/ceiling check failing, MUST roll back the
-   entire transaction, including the just-created connection and permission rows.
+   entire transaction, including the just-created connection and permission rows. A failing balance or
+   ceiling check is refused with `INSUFFICIENT_CAPACITY` (§Errors).
 
    Step 8's guard is not sufficient on its own: it is process-local, so two Hub processes sharing one
    database could still both pass this check. Making the read-and-create genuinely atomic requires a
@@ -318,10 +321,15 @@ codes for them, on either transport:
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
 | `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it is deleted |
+| `LIMIT_EXCEEDED` | `max_amount`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other terms |
 | `RATE_LIMITED` | the requester has asked too often (step 7) | yes, later |
+| `INSUFFICIENT_CAPACITY` | the Hub cannot commit that much now (step 9) | yes, later or for less |
 
-Other failures (a malformed request, a proof that does not verify, a balance or ceiling check failing) keep
-whatever codes the implementation uses; this document names only the four a caller has to distinguish.
+Other failures (a malformed request, a proof that does not verify) keep whatever codes the implementation
+uses; this document names only the six a caller has to distinguish.
+
+A retry after any refusal MUST carry a newly signed proof. The refused proof's ID was consumed at step 3,
+so resending it is refused as a replay.
 
 ## Identity Proof (kind 23199)
 
@@ -339,7 +347,8 @@ section for the general reasoning, which applies identically here).
     ["d", "<Circle Wallet Hub's own pubkey>"], // binds proof to THIS Hub; no invoice to bind it to
                                               // — see below: this is the pubkey from the Hub's
                                               // PAIRING URI, not any key derived from its secret
-    ["connection", "<connection_pubkey from the request>"] // binds proof to the key the wallet is issued to
+    ["connection", "<connection_pubkey from the request>"], // binds proof to the key the wallet is issued to
+    ["terms", "<max_amount>:<expiry>:<budget_renewal>"]    // binds proof to the requested terms
   ],
   "content": "",
   "sig": "<schnorr signature by `pubkey`>"
@@ -354,10 +363,10 @@ one list of checks; every other section that verifies a kind-23199 proof refers 
 1. **The event's `kind` is 23199.** Another kind signed by the same key — a NIP-CASH proof, say — is not
    an identity proof for this Hub, however well its other fields match.
 2. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
-   compare. This is load-bearing rather than a formality: a Nostr signature does not cover the `id` field,
-   so a proof whose id is *not* checked can be replayed indefinitely by mutating only that field — the
-   signature stays valid and the single-use replay guard below, which keys on the id, never sees a repeat.
-   Omitting this check silently defeats the guard rather than weakening it.
+   compare. This is load-bearing rather than a formality: a verifier that checks the signature against a
+   recomputed id but keys the replay guard on the supplied `id` can be fooled by changing only that field —
+   the signature still verifies and the single-use replay guard below never sees a repeat. Omitting this
+   check silently defeats the guard rather than weakening it.
 3. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
 4. **`created_at` is inside the freshness window** given above.
 5. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
@@ -367,10 +376,15 @@ one list of checks; every other section that verifies a kind-23199 proof refers 
 6. **The `connection` tag equals the request's `connection_pubkey`.** Exactly one such tag. It ties the
    member's identity to the key the wallet will be issued to, so nobody who sees the request can have the
    wallet issued to a key of their own instead (§Security Considerations).
-7. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
+7. **The `terms` tag equals the request's terms.** Exactly one such tag, whose value is
+   `<max_amount>:<expiry>:<budget_renewal>` exactly as requested: `max_amount` and `expiry` as decimal
+   integers, an omitted `expiry` written as `0` and an omitted `budget_renewal` as `never`. A Hub MUST
+   reject a request whose params differ. With the signer, `d` and `connection`, this binds every param of
+   the request, so nobody who sees it can resubmit the proof with other terms.
+8. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
-Checks 1–6 MUST run before the membership
+Checks 1–7 MUST run before the membership
 authorization check. This ordering is what closes an allowlist-membership oracle: an attacker who does
 not hold the target's private key MUST NOT be able to reach the authorization check at all, so the
 response cannot be used to probe list membership.
@@ -767,14 +781,12 @@ request before the Hub does could resubmit it with their own key and receive a w
 against the Hub on the real member's membership. The kind-23199 `connection` tag (§Identity Proof,
 check 6) closes this on both transports.
 
-**On the standard transport, the identity proof does not bind the other params.** It binds the
-requester, the Hub and the connection key, nothing else. Anyone who reads a request before the Hub does —
-a co-member holding the shared connection who sees it on a relay — can resubmit the same proof with a
-different `max_amount`, `expiry` or `budget_renewal` and, by arriving first, consume it; the requester's
-own copy is then refused as a replay. The wallet is still issued to the requester's own connection key and
-its details are still encrypted to them, so this cannot take a wallet, but it can change its terms or tie
-up the Hub's commitment ceiling. A member who cares SHOULD join over §Private Join, where the requester's
-own item proof binds every param.
+**The identity proof binds every param, on either transport.** Its `connection` and `terms` tags
+(§Identity Proof, checks 6–7) bind the connection key, `max_amount`, `expiry` and `budget_renewal`, beside
+the requester and the Hub. Anyone who reads a request on the standard transport before the Hub does — a
+co-member holding the shared connection who sees it on a relay — can still resubmit it first and consume
+the proof, but only unchanged: the Hub issues exactly the wallet the requester asked for, to their own key,
+with its details encrypted to them. The requester's own copy is then refused as a replay.
 
 **The private-transport inbox is trusted through `get_info`, and the reply through the Hub's key.** A
 client encrypts a private join to whatever inbox the announcement names, and trusts the announcement only
