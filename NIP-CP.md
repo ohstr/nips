@@ -64,10 +64,12 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `amount`: milli-units (`msats` for `bitcoin`).
 - `chain`: e.g. `bitcoin`; any energy-backed coin works the same.
 - `identity`: who can claim it — `pubkey <pubkey>`, `connection_key <ConnectionKey> <ia-pubkey>` or `cash`.
-- `state`: `live`, `spent`, `expired`, `reclaimed` or `unknown`, plus the last check time.
+- `state`: `live`, `pending`, `spent`, `expired`, `reclaimed` or `unknown`, plus the last check time.
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
 
-**Optional tags**: `mint` (Minter), `expires_at`, `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
+A `pending` entry leaves out `cash` and `identity` and carries `request_id` instead (§Writing).
+
+**Optional tags**: `mint` (Minter), `expires_at`, `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token), `request_id` (of the call that creates the token).
 
 **Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published on its own. Relays SHOULD reject a signed `9525`.
 
@@ -80,6 +82,7 @@ Wraps go to the user's NIP-17 inbox relays (kind `10050`), else their NIP-65 wri
 ## Writing
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
+- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet saves a `pending` entry holding the call's `request_id` (NIP-CASH) and any cash secret it generated, with `w` set to the `request_id`. On the reply it adds an entry for each new bill and removes the pending one. If the reply is lost, the wallet recovers it with `cash_lookup` and MUST NOT resend the call.
 - **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`), so the user can see why a note left.
 
