@@ -380,12 +380,13 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   - `unknown` while now is at most `deadline` plus 6 minutes: the join was not made and never will be;
   - `expired` after that: the outcome can no longer be known. A client MUST NOT join again automatically
     with that `connection_pubkey`, and SHOULD show the join to the member.
-- **An `unknown` received after the wallet was deleted proves nothing.** The record is dropped when the
-  wallet is deleted, so after that an `unknown` no longer shows the join failed (§The Record in NIP-CASH).
+- **The record outlives the lookup window.** The Hub keeps a join's record at least until its `deadline`
+  plus 6 minutes, even if the wallet is deleted sooner. It may drop the record once the wallet is deleted
+  and that window has passed; a later lookup then answers `expired` (§The Record in NIP-CASH).
 
 A Hub that serves it lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
-(§Scope Surface in NIP-CASH), and MUST keep each wallet's `encrypted_details` while the wallet exists.
-This works whichever transport carried the join, but only on a Hub that lists `cash_lookup`; offering
+(§Scope Surface in NIP-CASH), and MUST keep each join's record, with its `encrypted_details`, while the
+wallet exists and for at least the window above. This works whichever transport carried the join, but only on a Hub that lists `cash_lookup`; offering
 §Private Join is necessary for that, not sufficient.
 
 ## Identity Proof (kind 23199)
