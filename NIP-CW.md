@@ -117,8 +117,9 @@ A Circle Wallet Hub MUST maintain, for itself:
 - a ceiling on the amount a member may request for their own wallet;
 - a floor on how tight a member's requested budget-renewal period may be (§Budget Renewal Floor);
 - a ceiling on, and default value for, an issued wallet's lifetime;
-- an optional ceiling on the combined `max_amount` committed across every currently-active wallet it
-  has issued, separate from and in addition to its own real balance.
+- an optional ceiling on the combined commitment across every currently-active wallet it has issued
+  (§Creating a Circle Wallet's own Processing Algorithm, step 9), separate from and in addition to its own
+  real balance.
 
 A member's `max_amount` is a spend cap, not a pre-funded transfer: a Circle Wallet starts at zero
 balance and draws against the Hub's own underlying balance as it spends, up to that cap. The Hub MUST
@@ -147,6 +148,10 @@ monthly, yearly, never), a
 request MUST be rejected when its requested renewal is tighter than the Hub's floor. For example, a
 `monthly` floor allows `monthly`/`yearly`/`never` and rejects `daily`/`weekly`.
 
+A budget period starts when the wallet is created and repeats every day, week, calendar month or year
+after that, in UTC. At the start of each period the wallet's spend cap is available again in full. With
+`never`, the wallet's whole life is one period.
+
 ## Creating a Circle Wallet
 
 ```mermaid
@@ -163,7 +168,7 @@ sequenceDiagram
     Hub->>Hub: check one active wallet per (Hub, identity) (step 5)
     Hub->>Hub: validate max_amount, budget_renewal and expiry (step 6)
     Hub->>Hub: rate-limit, and guard concurrent requests (steps 7–8)
-    Hub->>Wallet: in one transaction: check committed max_amount against balance, create the wallet authorizing connection_pubkey, record membership (step 9)
+    Hub->>Wallet: in one transaction: check the commitment (remaining caps + max_amount) against balance, create the wallet authorizing connection_pubkey, record membership (step 9)
     Hub->>Wallet: after commit, publish its relay subscription (step 10)
     Hub-->>Member: {encrypted_details} (step 11)
     Note over Hub,Member: one NIP-44 ciphertext from the Hub key: every wallet term, no secret
@@ -189,10 +194,13 @@ sequenceDiagram
   The member keeps the secret and never sends it; the Hub authorizes this pubkey as the wallet's client key.
   A request without it MUST be rejected — there is no Hub-generated alternative. A member SHOULD generate a
   fresh keypair per request, so the connection key links to nothing else they use.
-- `max_amount` — REQUIRED, MUST NOT exceed the Hub's own per-wallet ceiling (§Data Model).
+- `max_amount` — REQUIRED, the spend cap per budget period, in the chain's milli-unit (msats on Bitcoin,
+  the same milli-unit for any other energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own
+  per-wallet ceiling (§Data Model).
 - `expiry` — OPTIONAL; if omitted or zero, it MUST default to the Hub's own expiry ceiling.
-- `budget_renewal` — OPTIONAL; if omitted, it MUST default to `never`. Whether omitted or explicit, the
-  resolved value MUST satisfy the Hub's own renewal floor (§Budget Renewal Floor).
+- `budget_renewal` — OPTIONAL, one of NIP-47's `daily` | `weekly` | `monthly` | `yearly` | `never`, with
+  periods as §Budget Renewal Floor defines them; if omitted, it MUST default to `never`. Whether omitted
+  or explicit, the resolved value MUST satisfy the Hub's own renewal floor (§Budget Renewal Floor).
 - `identity_event` — REQUIRED, the JSON-encoded kind-23199 identity proof (§Identity Proof).
 
 ### Response
@@ -223,9 +231,9 @@ return a secret, a `pairing_uri`, or anything else derived from one. `relays` MU
 non-empty relay URL, in failover order, for the same reason NIP-CASH requires one on every credential it
 defines (§Relay Hints Are Mandatory in NIP-CASH): the wallet is reachable nowhere else.
 
-`max_amount` is the spend cap as the Hub resolved it, in the request's units. A Hub that adjusts the
-requested value, for example by rounding it to a unit its node can represent, reports what it actually
-applied, so the member is never left assuming a cap they do not have.
+`max_amount` is the spend cap as the Hub resolved it, in the same milli-unit as the request. A Hub that
+adjusts the requested value, for example by rounding it to a unit its node can represent, reports what it
+actually applied, so the member is never left assuming a cap they do not have.
 
 **The response carries exactly one field on purpose.** `encrypted_details` MUST be encrypted (NIP-44) to
 the requester's own pubkey, and every term describing the issued wallet MUST be inside it. A Hub MUST NOT
@@ -280,10 +288,12 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    pass step 9's commitment check against the same balance; rejecting the second with a retryable error is
    sufficient. This guard is caller-visible, which is why it is specified: a member may see a transient
    failure caused by another member's request, not by anything wrong with their own.
-9. Inside one transaction, verify that the sum of `max_amount` across every currently-active wallet the
-   Hub has issued, plus this request's `max_amount`, does not exceed the Hub's own current balance (and
-   its optional aggregate ceiling, if configured). Then create the Circle Wallet connection, authorizing
-   `connection_pubkey` as its client key, and insert its membership row. The membership row's uniqueness
+9. Inside one transaction, verify that the Hub's commitment does not exceed its own current balance (and
+   its optional aggregate ceiling, if configured). The commitment is the sum, over every currently-active
+   wallet the Hub has issued, of that wallet's remaining cap for its current budget period (§Budget
+   Renewal Floor), plus this request's `max_amount`. This limits what members can draw in one period, not
+   across renewals. Then create the Circle Wallet connection, authorizing `connection_pubkey` as its
+   client key, and insert its membership row. The membership row's uniqueness
    constraint is the authoritative guard for step 5, so a conflict here, a `connection_pubkey` already
    authorized for another connection on this node, or a balance/ceiling check failing, MUST roll back the
    entire transaction, including the just-created connection and permission rows.
@@ -558,7 +568,7 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
 
 ```jsonc
 "circle_wallet": {
-  "available_millis": 1000000, // what the Hub can still commit: balance minus outstanding commitments
+  "available_millis": 1000000, // what the Hub can still commit: balance minus step 9's commitment
   "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
   "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
@@ -573,9 +583,9 @@ and a Hub that withheld them would only push the question into a support channel
 snapshot, not a reservation — it MAY be stale by the time a request lands, and step 9's commitment check
 remains authoritative.
 
-`per_wallet_max_millis` (same unit as `max_amount`) and `min_budget_renewal` (`daily` | `weekly` |
-`monthly` | `yearly` | `never`) are the other limits step 6 checks, so a client can validate a request
-before sending it. A Hub SHOULD report both. They can change after `get_info`, so a client MUST still
+`per_wallet_max_millis` (the chain's milli-unit, like `max_amount`) and `min_budget_renewal` (`daily` |
+`weekly` | `monthly` | `yearly` | `never`) are the other limits step 6 checks, so a client can validate a
+request before sending it. A Hub SHOULD report both. They can change after `get_info`, so a client MUST still
 handle a refusal.
 
 `circle_policy` is different in kind: it discloses the Hub's **admission mechanism**, not its terms. This is
