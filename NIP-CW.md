@@ -138,7 +138,8 @@ be able to determine that fact. §Membership's one-active-wallet-per-member rule
 That fact MUST stop being true once the member's wallet stops being active (§Lifecycle and Deletion),
 freeing them to request a new one.
 
-A Hub that serves §Lost Join Reply MUST keep, for each Circle Wallet, the `encrypted_details` it returned.
+A Hub that serves §Lost Join Reply also keeps, for each Circle Wallet, the `encrypted_details` it returned
+(§Lost Join Reply).
 
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has
 already consumed for `create_circle_wallet` (§Identity Proof, §Security Considerations), since this
@@ -362,19 +363,23 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   proof signed with the Hub connection's secret, exactly as a join does (§What differs from a bill
   operation).
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
-  request that named this `connection_pubkey`. The record is keyed on (`pubkey`, `connection_pubkey`): a
-  lookup whose signer has no record for that `connection_pubkey` is answered `pending` or `unknown` by its
-  `deadline` as below, not omitted.
+  request that named this `connection_pubkey`. The record is matched on (signer, `connection_pubkey`): a
+  lookup whose signer has no record for that `connection_pubkey` is answered by its `deadline` as below,
+  not omitted.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
   would have checked the reply (§Response).
 - **`deadline` is the join's deadline, as the client sent it.** A join's deadline is its kind-23199
   proof's `created_at` plus the 5-minute freshness window (§Identity Proof), and the Hub MUST NOT create a
-  wallet whose proof is past it, checked at commit (step 9). With no record for the signer and that
-  `connection_pubkey`, the Hub answers `pending` with `retry_after` = `deadline` while `deadline` is in
-  the future, and `unknown`, which is final, once it has passed. A `deadline` counts as at most 6 minutes
+  wallet whose proof is past it, checked at commit (step 9). A `deadline` counts as at most 6 minutes
   from now (the 5-minute freshness window plus its 1-minute future allowance); a later one is treated as
   now plus 6 minutes. A client that misstates `deadline` misleads only itself, since a late join is
   refused anyway. A lookup MUST NOT write state.
+- **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH (§The
+  Record in NIP-CASH):
+  - `pending`, with `retry_after` = `deadline`, while `deadline` is ahead;
+  - `unknown` while now is at most `deadline` plus 6 minutes: the join was not made and never will be;
+  - `expired` after that: the outcome can no longer be known. A client MUST NOT join again automatically
+    with that `connection_pubkey`, and SHOULD show the join to the member.
 - **A late `unknown` proves nothing once the wallet is gone.** The record is dropped when the wallet is
   deleted, so after that an `unknown` no longer shows the join failed (§The Record in NIP-CASH).
 
