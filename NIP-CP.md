@@ -68,13 +68,10 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
 - `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
-A `pending` entry carries `w`, `v`, `state`, `wrap_key` and `request_id`, plus `deadline` and `target` when the Hub
-lists `cash_lookup` (§Writing), and the call's `amount` and `chain`. It leaves out `cash`, `identity` and
-`expires_at`. Its `w` equals its `request_id`.
+A `pending` entry carries `w`, `v`, `state`, `wrap_key` and `request_id`, plus `deadline` and `target` when the Hub lists `cash_lookup` (§Writing), and the call's `amount` and `chain`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 - `request_id`: the call's NIP-CASH `request_id`.
 - `deadline`: the call's deadline as sent (the envelope's `not_after`, or `mint_cash`'s NIP-47 `expiration`).
-- `target`: the `w` of the bill the call named (the first source for `cash_consolidate`), or for `mint_cash` the
-  Cash Hub connection's wallet pubkey (its TLV `0`).
+- `target`: the `w` of the bill the call named (the first source for `cash_consolidate`), or for `mint_cash` the Cash Hub connection's wallet pubkey (its TLV `0`).
 
 **Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
 
@@ -91,23 +88,12 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 ## Writing
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
-- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the
-  wallet stores a `pending` entry holding the call's `request_id` and any cash secret it generated, and reads it
-  back before sending the call, which carries that `request_id`. When the Hub lists `cash_lookup` in
-  `private_methods`, the entry also holds the call's `deadline` and `target`. On the reply the wallet adds an entry
-  for each new bill and marks the pending entry `done`. If the reply is lost, the wallet sends `cash_lookup` with
-  `request_id` and `deadline` to that target, and MUST NOT resend the call:
-  - `done`: add an entry for each new bill (a tombstone in place of a token sets that entry's state per §Balance)
-    and mark the pending entry `done`.
+- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet stores a `pending` entry holding the call's `request_id` and any cash secret it generated, and reads it back before sending the call, which carries that `request_id`. When the Hub lists `cash_lookup` in `private_methods`, the entry also holds the call's `deadline` and `target`. On the reply the wallet adds an entry for each new bill and marks the pending entry `done`. If the reply is lost, the wallet sends `cash_lookup` with `request_id` and `deadline` to that target, and MUST NOT resend the call:
+  - `done`: add an entry for each new bill (a tombstone in place of a token sets that entry's state per §Balance) and mark the pending entry `done`.
   - `pending`: ask again after `retry_after`.
-  - `unknown`: the wallet MAY place the call again with a new `request_id` only if the `unknown` arrived no later
-    than the call's `deadline` plus the Hub's `max_request_age`; otherwise it MUST NOT place it again automatically
-    and SHOULD show the call to the user. Then it marks the pending entry `done`. An omitted answer is not `unknown`.
-- **Without `cash_lookup`**: the Hub still refuses a repeated `request_id`, so the call still carries it. The pending
-  entry has its `request_id` but no `deadline` or `target`, and a lost reply needs the Hub operator.
-- **Close** a pending entry by publishing it at `v` + 1 in state `done`, then deleting the old wrap as for any change;
-  never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until
-  the pending entry is `done`.
+  - `unknown`: the wallet MAY place the call again with a new `request_id` only if the `unknown` arrived no later than the call's `deadline` plus the Hub's `max_request_age`; otherwise it MUST NOT place it again automatically and SHOULD show the call to the user. Then it marks the pending entry `done`. An omitted answer is not `unknown`.
+- **Without `cash_lookup`**: the Hub still refuses a repeated `request_id`, so the call still carries it. The pending entry has its `request_id` but no `deadline` or `target`, and a lost reply needs the Hub operator.
+- **Close** a pending entry by publishing it at `v` + 1 in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
 - **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`, `done`), so the user can see why a note left.
 - **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
@@ -116,12 +102,8 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 
 - **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525` whose seal `pubkey` and rumor `pubkey` are both the user. Other wraps (DMs) are ignored. A wallet MUST discard any other `9525`: anyone can gift-wrap to the user, but only the user can sign the seal.
 - **Incremental sync**: the same filter with `since` set to the last sync minus 2 days, since gift wraps carry randomized timestamps. Wraps already seen are skipped.
-- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`, `done`) wins only over entries whose `v` is
-  less than or equal to its own; an entry with a higher `v`, written after a definitive `cash_status` result,
-  supersedes it (a bill returned by an in-place transfer keeps its `w`). Otherwise the highest `v` wins; on a tie,
-  the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
-- **Older entries**: a wallet SHOULD fill a missing `expires_at` from `cash_status` and rewrite the entry. A reader
-  MUST ignore an entry whose `state` it does not recognise.
+- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`, `done`) wins only over entries whose `v` is less than or equal to its own; an entry with a higher `v`, written after a definitive `cash_status` result, supersedes it (a bill returned by an in-place transfer keeps its `w`). Otherwise the highest `v` wins; on a tie, the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
+- **Older entries**: a wallet SHOULD fill a missing `expires_at` from `cash_status` and rewrite the entry. A reader MUST ignore an entry whose `state` it does not recognise.
 - **Resync**: drop the local copy and run a full sync.
 
 ## Balance
@@ -156,5 +138,4 @@ A device MUST write a final state only from a definitive result (its own spend, 
 
 Relays see gift wraps addressed to the user at randomized times, the same as DMs, and deletions signed by one-time keys at randomized times. The number of wraps still grows with activity; a wallet MAY batch changes to hide it. Refreshing states contacts each Hub, not relays.
 
-A wrap carrying NIP-40 `expiration` is distinguishable from a DM and reveals roughly when its bill expires; a wallet
-that wants wraps indistinguishable omits it.
+A wrap carrying NIP-40 `expiration` is distinguishable from a DM and reveals roughly when its bill expires; a wallet that wants wraps indistinguishable omits it.
