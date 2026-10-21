@@ -68,7 +68,7 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
 - `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
-A `pending` entry carries `w`, `v`, `state`, `wrap_key` and `request_id`, plus `deadline` and `target` when the Hub lists `cash_lookup` (§Writing), and the call's `amount` and `chain`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
+A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline` and `target` (§Writing), and the call's `amount` and `chain`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 - `request_id`: the call's NIP-CASH `request_id`.
 - `deadline`: the call's deadline as sent (the envelope's `not_after`, or `mint_cash`'s NIP-47 `expiration`).
 - `target`: the `w` of the bill the call named (the first source for `cash_consolidate`), or for `mint_cash` the Cash Hub connection's wallet pubkey (its TLV `0`).
@@ -88,11 +88,13 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 ## Writing
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
-- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet stores a `pending` entry holding the call's `request_id` and any cash secret it generated, and reads it back before sending the call, which carries that `request_id`. When the Hub lists `cash_lookup` in `private_methods`, the entry also holds the call's `deadline` and `target`. On the reply the wallet adds an entry for each new bill and marks the pending entry `done`. If the reply is lost, the wallet sends `cash_lookup` with `request_id` and `deadline` to that target, and MUST NOT resend the call:
+- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet stores a `pending` entry holding the call's `request_id`, `deadline`, `target` and any cash secret it generated, and reads it back before sending the call, which carries that `request_id`. On the reply the wallet adds an entry for each new bill and marks the pending entry `done`. If the reply is lost and the Hub lists `cash_lookup` in `private_methods`, the wallet sends `cash_lookup` with `request_id` and `deadline` to that target, and MUST NOT resend the call. The Hub answers on its own clock:
   - `done`: add an entry for each new bill (a tombstone in place of a token sets that entry's state per §Balance) and mark the pending entry `done`.
   - `pending`: ask again after `retry_after`.
-  - `unknown`: the wallet MAY place the call again with a new `request_id` only if the `unknown` arrived no later than the call's `deadline` plus the Hub's `max_request_age`; otherwise it MUST NOT place it again automatically and SHOULD show the call to the user. Then it marks the pending entry `done`. An omitted answer is not `unknown`.
-- **Without `cash_lookup`**: the Hub still refuses a repeated `request_id`, so the call still carries it. The pending entry has its `request_id` but no `deadline` or `target`, and a lost reply needs the Hub operator.
+  - `unknown`: the wallet MAY place the call again, with `request_id` = lowercase hex of sha256("retry:" ‖ the previous `request_id`), written ahead as a new pending entry; then it marks the old pending entry `done`. Two devices re-placing the same call thus collide, and the Hub refuses the second as a repeat. An omitted answer is not a lookup `unknown`.
+  - `expired`: the outcome can no longer be known (this lookup answer is not the bill state `expired`). The wallet MUST NOT place the call again automatically, SHOULD show the call to the user, and marks the pending entry `done`.
+- **Without `cash_lookup`**: the Hub still refuses a repeated `request_id`, so the pending entry is written the same way, but a lost reply needs the Hub operator.
+- **Old Hubs**: on a Hub that does not announce `max_request_age`, the wallet treats `request_id` as unhonoured and MUST NOT resend a bill-creating call whose reply was lost.
 - **Close** a pending entry by publishing it at `v` + 1 in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
 - **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`, `done`), so the user can see why a note left.
