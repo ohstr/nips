@@ -213,15 +213,16 @@ A client MAY mark a Cash Zap past `expires_at` as possibly expired. A sender's N
 
 ## Security Considerations
 
-- **Fake value**: any key can make a valid mint signature, and a sender can mint to themselves and reclaim. Counting only recipient-listed minters limits this to minters the recipient trusts, as NIP-57 does with `nostrPubkey`.
-- **Revocation**: until claimed, the sender can delete the bill, remove the slice, or untrust a ConnectionKey's IA (NIP-CASH §Lifecycle and Deletion, §Removing a Recipient).
-- **Copies**: a copied token cannot be redeemed, but can be re-tagged to another note, recipient or sender, with any `created_at`. Conflicting copies are therefore not counted.
-- **Split bills**: TLV `6` attests the whole wallet, so a bill could give the recipient one sat and the sender the rest. Only rule 9 catches it.
-- **Proxy trust**: anyone can sign a `P` naming anyone.
+- **Fake value**: any node can make a valid zap signature, including one the sender runs, which can issue a zap and revoke it before it is claimed. Counting only Minters the reader or the recipient trusts limits this to Hubs they trust, as NIP-57 does with `nostrPubkey`.
+- **Revocation**: until claimed, the minting Hub's owner can delete the bill, remove the slice, or untrust a ConnectionKey's IA (NIP-CASH §Lifecycle and Deletion, §Removing a Recipient). A sender who transferred the bill has no power over it. A zap revoked after it was issued still counts.
+- **Identity Authorities**: a ConnectionKey zap is claimable by whoever its IA attests. The IA is chosen and vouched for by the minting Hub, so trusting the Hub includes trusting its IAs. Claim screens SHOULD show the IA.
+- **Copies**: a copied token cannot be redeemed. The zap signature commits to the recipient, sender and target, so a copy re-tagged to another note, recipient or sender fails rule 7, and a copy with other relay hints or connection secret fails rule 6.
+- **Split bills**: TLV `6` attests the whole wallet. A zap signature is made only for a new bill issued to the recipient alone, but a bill without one could give the recipient one sat and others the rest. Only rule 9 catches it.
+- **Proxy trust**: anyone can sign a `P` naming any platform account. `P` is display only, never a Nostr pubkey, and never the signed sender.
 
 ## Privacy Considerations
 
-A Cash Zap shows its amount, chain, recipient and Minter; for a self-hosted Hub, the Minter is the sender's own node.
+A Cash Zap shows its amount, chain, recipient and Minter; for a self-hosted Hub, the Minter is the sender's own node. The minting Hub learns the zapped event from `zap_target`, which the `9522` makes public anyway.
 
 Anyone holding the public token can poll `get_balance` and `cash_status` and learn when the value left — redeemed, reclaimed or expired, without telling which — exactly, via the tombstone's `retained_until`. A sender who wants this hidden SHOULD send the token privately instead.
 
@@ -229,6 +230,5 @@ Anyone holding the public token can poll `get_balance` and `cash_status` and lea
 
 Optional NIP-CASH upgrades, needing no change to these events:
 
-- a mint-signature commitment to the recipient and target, making attribution provable and the copy rules unnecessary;
 - irrevocable bills, turning counts from promised into committed;
 - an attestation parameter on `cash_status`, so a ConnectionKey recipient can check rule 9 without a transfer.
