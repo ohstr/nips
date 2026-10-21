@@ -136,6 +136,8 @@ be able to determine that fact. §Membership's one-active-wallet-per-member rule
 That fact MUST stop being true once the member's wallet is disabled (§Membership) or its connection is
 deleted, freeing them to request a new one.
 
+A Hub that serves §Lost Join Reply keeps, for each Circle Wallet, the `encrypted_details` it returned.
+
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has
 already consumed for `create_circle_wallet` (§Identity Proof, §Security Considerations), since this
 proof has no invoice to bind it to a single use.
@@ -171,8 +173,8 @@ sequenceDiagram
     Hub->>Wallet: in one transaction: check the commitment (remaining caps + max_amount) against balance, create the wallet authorizing connection_pubkey, record membership (step 9)
     Hub->>Wallet: after commit, publish its relay subscription (step 10)
     Hub-->>Member: {encrypted_details} (step 11)
-    Note over Hub,Member: one NIP-44 ciphertext from the Hub key: every wallet term, no secret
-    Member->>Member: decrypt, then build the connection string from wallet_pubkey, relays and its own secret
+    Note over Hub,Member: one NIP-44 ciphertext from the Hub key: every wallet term and connection_pubkey, no secret
+    Member->>Member: decrypt, check connection_pubkey, then build the connection string from wallet_pubkey, relays and its own secret
 ```
 
 ### Request
@@ -216,6 +218,7 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
 ```jsonc
 {
   "wallet_pubkey": "<hex>",
+  "connection_pubkey": "<hex, the connection_pubkey of the request>",
   "relays": ["wss://relay.example.com"],
   "max_amount": 100000,
   "expires_at": 1720000000,
@@ -230,6 +233,10 @@ It carries no secret and no connection string. The member builds its own connect
 return a secret, a `pairing_uri`, or anything else derived from one. `relays` MUST carry at least one
 non-empty relay URL, in failover order, for the same reason NIP-CASH requires one on every credential it
 defines (§Relay Hints Are Mandatory in NIP-CASH): the wallet is reachable nowhere else.
+
+`connection_pubkey` repeats the request's. A client MUST reject details whose `connection_pubkey` differs
+from the one in its request. Every join between the same member and Hub decrypts under the same
+conversation key, so without it an old genuine reply could be passed off as the answer to a new request.
 
 `max_amount` is the spend cap as the Hub resolved it, in the same milli-unit as the request. A Hub that
 adjusts the requested value, for example by rounding it to a unit its node can represent, reports what it
@@ -308,8 +315,9 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    otherwise unenforced. A transaction-scoped advisory lock is sufficient where the datastore supports
    one.
 10. After the transaction commits, never before, publish the new connection's relay subscription.
-11. Return a single `encrypted_details` ciphertext containing `wallet_pubkey`, `relays` and every resolved
-    wallet parameter, and no secret. Nothing describing the wallet may travel outside it (§Response).
+11. Return a single `encrypted_details` ciphertext containing `wallet_pubkey`, `connection_pubkey`,
+    `relays` and every resolved wallet parameter, and no secret. Nothing describing the wallet may travel
+    outside it (§Response).
 
 ### Errors
 
@@ -330,6 +338,24 @@ uses; this document names only the six a caller has to distinguish.
 
 A retry after any refusal MUST carry a newly signed proof. The refused proof's ID was consumed at step 3,
 so resending it is refused as a replay.
+
+### Lost Join Reply
+
+A member whose join reply never arrives cannot simply ask again: the proof was consumed at step 3, and a
+new request is refused with `WALLET_EXISTS` if the first one succeeded. The member recovers the reply with
+NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NIP-CASH), with params
+`{"connection_pubkey": "<hex>"}` in place of `request_id`:
+
+- **The item's `target` is the Hub**, and it carries a bill proof signed with the Hub connection's secret,
+  exactly as a join does (§What differs from a bill operation).
+- **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
+  request that named this `connection_pubkey`. An item signed by anyone else MUST be omitted.
+- **Its result is the original response**, the same `encrypted_details`, which the client checks as it
+  would have checked the reply (§Response).
+
+A Hub that serves it lists `cash_lookup` in its `get_info` `private_methods` (§Scope Surface in
+NIP-CASH), and keeps each wallet's `encrypted_details` while the wallet exists. This works whichever
+transport carried the join, but only on a Hub that offers §Private Join.
 
 ## Identity Proof (kind 23199)
 
@@ -786,7 +812,8 @@ check 6) closes this on both transports.
 the requester and the Hub. Anyone who reads a request on the standard transport before the Hub does — a
 co-member holding the shared connection who sees it on a relay — can still resubmit it first and consume
 the proof, but only unchanged: the Hub issues exactly the wallet the requester asked for, to their own key,
-with its details encrypted to them. The requester's own copy is then refused as a replay.
+with its details encrypted to them. The requester's own copy is then refused as a replay, and their client
+recovers the reply (§Lost Join Reply).
 
 **The private-transport inbox is trusted through `get_info`, and the reply through the Hub's key.** A
 client encrypts a private join to whatever inbox the announcement names, and trusts the announcement only
