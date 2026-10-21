@@ -386,8 +386,8 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
 
 A Hub that serves it lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
 (§Scope Surface in NIP-CASH), and MUST keep each join's record, with its `encrypted_details`, while the
-wallet exists and for at least the window above. This works whichever transport carried the join, but only on a Hub that lists `cash_lookup`; offering
-§Private Join is necessary for that, not sufficient.
+wallet exists and for at least the window above. This works whichever transport carried the join, but
+only on a Hub that lists `cash_lookup`; offering §Private Join is necessary for that, not sufficient.
 
 ## Identity Proof (kind 23199)
 
