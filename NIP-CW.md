@@ -514,7 +514,7 @@ value only the provider and the Hub can read:
   were one.
 - **Reading.** For each `hidden_p` tag, a Hub MUST attempt NIP-44 v2 decryption with its inbox key and
   the provider pubkey. An entry that fails to decrypt MUST be skipped without error, since it may be
-  meant for another Hub sharing the Circle Identity. An entry that decrypts to anything but a
+  meant for a Hub on another node sharing the Circle Identity. An entry that decrypts to anything but a
   well-formed 64-character lowercase-hex pubkey MUST be skipped too.
 - **Several Hubs.** A Circle Identity serving several Hubs with different inbox keys needs one
   `hidden_p` entry per hidden member per inbox key.
@@ -711,9 +711,9 @@ Connection). Its `circle_wallet.identity` is what reaches the private transport:
    — not a URI parameter, a QR caption or a profile — since whoever supplies it chooses the inbox the
    join is encrypted to.
 3. A client SHOULD then join over the private transport, without asking the member to choose.
-4. If no announcement can be found or verified, a client MAY fall back to the standard transport, and
-   when it does it SHOULD tell the member the join was not private. It MUST NOT fall back silently:
-   a member who expected Private Join may not want their pubkey on the shared connection.
+4. If no announcement can be found or verified, a client MAY fall back to the standard transport only
+   after telling the member the join will not be private: a member who expected Private Join may not
+   want their pubkey on the shared connection.
 
 ### What differs from a bill operation
 
@@ -895,6 +895,10 @@ call that yields `identity` travels on the standard transport, `p`-tagged with t
 relay observer learns that someone looked at the circle and when. It is authored by the connection's
 client key, which every prospective member shares, so it does not say who. The join that follows, which
 carries the requester's own pubkey, goes over the private transport.
+
+**Reporting `identity` reveals the host's node.** `identity` is the Hub's node identity (§The Circle
+Wallet Hub Connection), so reporting it shows everyone who holds the connection string the host's
+Lightning node, and every other Hub on that node.
 
 **`get_info` discloses which mechanism a Hub uses.** Any holder of the shared Hub connection string — which
 is broadcast to everyone who might join, so in practice anyone who has been told about the circle — can read
