@@ -1267,14 +1267,16 @@ created could expire.
 call's target — the bill a `cash_transfer` or `cash_consolidate` item named, the Cash Hub connection for
 `mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even if it has since
 destroyed that bill. Its bill proof is signed with that target's connection secret, as for any item (§Bill
-Proofs).
+Proofs). For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV `0`, §The
+Cash Hub Connection), and the item and bill proofs are both signed with that connection's client key.
 
 ```jsonc
 {"request_id": "<hex>", "deadline": 1720000060}
 ```
 
-- `request_id` — REQUIRED, the original call's. NIP-CW defines a second key, `connection_pubkey`, for a
-  lost join reply (§Lost Join Reply in NIP-CW); a lookup carries exactly one of the two.
+- `request_id` — the original call's. REQUIRED unless the lookup carries NIP-CW's `connection_pubkey`
+  (§Lost Join Reply in NIP-CW); exactly one of the two MUST be present, and a lookup with both or neither
+  MUST be omitted.
 - `deadline` — REQUIRED. The original call's deadline as the client sent it (§Deadlines): `mint_cash`'s
   NIP-47 `expiration`, the envelope's `not_after` for a private item, or, for a NIP-CW join, its kind-23199
   proof's `created_at` plus the freshness window.
@@ -1302,9 +1304,10 @@ The answer is one of:
   New Channel). Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
   (§Answering About a Destroyed Bill) in place of its token, never as a token.
 - **`pending`** — the call may still commit. Either the Hub holds it and has not finished it, or it has no
-  record and `deadline` has not passed. `retry_after` is the deadline: the recorded one, or the lookup's
-  `deadline`, which the Hub treats as at most `H` from now — or, for a join lookup by `connection_pubkey`, at
-  most the kind-23199 proof's freshness window from now (§Lost Join Reply in NIP-CW).
+  record and `deadline` has not passed. `retry_after` is the deadline, in absolute unix seconds: the
+  recorded one, or the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a join
+  lookup by `connection_pubkey`, at most 6 minutes from now (the kind-23199 freshness window plus its
+  1-minute future allowance; §Lost Join Reply in NIP-CW).
 - **`unknown`** — the call was not applied and never will be, as long as a record it left would still be
   retained (§The Record): it reached its deadline uncommitted, or the Hub has no record and `deadline` has
   passed. A copy of the original arriving later is refused, because the Hub never commits a call past its own
