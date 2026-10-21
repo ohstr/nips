@@ -11,7 +11,7 @@ Identity Connection: Web Identity Linking
 
 ## Abstract
 
-This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Web Identity**: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ uses to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
+This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Web Identity**: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ, NIP-CZ and NIP-CASH use to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
 
 ## Motivation
 
@@ -28,7 +28,7 @@ Splitting these apart — rather than having a single self-attested event — me
 
 - **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
 - **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
-- **ConnectionKey**: `SHA256("<platform>:<platform-user-id>")` — see NIP-AZ. `<platform-user-id>` MUST be the canonical form given in Canonical Platform User IDs. The `d` tag of both event kinds in this NIP.
+- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. `<platform-user-id>` MUST be the canonical form given in Canonical Platform User IDs. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
