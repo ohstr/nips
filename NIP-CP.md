@@ -7,7 +7,7 @@ Cash Pocket
 `draft` `optional`
 
 **Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) (Gift Wrap), [NIP-CASH](./NIP-CASH.md) (Cash Hub)
-**Related**: [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) (Private Direct Messages), [NIP-CZ](./NIP-CZ.md) (Cash Zaps)
+**Related**: [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) (Private Direct Messages), [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp), [NIP-CZ](./NIP-CZ.md) (Cash Zaps)
 
 ## Abstract
 
@@ -66,19 +66,19 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `identity`: who can claim it — `pubkey <pubkey>`, `connection_key <ConnectionKey> <ia-pubkey>` or `cash`.
 - `state`: `live`, `pending`, `spent`, `expired`, `reclaimed` or `unknown`, plus the last check time.
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
-- `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`.
+- `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
 A `pending` entry leaves out `cash` and `identity`; `request_id`, the call's NIP-CASH `request_id`, is REQUIRED on it (§Writing).
 
-**Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token), `request_id` (of the call that creates the token).
+**Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
 
-**Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published on its own. Relays SHOULD reject a signed `9525`.
+**Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published outside a seal. Relays SHOULD reject a signed `9525`.
 
 ### Wrapping
 
 An entry is sealed (kind `13`, signed by the user) and gift-wrapped (kind `1059`, `p` = the user) per NIP-59. The wallet generates the wrap key first and records it in the entry's `wrap_key`.
 
-Wraps go to the user's NIP-17 inbox relays (kind `10050`), else their NIP-65 write relays. Those relays SHOULD serve a `1059` only to its `p` (NIP-42 AUTH). The user MAY add their own relay to their `10050` list.
+Wraps go to the user's NIP-17 inbox relays (kind `10050`), else their NIP-65 write relays. Those relays SHOULD serve a `1059` only to its `p` (NIP-42 AUTH). The user MAY add their own relay (one they run or control) to their `10050` list.
 
 A wallet SHOULD write each wrap to at least 2 relays, read it back before treating it as stored, and on each sync republish entries a relay no longer returns.
 
@@ -97,7 +97,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 
 - **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525` whose seal `pubkey` and rumor `pubkey` are both the user. Other wraps (DMs) are ignored. A wallet MUST discard any other `9525`: anyone can gift-wrap to the user, but only the user can sign the seal.
 - **Incremental sync**: the same filter with `since` set to the last sync minus 2 days, since gift wraps carry randomized timestamps. Wraps already seen are skipped.
-- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`) wins over `live`, `unknown` or `pending`, whatever its `v`. Otherwise the highest `v` wins; on a tie, the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
+- **Resolving**: per `w`, a final state (`spent`, `expired`, `reclaimed`) wins over `live` or `unknown`, whatever its `v`. Otherwise the highest `v` wins; on a tie, the latest rumor `created_at`. On any conflict the wallet re-checks the bill with `cash_status`.
 - **Resync**: drop the local copy and run a full sync.
 
 ## Balance
