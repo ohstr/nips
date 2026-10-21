@@ -723,10 +723,20 @@ touching a Lightning wallet themselves. Two shapes of this exist, unified under 
 
 `new_identity` MAY be `cash` (§Cash-Mode Slices) as well as `pubkey`/`connection_key`, for either shape.
 
+A **zap transfer** is either shape carrying `zap_target`, the event being zapped ([NIP-CZ](./NIP-CZ.md)).
+Its new bill is signed under the zap scheme (§Mint Provenance), so anyone holding the token and the Cash Zap
+can check offline who issued it to whom, for which event, and when.
+
 ### Which outcome a request produces
 
 An implementation MUST determine the outcome as follows, in this order:
 
+0. **`zap_target` is present** → this is a **zap transfer**, always a spin-off, never in place. The source
+   slice is consumed whole. A full transfer produces one new wallet holding the whole amount for
+   `new_identity`; a partial split produces two, as in item 1. The wallet for `new_identity` is the zap bill,
+   signed under the zap scheme; a remainder wallet is an ordinary bill. A zap bill always gets a fresh wallet
+   because the zap signature names its recipient and the time it was issued, which only a newly created
+   bill can carry.
 1. **`amount_millis` is present and less than the slice's current committed amount** → this is a **split**.
    The source slice is consumed whole and its value re-emerges as two brand-new, dedicated wallets
    (§Spinning a Slice Off Into a Dedicated Wallet), regardless of `new_identity`'s type or this wallet's
@@ -746,18 +756,22 @@ An implementation MUST determine the outcome as follows, in this order:
      Shared Wallet?" for why a multi-recipient-history wallet can't take this shortcut.
 
 A **spin-off** is any outcome that lands value in brand-new dedicated wallets rather than reassigning in
-place: a partial split (two wallets) or a full transfer to `cash` on a multi-recipient-history wallet (one
-wallet). "Split" on its own always means the partial split.
+place: a partial split (two wallets), a full transfer to `cash` on a multi-recipient-history wallet (one
+wallet), or a zap transfer (one wallet, or two for a partial one). "Split" on its own always means the partial split.
 
 ```mermaid
 sequenceDiagram
     participant Caller as Recipient (current registered identity)
     participant Wallet as Cash Wallet
 
-    Caller->>Wallet: cash_transfer {proof, new_identity, amount_millis?}
+    Caller->>Wallet: cash_transfer {proof, new_identity, amount_millis?, zap_target?}
     Wallet->>Wallet: verify proof against current registered identity
     Wallet->>Wallet: validate new identity
-    alt full transfer to pubkey/connection_key, or cash mode on a lifetime-solo wallet
+    alt zap transfer (zap_target set)
+        Wallet->>Wallet: claim the source slice terminal, atomically
+        Wallet->>Wallet: create + fund the zap bill for new_identity (+ remainder wallet if partial)
+        Wallet-->>Caller: {new_wallet_token, issued_at, expires_at, remainder if partial}
+    else full transfer to pubkey/connection_key, or cash mode on a lifetime-solo wallet
         Wallet->>Wallet: reassign identity in place, atomically
         Wallet-->>Caller: {amount (unchanged), new registered identity}
     else full transfer to cash mode on a multi-recipient-history wallet
@@ -789,12 +803,13 @@ sequenceDiagram
   // new_identity MAY instead be
   // {"identity_type": "cash", "identity_value": "<hex sha256 commitment the caller generated>"}
   // — see §Cash-Mode Slices for why identity_value is required, not server-minted, here.
-  "amount_millis": 5000 // OPTIONAL — omit, or equal the slice's current amount, to transfer it
+  "amount_millis": 5000, // OPTIONAL — omit, or equal the slice's current amount, to transfer it
                         // all; a smaller value splits off exactly that much (§Which outcome a
                         // request produces above). A split consumes the source slice WHOLE: the
                         // remainder is not left behind on it, but re-emerges as its own brand-new
                         // dedicated wallet alongside the carved-off one — see this section's
                         // own "Split off a piece" description above.
+  "zap_target": "<event id hex, or kind:pubkey:d coordinate>" // OPTIONAL — makes this a zap transfer
 }
 ```
 
@@ -836,6 +851,11 @@ sequenceDiagram
 - `amount_millis` — OPTIONAL. Omit it, or set it equal to the slice's current committed amount, for a full
   transfer; a smaller value splits off exactly that much (§Which outcome a request produces). When present,
   it MUST be strictly positive and MUST NOT exceed the slice's current committed amount.
+- `zap_target` — OPTIONAL. The zapped event's `e` id or its `a` coordinate (`<kind>:<pubkey>:<d>`), as a
+  non-empty string. The Hub does not look the event up or interpret the string; it signs its `sha256`
+  (§Mint Provenance). When present, the source slice MUST be identity-bound (`pubkey` or `connection_key`,
+  never `cash`), and `new_identity` MUST be `pubkey` or `connection_key`. Like every param, it is bound by
+  the item proof's `ph` (§Item Proofs).
 
 ### Response
 
@@ -853,8 +873,15 @@ sequenceDiagram
   //   "remaining_amount_millis": 15000,   // what the caller keeps, now in its own new wallet
   //   "new_wallet_pubkey":      "<clear>",  "new_wallet_token":      "<encrypted>", // the carved piece -> new_identity (same field names as the single-wallet spin-off above)
   //   "remainder_wallet_pubkey":"<clear>",  "remainder_wallet_token":"<encrypted>"  // the remainder -> caller
+  // for a ZAP transfer, the spin-off fields above (one wallet, or two if partial), and additionally:
+  //   "issued_at":  1720000000,   // the zap bill's signed issued_at
+  //   "expires_at": 1722592000    // the zap bill's signed expires_at; 0 if it never expires
 }
 ```
+
+A zap transfer's response MUST carry the zap bill's `issued_at` and `expires_at`, in unix seconds, exactly as
+signed. The sender copies them into the Cash Zap, from which readers rebuild the payload (§Mint Provenance).
+Unlike `mint_cash`'s `expires_at`, this one is `0`, not omitted, for a bill that never expires.
 
 This response MUST NOT ever carry a cash secret, nor any other secret capable of moving funds, in a
 form decryptable by every holder of this connection — `identity_value` here is always either a public
@@ -871,12 +898,14 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
    `proof` against it, against this specific `new_identity`, and against this specific `amount_millis`
    (treating an omitted `amount_millis` as bound to "the slice's full current amount," not as unbound); for a
    `cash` current identity, verify the presented `cash_secret`. A redeemed slice has no registered
-   identity left to act on; `cash_transfer` on a redeemed slice MUST be rejected.
+   identity left to act on; `cash_transfer` on a redeemed slice MUST be rejected. A request carrying
+   `zap_target` on a `cash` source MUST be rejected.
 2. Validate `new_identity`: for `pubkey`/`connection_key`, the same rules `mint_cash` applies to
    a recipient entry (§Processing Algorithm) — identity shape, and, for `connection_key` mode, that
    `ia_pubkey` is on the wallet owner's trusted Identity Authority allowlist right now. For `cash`,
    verify `identity_value` is present and is a well-formed commitment — the implementation MUST NOT
-   generate a secret on the wallet's behalf here (§Cash-Mode Slices, §Security Considerations).
+   generate a secret on the wallet's behalf here (§Cash-Mode Slices, §Security Considerations). With
+   `zap_target`, a `cash` `new_identity` MUST be rejected.
 3. Resolve `amount_millis` against the slice's current committed amount (read fresh, not from an earlier
    lookup) and determine the outcome per §Which outcome a request produces above. If `amount_millis` is
    present and exceeds the slice's current amount, reject.
@@ -890,7 +919,10 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
 6. For a spin-off: follow §Spinning a Slice Off Into a Dedicated Wallet's own algorithm instead. The source
    slice is claimed **terminal** (exactly like a redemption — its committed amount is never rewritten to a
    smaller value), and its value re-emerges as new dedicated wallets: one wallet of `amount_millis` for a
-   full transfer to `cash`; two wallets (carved `amount_millis` + remainder) for a partial split.
+   full transfer to `cash` or a full zap transfer; two wallets (carved `amount_millis` + remainder) for a
+   partial split. For a zap transfer, the Hub sets `issued_at` from its clock and signs the bill for
+   `new_identity` under the zap scheme (§Mint Provenance), with the source slice's registered identity as
+   `<sender>`; it signs a remainder wallet under the ordinary scheme.
 7. Return the slice's resulting amount together with its new registered identity (in-place), or the new
    wallet connection(s) — one for a full-transfer spin-off, two for a partial split — see the Response
    format above and §Spinning a Slice Off Into a Dedicated Wallet.
@@ -907,7 +939,9 @@ single-recipient Cash Wallets, whose connections are delivered to the caller alo
 - a **full transfer to `cash`** on a wallet whose recipient history rules out an in-place reassignment
   produces **one** new wallet holding the whole amount, for `new_identity`;
 - a **partial split** produces **two** new wallets — one holding the carved `amount_millis` for
-  `new_identity`, one holding the remainder for the caller's own identity.
+  `new_identity`, one holding the remainder for the caller's own identity;
+- a **zap transfer** produces one new wallet (full) or two (partial) the same way, the one for
+  `new_identity` signed under the zap scheme (§Mint Provenance).
 
 ```mermaid
 sequenceDiagram
@@ -2574,7 +2608,7 @@ flowchart TD
     S -->|"cash_transfer, full transfer,<br/>new_identity = cash —<br/>ONLY if this wallet has EVER<br/>had exactly one recipient"| T2["Becomes cash mode IN PLACE<br/>(same wallet, still Unredeemed)"]
     T2 -.->|"same slice, now cash mode —<br/>every case above applies again"| S
 
-    S -->|"cash_transfer, PARTIAL split<br/>(any new_identity type) — OR full<br/>transfer to cash mode on a<br/>multi-recipient-history wallet"| SP["Spin off: atomically claim the<br/>source slice TERMINAL, fund brand-new<br/>dedicated Cash Wallet(s) — two for a<br/>partial split (carved + remainder)"]
+    S -->|"cash_transfer, PARTIAL split<br/>(any new_identity type) — OR full<br/>transfer to cash mode on a<br/>multi-recipient-history wallet —<br/>OR any zap transfer"| SP["Spin off: atomically claim the<br/>source slice TERMINAL, fund brand-new<br/>dedicated Cash Wallet(s) — two for a<br/>partial split (carved + remainder)"]
 
     S -->|"cash_consolidate<br/>(this + other same-hub slices<br/>this node custodies)"| SP
 
@@ -2839,6 +2873,8 @@ recipients' one connection through a single broadcast channel. But sharing a sli
 correlate an identity to a payout amount for anyone watching that channel. Wallet owners who need
 recipients to stay unlinkable from each other, not just from third parties, SHOULD distribute the
 connection through channels that don't also reveal who else received it.
+
+A zap transfer tells the minting Hub which event is being zapped. The Cash Zap makes that public anyway.
 
 A token carrying mint provenance (§Mint Provenance) additionally exposes, in the clear, its **minter node
 pubkey** (recoverable from the signature) and its **denomination** (the attested amount, TLV type `6`).
