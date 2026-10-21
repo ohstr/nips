@@ -1254,13 +1254,12 @@ Connection secrets are re-derived (§The Pairing Connection), so the Hub stores 
 the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
 not MUST store them.
 
-**Retention.** The Hub keeps every `request_id` record at least until its call's deadline plus `H`, so a
-repeat is refused for as long as it could still commit, and a lookup within `H` of the deadline finds it.
-It keeps the full record while any bill the call created is live, plus that bill's tombstone window
-(§Answering About a Destroyed Bill). After both, it MAY drop the record, and a lookup is then answered as
-for a `request_id` it never saw — so a late `unknown` no longer proves the call was not applied (§Looking Up
-a Call, Finality). A client SHOULD look up a lost reply promptly, and well before any bill it might have
-created could expire.
+**Retention.** Here `H` is the largest `max_request_age` the Hub has announced since the call. The Hub MUST
+NOT drop a `request_id` record before the call's deadline plus `H`, so a repeat is refused for as long as it
+could still commit, and a lookup until then gets a definite answer. It keeps the full record while any bill
+the call created is live, plus that bill's tombstone window (§Answering About a Destroyed Bill). After both,
+it MAY drop the record, and a lookup is then answered `expired` (§Looking Up a Call). A client SHOULD look up
+a lost reply promptly, and well before any bill it might have created could expire.
 
 ### Looking Up a Call (`cash_lookup`)
 
@@ -1289,8 +1288,8 @@ omitted.
 
 When the Hub holds no record, there is nothing to check the signer against. The item proof (or the bearer
 `cash_secret`) and the bill proof are still REQUIRED and MUST verify, with their usual bindings, and a bill
-proof that does not verify is still omitted. A verifying item is then answered `pending` or `unknown`, never
-omitted: the rightful caller of a call that has not arrived yet gets an answer.
+proof that does not verify is still omitted. A verifying item is then answered `pending`, `unknown` or
+`expired`, never omitted: the rightful caller of a call that has not arrived yet gets an answer.
 
 The answer is one of:
 
@@ -1298,7 +1297,10 @@ The answer is one of:
 {"status": "done", "result": { /* the original response */ }}
 {"status": "pending", "retry_after": 1720000060}
 {"status": "unknown"}
+{"status": "expired"}
 ```
+
+The Hub decides the status on its own clock.
 
 - **`done`** — the call committed. `result` is the original response, rebuilt: the same fields and the same
   tokens byte for byte, each encrypted to the same keys as originally (§Delivery — Nested Encryption, Not a
@@ -1309,19 +1311,23 @@ The answer is one of:
   recorded one, or the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a join
   lookup by `connection_pubkey`, at most 6 minutes from now (the kind-23199 freshness window plus its
   1-minute future allowance; §Lost Join Reply in NIP-CW).
-- **`unknown`** — the call was not applied and never will be, as long as a record it left would still be
-  retained (§The Record, Retention): it reached its deadline uncommitted, or the Hub has no record and
-  `deadline` has passed. A copy of the original arriving later is refused, because the Hub never commits a
-  call past its own deadline.
+- **`unknown`** — the call was not applied and never will be: the Hub has no record, `deadline` has passed,
+  and now is no later than `deadline` plus `H`, so a record the call left would still be held (§The Record,
+  Retention). A copy of the original arriving later is refused, because the Hub never commits a call past
+  its own deadline.
+- **`expired`** — the outcome can no longer be known: the Hub has no record, and now is later than
+  `deadline` plus `H`, so a record the call left may have been dropped.
 
 A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
 misstates `deadline` only misleads itself.
 
-**Finality.** `done` and `unknown` are final. A client MUST NOT resend the original after either. A client
-MUST NOT place the call again after `unknown` unless that `unknown` arrived no later than the call's
-deadline plus `H`; it then MAY, with a new `request_id`. A later `unknown` may follow a dropped record
-(§The Record, Retention), so the client MUST NOT place the call again automatically, and surfaces it to its
-user instead. A client MUST NOT read an omitted `cash_lookup` as `unknown`.
+**Finality.** `done`, `unknown` and `expired` are final. A client MUST NOT resend the original after any of
+them. A client MAY place the call again only after `unknown`, and MUST then use as its `request_id` the
+lowercase hex of `sha256("retry:" ‖ <previous request_id>)`, over the ASCII bytes of `retry:` followed by
+the previous `request_id` as sent. Two devices re-placing the same call then send the same `request_id`,
+and the Hub refuses the second as a repeat. After `expired` a client MUST NOT place the call again
+automatically, and surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as
+`unknown`.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token).
