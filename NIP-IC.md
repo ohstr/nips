@@ -11,7 +11,7 @@ Identity Connection: Web Identity Linking
 
 ## Abstract
 
-This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Web Identity**: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ uses to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
+This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Web Identity**: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ, NIP-CZ and NIP-CASH use to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
 
 ## Motivation
 
@@ -28,11 +28,28 @@ Splitting these apart — rather than having a single self-attested event — me
 
 - **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
 - **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
-- **ConnectionKey**: `SHA256("<platform>:<platform-user-id>")` — see NIP-AZ. The `d` tag of both event kinds in this NIP.
+- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. `<platform-user-id>` MUST be the canonical form given in §Canonical Platform User IDs. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
 ## Specification
+
+### Canonical Platform User IDs
+
+Every client hashing a ConnectionKey for the same account MUST get the same hash, so `<platform-user-id>` has one canonical form per platform:
+
+| Platform | `<platform>` | `<platform-user-id>` |
+|---|---|---|
+| X | `x` | The numeric account ID, in decimal. Not the handle. |
+| Discord | `discord` | The numeric account ID, in decimal. Not the username. |
+| Email | `email` | The whole address, trimmed and lowercased, its domain part as IDNA A-labels. |
+| DNS domain | `dns` | The domain as IDNA A-labels, lowercased, without a trailing dot. |
+
+No canonical form is defined here for other platforms.
+
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed.
+
+No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
 
 ### Event Kinds
 
@@ -102,7 +119,7 @@ A cleartext JSON (v1) string:
 | `version` | number | Always `1`. |
 | `platform` | string | Web Identity platform name. |
 | `auth_type` | string | How the IA verified control of the account. `"public_post"` is defined below; IAs MAY use other values (e.g. a one-time code sent to an email address). |
-| `user_id` | string | The normalized platform account identifier. |
+| `user_id` | string | The platform account identifier, in its canonical form (§Canonical Platform User IDs). |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
 | `evidence_url` | string | `public_post` only: URL of the public post carrying the challenge. |
