@@ -243,8 +243,9 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   source carries a signed proof whose nonce the Hub burns, while `mint_cash`'s parameters have nothing unique
   in them. A caller whose retry logic reads a timeout as "it failed" would mint and fund a **second** wallet.
   A timeout does not mean the mint did not happen: the Hub's funding is durable before any response is
-  built. A request carrying `request_id` MUST also carry a NIP-47 `expiration` tag, and the Hub MUST NOT
-  commit it after that instant, checked at commit time (§Lost Replies).
+  built. A request carrying `request_id` MUST also carry a NIP-47 `expiration` tag no more than the Hub's
+  `max_request_age` ahead, and the Hub MUST NOT commit it after that instant, checked at commit time
+  (§Lost Replies, Deadlines).
 
 `min_transfer_millis` is deliberately NOT a request field here — it's a Hub-level setting (§Data Model),
 applied uniformly to every recipient of a freshly-minted wallet from the Hub's own current configuration,
@@ -311,8 +312,8 @@ On receiving `mint_cash`, the Hub MUST, in order:
    to check it against, subject only to the implementation's own representational bound (§Minting, `expiry`). Otherwise (the Hub's own ceiling is a real, positive value): if omitted or zero, set it to the
    Hub's own expiry ceiling; otherwise it MUST NOT exceed that ceiling.
 5. Verify the Hub's own available balance is at least the sum of all recipients' amounts.
-6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed, and
-   that the `request_id` is unused (§Lost Replies). **A used `request_id` MUST be refused rather than mint
+6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed and
+   lies within `max_request_age`, and that the `request_id` is unused (§Lost Replies). **A used `request_id` MUST be refused rather than mint
    again.** Checked here, after validation and before any state is created: a request that was never going
    to succeed records nothing, so it cannot lock out the caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
@@ -1220,9 +1221,17 @@ Slices), so the record survives a crash between sending and the reply.
 by any call to any of its Cash Hubs, MUST be refused, whether or not the parameters match. The outcome of the
 first call is read with `cash_lookup`, not by resending it.
 
-A Hub MUST NOT commit a call carrying a `request_id` after its deadline: the envelope's `not_after` on the
-private transport (§Envelopes), or the NIP-47 `expiration` that `mint_cash` then requires (§Minting Cash).
-This is checked when the call commits, not only when it arrives.
+### Deadlines
+
+Every call carrying a `request_id` has a **deadline**: the envelope's `not_after` on the private transport
+(§Envelopes), or the NIP-47 `expiration` that `mint_cash` then requires (§Minting Cash). A Hub announces a
+horizon `H`, `max_request_age` in seconds, among its announcement's `limits` (§The Hub Announcement). It
+MUST reject a call whose deadline lies more than `H` past the moment it arrives, and a caller MUST NOT set
+a deadline more than `H` past the moment it sends.
+
+**A Hub MUST NOT commit a call after its deadline.** This is checked when the call commits, not only when it
+arrives. It is what makes a lookup's answer final: once the deadline has passed, a call that has not
+committed never will.
 
 ### The Record
 
@@ -1239,21 +1248,40 @@ Connection secrets are re-derived (§The Pairing Connection), so the Hub stores 
 the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
 not MUST store them.
 
+**Retention.** The Hub keeps a `request_id` at least until its call's deadline, so a repeat is refused for
+as long as it could still commit. It keeps the full record while any bill the call created is live, plus
+that bill's tombstone window (§Answering About a Destroyed Bill). After both, it MAY drop the record, and a
+lookup is then answered as for a `request_id` it never saw — so a late `unknown` no longer proves the call
+was not applied. A client SHOULD look up a lost reply promptly, and well before any bill it might have
+created could expire.
+
 ### Looking Up a Call (`cash_lookup`)
 
 `cash_lookup` is served on the private transport only (§The Private Transport). Its item names the original
-call's target, which the Hub MUST serve even if it has since destroyed it; its bill proof is signed with
-that target's connection secret, as for any item (§Bill Proofs).
+call's target — the bill a `cash_transfer` or `cash_consolidate` item named, the Cash Hub connection for
+`mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even if it has since
+destroyed that bill. Its bill proof is signed with that target's connection secret, as for any item (§Bill
+Proofs).
 
 ```jsonc
-{"request_id": "<hex>"}
+{"request_id": "<hex>", "deadline": 1720000060}
 ```
 
-The item proof MUST be signed by the recorded authorizer. When the authorizer is a cash commitment, the item
-omits `proof` and carries the matching `cash_secret` in `params`, as a bearer item does (§Bearer Items).
-Anything else — another signer, another target, a secret that does not match — MUST be omitted. NIP-CW
-defines a second key, `connection_pubkey`, for a lost join reply (§Private Join in NIP-CW); a lookup carries
-exactly one of the two.
+- `request_id` — REQUIRED, the original call's. NIP-CW defines a second key, `connection_pubkey`, for a
+  lost join reply (§Lost Join Reply in NIP-CW); a lookup carries exactly one of the two.
+- `deadline` — REQUIRED. The original call's deadline as the client sent it (§Deadlines): `mint_cash`'s
+  NIP-47 `expiration`, the envelope's `not_after` for a private item, or, for a NIP-CW join, its kind-23199
+  proof's `created_at` plus the freshness window.
+
+When the Hub holds a record, the item proof MUST be signed by the recorded authorizer. When the authorizer is
+a cash commitment, the item omits `proof` and carries the matching `cash_secret` in `params`, as a bearer item
+does (§Bearer Items). Anything else — another signer, another target, a secret that does not match — MUST be
+omitted.
+
+When the Hub holds no record, there is nothing to check the signer against. The item proof (or the bearer
+`cash_secret`) and the bill proof are still REQUIRED and MUST verify, with their usual bindings, and a bill
+proof that does not verify is still omitted. A verifying item is then answered `pending` or `unknown`, never
+omitted: the rightful caller of a call that has not arrived yet must get an answer.
 
 The answer is one of:
 
@@ -1267,11 +1295,15 @@ The answer is one of:
   tokens byte for byte, each encrypted to the same keys as originally (§Delivery — Nested Encryption, Not a
   New Channel). Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
   (§Answering About a Destroyed Bill) in place of its token, never as a token.
-- **`pending`** — the Hub holds the call but has not committed or refused it yet. `retry_after` is no later
-  than the call's deadline.
-- **`unknown`** — the call was not applied and never will be. Either it reached its deadline uncommitted,
-  or the Hub has no record of the `request_id` at all. In the second case the Hub MUST first record the
-  `request_id` as used, atomically, so that a copy of the original arriving later is refused.
+- **`pending`** — the call may still commit. Either the Hub holds it and has not finished it, or it has no
+  record and `deadline` has not passed. `retry_after` is the deadline: the recorded one, or the lookup's
+  `deadline`, which the Hub treats as at most `H` from now.
+- **`unknown`** — the call was not applied and never will be: it reached its deadline uncommitted, or the Hub
+  has no record and `deadline` has passed. A copy of the original arriving later is refused, because the
+  Hub never commits a call past its own deadline.
+
+A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
+misstates `deadline` only misleads itself.
 
 **Finality.** `done` and `unknown` are final. A client MUST NOT resend the original after either; after
 `unknown` it MAY place the call again with a new `request_id`. A client MUST NOT read an omitted
@@ -1279,11 +1311,6 @@ The answer is one of:
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token).
-
-**Retention.** The Hub keeps the full record while any bill the call created is live or inside its tombstone
-window. After that it MAY drop all but the `request_id`, the target and the authorizer, which it MUST keep
-permanently, and then answers `done` without `result`. A forgotten `request_id` would turn a late lookup into
-`unknown` and, for `mint_cash`, let the original be applied as a second mint.
 
 ### Support
 
@@ -1466,7 +1493,8 @@ needed.
   signing device that can sign but cannot perform ECDH needs a *separate* decryption key, so
   the announcement carries the inbox explicitly and a client MUST use whatever it says.
 - **`limits`** — the envelope limits a Hub will actually accept: `max_bytes`, `max_items`,
-  `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`.
+  `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`, and, for a Hub serving
+  `cash_lookup`, `max_request_age` (§Lost Replies, Deadlines).
 - **`relays`** — OPTIONAL. Where the Hub reads its inbox. A bill's own token already carries relay
   hints (§The Cash Token), but those were fixed when the bill was minted and a Hub may have moved
   since; a bill minted years earlier is exactly the case this field exists for. When present a
@@ -2005,7 +2033,9 @@ induce a double application.
 A Hub MUST serve over this transport only the methods that operate on a **bill**:
 `cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate`, plus `cash_lookup`, which reads
 the outcome of one (§Lost Replies). NIP-CW's `create_circle_wallet` MAY also be served here
-(§Private Join in NIP-CW).
+(§Private Join in NIP-CW). `cash_lookup` is the one method whose target need not be a live bill: it names
+the original call's target, which may be a bill the Hub has destroyed, its Cash Hub connection, or a
+Circle Hub connection.
 
 **This MUST be an explicit allowlist, not a reuse of the Hub's ordinary method dispatch.** The
 distinction is a security boundary, not a style preference. A caller on this transport
@@ -2535,7 +2565,8 @@ transport, and a client MUST NOT read a method's presence here as permission to 
 
 `cash_lookup` (§Lost Replies) has no scope: it is authorized by the original call's authorizer, and returns
 only what that call's reply carried. A Hub that serves it MUST list it in `private_methods` on every Cash
-Wallet connection and on its Cash Hub connection, and this listing is how a client learns the Hub supports
+Wallet connection and on its Cash Hub connection, and on a Circle Hub connection whose join lookups it
+serves (NIP-CW). This listing is how a client learns the Hub supports
 `request_id` at all. A client that does not find it falls back to calling without a `request_id`.
 
 Note this concerns advertising only. The scopes above still GRANT these methods — an implementation that
