@@ -58,7 +58,7 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 ```
 
 **Required tags**:
-- `w`: token wallet pubkey (TLV `0`).
+- `w`: token wallet pubkey (TLV `0`), or the `request_id` for a `pending` entry.
 - `v`: version, +1 on every change.
 - `cash`: the token.
 - `amount`: milli-units (`msats` for `bitcoin`).
@@ -68,7 +68,7 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
 - `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`.
 
-A `pending` entry leaves out `cash` and `identity` and carries `request_id` instead (§Writing).
+A `pending` entry leaves out `cash` and `identity`; `request_id`, the call's NIP-CASH `request_id`, is REQUIRED on it (§Writing).
 
 **Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token), `request_id` (of the call that creates the token).
 
@@ -85,7 +85,10 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 ## Writing
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
-- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet saves a `pending` entry holding the call's `request_id` (NIP-CASH) and any cash secret it generated, with `w` set to the `request_id`. On the reply it adds an entry for each new bill and removes the pending one. If the reply is lost, the wallet recovers it with `cash_lookup` and MUST NOT resend the call.
+- **Write ahead**: when the Hub lists `cash_lookup` in `private_methods`, then before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`), the wallet stores a `pending` entry holding the call's `request_id` and any cash secret it generated, and reads it back before sending the call. On the reply it adds an entry for each new bill and removes the pending one. If the reply is lost, the wallet asks `cash_lookup` and MUST NOT resend the call, except as below:
+  - `done`: add an entry for each new bill (a tombstone in place of a token makes that entry `spent`) and remove the pending entry.
+  - `pending`: ask again after `retry_after`.
+  - `unknown`: remove the pending entry; the wallet MAY place the call again with a new `request_id`. An omitted answer is not `unknown`.
 - **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`), so the user can see why a note left.
 - **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
