@@ -317,9 +317,9 @@ On receiving `mint_cash`, the Hub MUST, in order:
 5. Verify the Hub's own available balance is at least the sum of all recipients' amounts.
 6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed and
    lies within `max_request_age`, and that the `request_id` is well formed and unused (§Lost Replies).
-   **A used `request_id` MUST be refused rather than mint again.** Checked here, after validation and before
-   any state is created: a request that was never going to succeed records nothing, so it cannot lock out
-   the caller's legitimate retry.
+   **A used `request_id` MUST be refused with `REQUEST_REUSED` rather than mint again.** Checked here,
+   after validation and before any state is created: a request that was never going to succeed records
+   nothing, so it cannot lock out the caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis` and `redeem_fee_ppm` defaults (§Data Model) and a one-way commitment of
    the secret for `cash`-mode slices, never the secret itself — and perform a single internal transfer
@@ -845,7 +845,8 @@ sequenceDiagram
   never `cash`), and `new_identity` MUST be `pubkey`: a zap is signed to a Nostr recipient, and a value sent
   to a `connection_key` carries no `zap_target`. Like every param, it is bound by the item proof's `ph`
   (§Item Proofs).
-- `request_id` — OPTIONAL; a caller SHOULD send one, and a used one MUST be refused (§Lost Replies).
+- `request_id` — OPTIONAL; a caller SHOULD send one, and a used one MUST be refused with `REQUEST_REUSED`
+  (§Lost Replies).
 
 ### Response
 
@@ -1150,7 +1151,8 @@ sequenceDiagram
   for `connection_key`; a caller-supplied, never wallet-minted, commitment for `cash` (§Cash-Mode Slices).
   The merged wallet is owned by this identity; its token is delivered to the caller, who hands it on —
   see Response below for how delivery differs by type.
-- `request_id` — OPTIONAL; a caller SHOULD send one, and a used one MUST be refused (§Lost Replies).
+- `request_id` — OPTIONAL; a caller SHOULD send one, and a used one MUST be refused with `REQUEST_REUSED`
+  (§Lost Replies).
 
 ### Response
 
@@ -1224,8 +1226,10 @@ durably, with the call and any cash secret it generated for it (§Security Consi
 Slices), so the record survives a crash between sending and the reply.
 
 **A repeat MUST be refused, never applied twice.** A call carrying a `request_id` already used on this node,
-by any call to any of its Cash Hubs, MUST be refused, whether or not the parameters match. The outcome of the
-first call is read with `cash_lookup`, not by resending it.
+by any call to any of its Cash Hubs, MUST be refused with the error code `REQUEST_REUSED`, whether or not the
+parameters match. A client receiving `REQUEST_REUSED` keeps the call pending and looks it up with
+`cash_lookup`; it never treats the call as failed. The outcome of the first call is read with `cash_lookup`,
+not by resending it.
 
 ### Deadlines
 
