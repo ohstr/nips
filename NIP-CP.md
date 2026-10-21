@@ -69,6 +69,8 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 
 **Optional tags**: `mint` (Minter), `expires_at`, `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
 
+**Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published on its own. Relays SHOULD reject a signed `9525`.
+
 ### Wrapping
 
 An entry is sealed (kind `13`, signed by the user) and gift-wrapped (kind `1059`, `p` = the user) per NIP-59. The wallet generates the wrap key first and records it in the entry's `wrap_key`.
@@ -83,7 +85,7 @@ Wraps go to the user's NIP-17 inbox relays (kind `10050`), else their NIP-65 wri
 
 ## Reading
 
-- **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525`. Other wraps (DMs) are ignored.
+- **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525` whose seal `pubkey` and rumor `pubkey` are both the user. Other wraps (DMs) are ignored. A wallet MUST discard any other `9525`: anyone can gift-wrap to the user, but only the user can sign the seal.
 - **Incremental sync**: the same filter with `since` set to the last sync minus 2 days, since gift wraps carry randomized timestamps. Wraps already seen are skipped.
 - **Resolving**: the highest `v` per `w` wins; on a tie, the latest rumor `created_at`.
 - **Resync**: drop the local copy and run a full sync.
