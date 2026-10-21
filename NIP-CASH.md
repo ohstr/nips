@@ -1330,13 +1330,14 @@ The Hub decides the status on its own clock, and `deadline` has passed when now 
 A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
 misstates `deadline` only misleads itself.
 
-**Finality.** `done`, `unknown` and `expired` are final. A client MUST NOT resend the original after any of
-them. A client MAY place the call again only after `unknown`, and MUST then use as its `request_id` the
-lowercase hex of `sha256("retry:" ‖ <previous request_id>)`, over the ASCII bytes of `retry:` followed by
-the previous `request_id` as sent. Two devices re-placing the same call then send the same `request_id`,
-and the Hub refuses the second as a repeat. After `expired` a client MUST NOT place the call again
-automatically, and surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as
-`unknown`.
+**Finality.** `done`, `unknown` and `expired` are final for that `request_id`. A client MUST NOT resend the
+original after any of them. Only the client that placed the call MAY place it again (NIP-CP binds this to
+one device), and only after `unknown`. A re-placed call always uses the derived id of the call it replaces,
+never a fresh one: the lowercase hex of `sha256("retry:" ‖ <replaced request_id>)`, over the ASCII bytes of
+`retry:` followed by the replaced call's `request_id` as sent. Two attempts to re-place the same call then
+send the same `request_id`, and the Hub refuses the second with `REQUEST_REUSED`. After `expired` a client
+MUST NOT place the call again automatically, and surfaces it to its user instead. A client MUST NOT read an
+omitted `cash_lookup` as `unknown`.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token).
