@@ -159,7 +159,7 @@ A wallet trusts a minter's key for one network only. Neither the token nor its s
 
 ## Verification Algorithm
 
-- **Client**: shows or counts a `9522`, using only the event, the token and the recipient's `10522`.
+- **Client**: shows or counts a `9522`, using only the event, its target, the token and the recipient's `10522`.
 - **Recipient wallet**: decides whether the cash is the recipient's.
 - **Relay**: MAY skip validation; if it validates, it applies the Client column.
 
@@ -170,31 +170,44 @@ Signature verification MUST come before trusting any tag.
 | 1 | `id`/`sig` verify against `pubkey`. | MUST | MUST |
 | 2 | Tags meet the cardinality in §Kind 9522 — Cash Zap, and `w` equals the token's TLV `0`. | MUST | MUST |
 | 3 | `cash` decodes per NIP-CASH §Wire Format. | MUST | MUST |
-| 4 | The token's prefix matches `chain` (`satscash` ↔ `bitcoin`). | MUST | MUST |
+| 4 | The token's prefix matches `chain` (§Chains). | MUST | MUST |
 | 5 | The token's identity-required hint (TLV `3`), if present, is `1`. | MUST | MUST |
-| 6 | The mint signature recovers a Minter (NIP-CASH §Mint Provenance), and its attested amount (TLV `6`) equals `amount`. | MUST | MUST |
-| 7 | `created_at` is not earlier than the target event's. | SHOULD | — |
-| 8 | The Minter is in the recipient's `10522` `mint` tags for `chain`. | to count it | MUST, unless the recipient approves it |
+| 6 | The token carries a signature scheme (TLV `8`), its signature recovers a Minter over the payload of that scheme (NIP-CASH §Mint Provenance), and its attested amount (TLV `6`) equals `amount`. | MUST | MUST |
+| 7 | The signature is a zap signature over the payload rebuilt below; `p` is the target's author; `issued_at` is not earlier than the target's `created_at`. | to count it | — |
+| 8 | The Minter is trusted for `chain`: by the reader, or in the recipient's `10522` `mint` tags. | to count it | MUST, unless the recipient approves it |
 | 9 | The recipient's slice is unclaimed and its `amount_millis` equals `amount`. For a pubkey `p`, `cash_status` with `scope: mine` (NIP-CASH §Cash Status) returns it; for a ConnectionKey `p`, a full in-place `cash_transfer` to the recipient's pubkey, using the attestation from `ia`, succeeds first. | — | MUST |
 
-Rules 1–8 only show that a trusted node minted the amount. Only rule 9 proves the cash is the recipient's: a wallet's funding equals the sum of its slices, so a matching amount means nobody else shares it. TLV `1`–`3` are unsigned, so rule 5 only catches mistakes. Clients MUST NOT present a `9522` as value received.
+For rule 7, the client rebuilds the `satscash-zap:v1` payload (NIP-CASH §Mint Provenance) from the token and this event, and verifies the signature against it:
+
+```
+satscash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount>:<relay_hash>:pubkey/<p>:pubkey/<pubkey>:<sha256(target)>:<issued_at>:<expires_at>
+```
+
+`<hrp>` and `<wallet_pubkey_hex>` come from the token, `<relay_hash>` from its relay hints and connection secret, `<amount>`, `<p>`, `<issued_at>` and `<expires_at>` from the tags, and `<pubkey>` is the signer of the `9522`. `target` is the `a` coordinate if the event has an `a` tag, else the `e` id. The signed recipient is therefore `p`, and the signed sender is the `9522` signer.
+
+Rules 1–8 show that a trusted Hub issued the amount to `p`, from the signer, for this target. They do not show the bill is still there: the minting Hub's owner can revoke it, and it can expire or be claimed. Only rule 9 proves the cash is the recipient's: a wallet's funding equals the sum of its slices, so a matching amount means nobody else shares it. TLV `3` is not signed, so rule 5 only catches mistakes. Clients MUST NOT present a `9522` as value received.
 
 ## Receiving
 
-- Incoming: `{"kinds": [9522], "#p": ["<recipient-pubkey>", "<connection-key>", ...]}` on the `10522` relays, including every ConnectionKey linked through NIP-IC. When linking a ConnectionKey, also query its identity connection's relays and any `nevent` received.
-- Sent: `{"kinds": [9522], "authors": ["<user-pubkey>"]}` and `{"kinds": [9522], "#P": ["<user-pubkey>"]}`.
+- Incoming: `{"kinds": [9522], "#p": ["<recipient-pubkey>", "<connection-key>", ...]}` on the `10522` relays, including every ConnectionKey linked through NIP-IC. When linking a ConnectionKey, also query its identity connection's relays.
+- Sent: `{"kinds": [9522], "authors": ["<user-pubkey>"]}` and `{"kinds": [9522], "#P": ["<connection-key>", ...]}`, with every ConnectionKey linked to the user through NIP-IC, never a Nostr pubkey.
 - A wallet MUST NOT contact a Minter missing from the recipient's `mint` tags without their approval, since contacting it reveals their identity and IP to that minter.
-- A wallet MUST try the token from every copy sharing a `w` before calling it unclaimable: relay hints and the connection secret are unsigned.
+- A wallet uses only copies of a token whose signature verifies (rule 6). The signature covers the relay hints and the connection secret through the relay hash, so a copy carrying other ones fails, and a wallet MUST NOT contact its relays.
 - A token's state comes from `cash_status` only (NIP-CASH §Answering About a Destroyed Bill). A timeout MUST NOT be reported as spent.
 - A wallet SHOULD keep the tokens it holds in a [NIP-CP](./NIP-CP.md) Cash Pocket.
-- A wallet SHOULD claim promptly, since the sender can revoke until then. An external redemption pays `net_redeemable_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node (NIP-CASH §The Redeem Fee).
+- A wallet SHOULD claim promptly, since the minting Hub's owner can revoke until then. An external redemption pays `net_redeemable_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node (NIP-CASH §The Redeem Fee).
 - Clients SHOULD NOT publish when a Cash Zap was claimed.
 
 ## Counting
 
-A client MAY total **verified** Cash Zaps (rules 1–8) per note, shown apart from Lightning zaps and as promised, not received. Unverified ones MAY be listed, never totalled.
+A client MAY total Cash Zaps per note, shown apart from Lightning zaps. It counts a Cash Zap only if:
 
-A token counts once. If all copies of a `w` agree on target, `p` and sender, the earliest counts; if they disagree, none does.
+- it passes rules 1–8, so its Minter is trusted by the reader or listed in the recipient's `10522`;
+- its `expires_at` is `0` (never), or `expires_at − issued_at` is at least the reader's minimum remaining life, a client setting (e.g. 30 days).
+
+A count means "issued to the recipient by a trusted Hub", not "received". ConnectionKey zaps, and zaps that fail these checks, MAY be listed, never totalled.
+
+A token counts once, however many copies share its `w`.
 
 A client MAY mark a Cash Zap past `expires_at` as possibly expired. A sender's NIP-09 deletion stops it counting, but does not revoke the token.
 
