@@ -348,7 +348,7 @@ so resending one is refused as a replay.
 A member whose join reply never arrives cannot simply ask again: the proof was consumed at step 3, and a
 new request is refused with `WALLET_EXISTS` if the first one succeeded. The member recovers the reply with
 NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NIP-CASH), with params
-`{"connection_pubkey": "<hex>"}` in place of `request_id`:
+`{"connection_pubkey": "<hex>", "deadline": <unix>}` in place of `request_id`:
 
 - **The item's `target` is the Circle Hub connection**, the original join's target, and it carries a bill
   proof signed with the Hub connection's secret, exactly as a join does (§What differs from a bill
@@ -357,10 +357,13 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   request that named this `connection_pubkey`. An item signed by anyone else MUST be omitted.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
   would have checked the reply (§Response).
-- **Its deadline is the proof's freshness window.** A join's deadline is its kind-23199 proof's
-  freshness window (§Identity Proof), and the Hub MUST NOT create a wallet whose proof is past it,
-  checked at commit (step 9). A lookup for a `connection_pubkey` the Hub has never seen is answered
-  `pending` until that window has passed, then `unknown`, which is final. A lookup MUST NOT write state.
+- **`deadline` is the join's deadline, as the client sent it.** A join's deadline is its kind-23199
+  proof's `created_at` plus the 5-minute freshness window (§Identity Proof), and the Hub MUST NOT create a
+  wallet whose proof is past it, checked at commit (step 9). With no record of the `connection_pubkey`,
+  the Hub answers `pending` with `retry_after` = `deadline` while `deadline` is in the future, and
+  `unknown`, which is final, once it has passed. A `deadline` later than any fresh proof could give is
+  treated as the latest one could. A client that misstates `deadline` misleads only itself, since a late
+  join is refused anyway. A lookup MUST NOT write state.
 
 A Hub that serves it lists `cash_lookup` in its `get_info` `private_methods` (§Scope Surface in
 NIP-CASH), and MUST keep each wallet's `encrypted_details` while the wallet exists. This works whichever
