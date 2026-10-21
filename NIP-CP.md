@@ -95,8 +95,9 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
   - `expired`: the outcome can no longer be known (this lookup answer is not the bill state `expired`). The wallet MUST NOT place the call again automatically, SHOULD show the call to the user, and marks the pending entry `done`.
 - **Without `cash_lookup`**: the Hub still refuses a repeated `request_id`, so the pending entry is written the same way, but a lost reply needs the Hub operator.
 - **Old Hubs**: on a Hub that does not announce `max_request_age`, the wallet treats `request_id` as unhonoured and MUST NOT resend a bill-creating call whose reply was lost.
-- **Close** a pending entry by publishing it at `v` + 1 in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
-- **Change** an entry by publishing a new wrap with `v` raised by one, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
+- **Close** a pending entry by publishing it at the next `v` in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
+- **Versions**: every write for a `w` uses the highest `v` seen for that `w` plus 1.
+- **Change** an entry by publishing a new wrap with the next `v`, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`, `done`), so the user can see why a note left.
 - **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
 
