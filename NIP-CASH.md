@@ -63,12 +63,14 @@ goes to a named identity (`pubkey` or `connection_key`) or to no one in particul
   (§Transferring and Splitting a Slice).
 - **identity**: an OPTIONAL binding on a slice, checked at redemption instead of trusting mere possession
   of the connection — a raw Nostr `pubkey`, or a `connection_key` (an opaque identifier an Identity
-  Authority vouches for, standing in for a Web Identity — a Discord handle, an email, a domain — for a
+  Authority vouches for, standing in for a Web Identity — a Discord account, an email, a domain — for a
   recipient not on Nostr yet). A slice left unbound is `cash` mode (§Cash-Mode Slices): ordinary ecash,
   redeemable by whoever holds its secret. A `connection_key`'s `identity_value` MUST be computed as
-  `hex(SHA256(platform + ":" + externalID))` — the same deterministic formula NIP-IC's `ConnectionKey`
-  defines — so two independent implementations deriving a connection_key for the same (platform, externalID)
-  pair always agree, and a real NIP-IC-issued attestation's own `d`-tag matches without coordination.
+  `hex(SHA256(platform + ":" + externalID))`, in lowercase hex, with the identifier in its canonical
+  form (NIP-IC §Canonical Platform User IDs) — the same deterministic formula NIP-IC's `ConnectionKey`
+  defines — so two independent implementations deriving a connection_key for the same (platform,
+  externalID) pair always agree, and a real NIP-IC-issued attestation's own `d`-tag matches without
+  coordination.
 - **cash mode**: the mode a slice is in when it carries no identity binding at all — `identity_type:
   "cash"` on the wire, with its secret carried as `cash_secret`. An earlier revision of this document
   called this mode `bearer`, with the secret field named `bearer_secret`; that spelling is gone.
