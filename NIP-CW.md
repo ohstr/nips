@@ -361,13 +361,16 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   proof's `created_at` plus the 5-minute freshness window (§Identity Proof), and the Hub MUST NOT create a
   wallet whose proof is past it, checked at commit (step 9). With no record of the `connection_pubkey`,
   the Hub answers `pending` with `retry_after` = `deadline` while `deadline` is in the future, and
-  `unknown`, which is final, once it has passed. A `deadline` later than any fresh proof could give is
-  treated as the latest one could. A client that misstates `deadline` misleads only itself, since a late
-  join is refused anyway. A lookup MUST NOT write state.
+  `unknown`, which is final, once it has passed. A `deadline` is capped at most 6 minutes from now (the
+  freshness window); a later one is treated as now plus 6 minutes. A client that misstates `deadline`
+  misleads only itself, since a late join is refused anyway. A lookup MUST NOT write state.
+- **A late `unknown` proves nothing once the wallet is gone.** The record is dropped when the wallet is
+  deleted, so after that an `unknown` no longer shows the join failed (§The Record in NIP-CASH).
 
-A Hub that serves it lists `cash_lookup` in its `get_info` `private_methods` (§Scope Surface in
-NIP-CASH), and MUST keep each wallet's `encrypted_details` while the wallet exists. This works whichever
-transport carried the join, but only on a Hub that offers §Private Join.
+A Hub that serves it lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
+(§Scope Surface in NIP-CASH), and MUST keep each wallet's `encrypted_details` while the wallet exists.
+This works whichever transport carried the join, but only on a Hub that lists `cash_lookup`; offering
+§Private Join is necessary for that, not sufficient.
 
 ## Identity Proof (kind 23199)
 
@@ -850,7 +853,7 @@ the requester and the Hub. Anyone who reads a request on the standard transport 
 co-member holding the shared connection who sees it on a relay — can still resubmit it first and consume
 the proof, but only unchanged: the Hub issues exactly the wallet the requester asked for, to their own key,
 with its details encrypted to them. The requester's own copy is then refused as a replay, and on a Hub
-that offers §Private Join their client recovers the reply (§Lost Join Reply).
+that lists `cash_lookup` (§Lost Join Reply) their client recovers the reply.
 
 **The private-transport inbox is trusted through `get_info`, and the reply through the Hub's key.** A
 client encrypts a private join to whatever inbox the announcement names, and trusts the announcement only
