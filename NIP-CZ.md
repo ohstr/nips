@@ -99,9 +99,8 @@ If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` 
 - `cash`: exactly one.
 - `w`: exactly one, the token's wallet pubkey (TLV `0`), so every copy of a token can be found with `#w`.
 - `ia`: exactly one if `p` is a ConnectionKey, else none.
-- `issued_at`, `expires_at`: exactly one each if `p` is a pubkey and the event has `e` or `a`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires.
 
-**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `expires_at` (at most one, informational, where not required).
+**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the zap is meant to be counted, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires, and is informational otherwise).
 
 A `9522` MUST NOT carry a NIP-40 `expiration` tag: relays could drop it before the recipient sees it.
 
@@ -172,8 +171,8 @@ Signature verification MUST come before trusting any tag.
 | 3 | `cash` decodes per NIP-CASH §Wire Format. | MUST | MUST |
 | 4 | The token's prefix matches `chain` (§Chains). | MUST | MUST |
 | 5 | The token's identity-required hint (TLV `3`), if present, is `1`. | MUST | MUST |
-| 6 | The token carries a signature scheme (TLV `8`), its signature recovers a Minter over the payload of that scheme (NIP-CASH §Mint Provenance), and its attested amount (TLV `6`) equals `amount`. | MUST | MUST |
-| 7 | The signature is a zap signature over the payload rebuilt below; `p` is the target's author; `issued_at` is not earlier than the target's `created_at`. | to count it | — |
+| 6 | The token's signature recovers a Minter over the payload of its signature scheme (TLV `8`; NIP-CASH §Mint Provenance; for TLV `8` = `2`, the payload rebuilt in rule 7), and its attested amount (TLV `6`) equals `amount`. | MUST; TLV `8` = `2` to count it | MUST; a token without TLV `8` is accepted |
+| 7 | `issued_at` and `expires_at` are present, and the zap signature verifies over the payload rebuilt below; `p` is the target's author; for an `e` target, `issued_at` is not earlier than the target's `created_at`. | to count it | — |
 | 8 | The Minter is trusted for `chain`: by the reader, or in the recipient's `10522` `mint` tags. | to count it | MUST, unless the recipient approves it |
 | 9 | The recipient's slice is unclaimed and its `amount_millis` equals `amount`. For a pubkey `p`, `cash_status` with `scope: mine` (NIP-CASH §Cash Status) returns it; for a ConnectionKey `p`, a full in-place `cash_transfer` to the recipient's pubkey, using the attestation from `ia`, succeeds first. | — | MUST |
 
@@ -192,7 +191,7 @@ Rules 1–8 show that a trusted Hub issued the amount to `p`, from the signer, f
 - Incoming: `{"kinds": [9522], "#p": ["<recipient-pubkey>", "<connection-key>", ...]}` on the `10522` relays, including every ConnectionKey linked through NIP-IC. When linking a ConnectionKey, also query its identity connection's relays.
 - Sent: `{"kinds": [9522], "authors": ["<user-pubkey>"]}` and `{"kinds": [9522], "#P": ["<connection-key>", ...]}`, with every ConnectionKey linked to the user through NIP-IC, never a Nostr pubkey.
 - A wallet MUST NOT contact a Minter missing from the recipient's `mint` tags without their approval, since contacting it reveals their identity and IP to that minter.
-- A wallet uses only copies of a token whose signature verifies (rule 6). The signature covers the relay hints and the connection secret through the relay hash, so a copy carrying other ones fails, and a wallet MUST NOT contact its relays.
+- A wallet uses only copies of a token whose signature verifies (rule 6). With TLV `8`, the signature covers the relay hints and the connection secret through the relay hash, so a copy carrying other ones fails, and a wallet MUST NOT contact its relays. A token without TLV `8` has unsigned relay hints, so a wallet SHOULD prefer the relays in the minting Hub's announcement (NIP-CASH §The Hub Announcement).
 - A token's state comes from `cash_status` only (NIP-CASH §Answering About a Destroyed Bill). A timeout MUST NOT be reported as spent.
 - A wallet SHOULD keep the tokens it holds in a [NIP-CP](./NIP-CP.md) Cash Pocket.
 - A wallet SHOULD claim promptly, since the minting Hub's owner can revoke until then. An external redemption pays `net_redeemable_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node (NIP-CASH §The Redeem Fee).
@@ -216,7 +215,7 @@ A client MAY mark a Cash Zap past `expires_at` as possibly expired. A sender's N
 - **Fake value**: any node can make a valid zap signature, including one the sender runs, which can issue a zap and revoke it before it is claimed. Counting only Minters the reader or the recipient trusts limits this to Hubs they trust, as NIP-57 does with `nostrPubkey`.
 - **Revocation**: until claimed, the minting Hub's owner can delete the bill, remove the slice, or untrust a ConnectionKey's IA (NIP-CASH §Lifecycle and Deletion, §Removing a Recipient). A sender who transferred the bill has no power over it. A zap revoked after it was issued still counts.
 - **Identity Authorities**: a ConnectionKey zap is claimable by whoever its IA attests. The IA is chosen and vouched for by the minting Hub, so trusting the Hub includes trusting its IAs. Claim screens SHOULD show the IA.
-- **Copies**: a copied token cannot be redeemed. The zap signature commits to the recipient, sender and target, so a copy re-tagged to another note, recipient or sender fails rule 7, and a copy with other relay hints or connection secret fails rule 6.
+- **Copies**: a copied token cannot be redeemed. The zap signature commits to the recipient, sender and target, so a copy re-tagged to another note, recipient or sender fails rule 7, and a copy of a token with TLV `8` carrying other relay hints or another connection secret fails rule 6.
 - **Split bills**: TLV `6` attests the whole wallet. A zap signature is made only for a new bill issued to the recipient alone, but a bill without one could give the recipient one sat and others the rest. Only rule 9 catches it.
 - **Proxy trust**: anyone can sign a `P` naming any platform account. `P` is display only, never a Nostr pubkey, and never the signed sender.
 
