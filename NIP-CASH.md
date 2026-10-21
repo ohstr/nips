@@ -942,7 +942,7 @@ sequenceDiagram
     Old->>Old: verify proof, determine split applies
     Old->>Old: atomically claim the source slice TERMINAL
     Old->>New: create + fund via internal transfer(s):<br/>one wallet (full-to-cash), or two (partial split)
-    New-->>Old: lokicash1... token(s) for the new wallet(s)
+    New-->>Old: satscash1... token(s) for the new wallet(s)
     Old->>Old: NIP-44 encrypt each token to the caller's own pubkey,<br/>keyed to that new wallet's own keypair
     Old-->>Caller: {carved + (for a split) remainder wallet_pubkey (clear), wallet_token (encrypted)}
 ```
@@ -1012,7 +1012,7 @@ split), a matched pair of fields:
 - `*_wallet_pubkey` — that new wallet's own `WalletPubkey`, in the clear. A bare pubkey with no
   accompanying secret grants no spending capability by itself (§The Pairing Connection), so exposing it
   unencrypted is safe — it exists purely so the recipient has a pubkey to derive a decryption key against.
-- `*_wallet_token` — that new wallet's cash token (`lokicash1...`, §The Cash Token), NIP-44 encrypted
+- `*_wallet_token` — that new wallet's cash token (`satscash1...`, §The Cash Token), NIP-44 encrypted
   using a **second, inner** encryption layer keyed to two values:
   - the pubkey that authenticated this `cash_transfer` call (the value bound by `proof`, i.e. the
     caller's own real identity — not the shared connection's client keypair), and
@@ -1101,7 +1101,7 @@ sequenceDiagram
     Node->>Node: resolve merged terms - earliest expiry, reject if min_transfer/redeem_fee disagree
     Node->>Node: atomically claim EVERY source slice terminal
     Node->>New: create one wallet for new_identity, fund via internal transfers summing sources
-    New-->>Node: lokicash1... token for the consolidated wallet
+    New-->>Node: satscash1... token for the consolidated wallet
     Node-->>Caller: {new_wallet_pubkey (clear), new_wallet_token (encrypted iff pubkey target), amount_millis}
 ```
 
@@ -2424,7 +2424,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
   Bitcoin's is the unqualified original. Other energy-backed coins list their own HRP, chain name and
-  signing prefix. A verifier MUST therefore select the prefix from the token's own HRP (§The Cash Token),
+  signing prefix: every other HRP is signed under its own implementation's signed-message prefix, which a
+  verifier must know to check it. A verifier MUST therefore select the prefix from the token's own HRP (§The Cash Token),
   which is precisely what identifies the base asset. An implementation
   encountering an HRP it has no prefix for MUST treat the token as carrying no valid provenance rather than
   guessing, and MUST NOT refuse to decode it.
