@@ -171,6 +171,9 @@ A portable, shareable string (e.g. handed from a Discord bot to a mobile wallet)
 |---|---|---|---|
 | `0` | Special | 32 bytes | The raw ConnectionKey bytes (hex-decoded). |
 | `1` | Relay | variable | A relay URL, UTF-8. Repeatable. |
+| `2` | Platform | variable | The `<platform>` name (§Canonical Platform User IDs), ASCII. Zero or one, OPTIONAL. |
+
+A decoder MUST ignore a TLV of an unrecognized type.
 
 `nconnection` is **not** a registered NIP-19 prefix — it is a distinct, protocol-specific encoding that happens to reuse NIP-19's TLV convention for consistency.
 
