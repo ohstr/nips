@@ -492,8 +492,8 @@ claimable. Where step 3 runs inside step 4's atomic claim, a failure there MUST 
 A `cash_redeem` MAY carry a fee; `cash_transfer` MUST NOT.
 
 - **When it applies.** Only when a `cash_redeem` resolves to a real external Lightning payment. A
-  redemption the Hub's own node both sends and receives — paid to a Circle Wallet, an isolated Simple
-  Subwallet, a standard connection, or another cash_wallet on the same node — is always fee-free, and no
+  redemption the Hub's own node both sends and receives — paid to a Circle Wallet, another Cash
+  Wallet, or any other connection on the same node — is always fee-free, and no
   fee ever applies to `cash_transfer`.
 - **How much.** A flat base plus a proportional cut: `redeem_fee_base + floor(redeem_fee_ppm × amount /
   1,000,000)`, in integer arithmetic on the slice's own committed amount, capped at that amount. Either
@@ -984,7 +984,7 @@ new cash token. No value is created (the result is exactly the sum of its inputs
 
 Every source MUST be:
 
-- **custodied by this node** — a `cash_wallet` this node itself issued, decided from the node's own records,
+- **custodied by this node** — a Cash Wallet this node itself issued, decided from the node's own records,
   not from a mint signature; a token another node minted is rejected;
 - **a child of the same Cash Hub**;
 - **controlled by the caller**, proven per source with a signed proof against each source slice's current
@@ -1062,7 +1062,7 @@ On receiving `cash_consolidate`, the node MUST, in order:
    Refuse fewer than two sources, a repeated one, or a source carrying a `cash_secret` (see the `sources`
    field above) with `BAD_REQUEST`, and more sources than the Hub's cap with `QUOTA_EXCEEDED`.
 2. Verify the caller controls every source, before any other check on any source: for each, locate the slice
-   registered to that source's `identity_type`/`identity_value` on the `cash_wallet` this node holds under
+   registered to that source's `identity_type`/`identity_value` on the Cash Wallet this node holds under
    its `wallet_pubkey`, and verify its `identity_event` against that slice as §Claim Proofs requires (bound
    to `new_identity`, to that slice's committed amount and to this call's source list), with its
    `attestation_event` for `connection_key`. A source this node does not hold, or holds no slice of for that
@@ -1080,7 +1080,7 @@ On receiving `cash_consolidate`, the node MUST, in order:
 6. Resolve the merged terms: expiry is the **earliest** among the sources (never later);
    `min_transfer_millis`, `redeem_fee_base` and `redeem_fee_ppm` MUST be identical across all sources —
    refuse with `RESTRICTED` on any disagreement.
-7. In one atomic commit: claim **every** source slice terminal, create one new `cash_wallet` for
+7. In one atomic commit: claim **every** source slice terminal, create one new Cash Wallet for
    `new_identity` as a child of the shared Hub, and fund it via internal transfers summing the sources, with
    the token built before it. A failure before
    the commit leaves every source unclaimed. The commit consumes every source's claim proof.
