@@ -11,7 +11,7 @@ AltZap: Cross-Chain Lightning Zaps
 
 ## Abstract
 
-AltZap extends NIP-57's zap request/receipt/LNURL flow with three kinds (`9520`, `9521`, `9523`): settlement on any energy-backed coin routable over the Lightning Network, named by a mandatory `chain` tag; senders and recipients identified by a **ConnectionKey** instead of a Nostr pubkey; and an on-behalf request (`9523`) whose signer is not the sender. AltZap is not wire-compatible with NIP-57 (§Backwards Compatibility).
+AltZap extends NIP-57's zap request/receipt/LNURL flow with three kinds (`9520`, `9521`, `9523`): settlement on any energy-backed coin routable over the Lightning Network, named by a mandatory `chain` tag; senders and recipients identified by their Nostr pubkey or, for someone with no Nostr keypair yet, by a **ConnectionKey** (NIP-IC); and an on-behalf request (`9523`) whose signer is not the sender. AltZap is not wire-compatible with NIP-57 (§Backwards Compatibility).
 
 ## Terminology
 
