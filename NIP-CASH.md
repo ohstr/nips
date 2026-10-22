@@ -16,11 +16,11 @@ coin this format extends to. It mints **cash tokens**: bech32 strings (`satscash
 another prefix for each other coin) that carry real, spendable value the moment they're minted, as a
 specially-scoped NWC connection.
 
-A token is handed on like a bill (in a zap ([NIP-CZ](./NIP-CZ.md)), a chat message, or offline), redeemed to
-a Lightning invoice, or handed on whole or in part with no Lightning
+A token is passed around like a banknote (in a zap ([NIP-CZ](./NIP-CZ.md)), a chat message, or offline),
+redeemed to a Lightning invoice, or transferred whole or in part with no Lightning
 hop. One `mint_cash` can fund many recipients on one shared connection; each share is either bound to an
-identity — a Nostr pubkey, or a web identity vouched for by an Identity Authority — or left a
-bare secret: ordinary cash ecash.
+identity — a Nostr pubkey, or a Web Identity's ConnectionKey vouched for by an Identity Authority — or
+bound only to a secret the caller holds: ordinary ecash, `cash` mode.
 
 ## Non-Goals
 
@@ -31,35 +31,39 @@ particular (`cash` mode). Naming a recipient is never mandatory.
 ## Terminology
 
 - **cash token**: a bech32 string like `satscash1...` (Bitcoin) — the
-  NIP-19-style credential a recipient holds and redeems. For a single-recipient wallet it doubles as "the
-  bill" itself, the way physical cash does; for a multi-recipient wallet it's shared access to a pool of
-  several recipients' independent shares instead (see the next entry).
+  NIP-19-style credential for one Cash Wallet, which its recipients hold and redeem from. This document
+  calls a Cash Wallet, as its token's holders see it, a **bill**: a single-recipient bill is handed on
+  much like physical cash, while a multi-recipient bill is shared access to a pool of several
+  recipients' independent shares (see the next entries).
 - **Cash Wallet**: the NWC connection a cash token's pairing data decodes to — one connection string, shared
-  by every recipient it was created for (or, after a transfer/split, by exactly one recipient — see
-  §Transferring and Splitting a Slice). This is the custody/transport mechanism a cash token rides on, not a
-  separate end-user-facing concept.
+  by every recipient it was created for; a wallet a split or other spin-off creates has exactly one
+  recipient, as §Transferring and Splitting a Slice describes. This is the custody/transport mechanism a
+  cash token rides on, not a separate end-user-facing concept.
 - **Cash Hub**: the wallet owner's own connection for minting cash tokens. It spends from its own
   balance to fund each one.
 - **recipient / slice**: one `(identity, amount)` pair inside a Cash Wallet. A wallet's total funding MUST
   equal the sum of its slices. A slice's identity MAY be reassigned pre-redemption via `cash_transfer`; its
   amount is immutable — a split consumes the slice whole and re-mints fresh wallets rather than rewriting it.
-- **identity**: an OPTIONAL binding on a slice, checked at redemption instead of trusting mere possession of
-  the connection — a raw Nostr `pubkey`, or a `connection_key` (an opaque identifier an Identity Authority
-  vouches for, standing in for a Web Identity — a Discord account, an email, a domain — for a recipient not
-  on Nostr yet). A slice left unbound is `cash` mode: ordinary ecash, redeemable by
-  whoever holds its secret. A `connection_key`'s `identity_value` is NIP-IC's `ConnectionKey`:
-  `hex(SHA256(platform + ":" + externalID))`, in lowercase hex, and it always travels with the `ia_pubkey`
-  that attests it. A sender MAY derive it from typed input only for a platform NIP-IC gives a canonical form,
-  with the identifier in that form and under NIP-IC's strict input
-  rules: input those rules would change is refused, never mapped. For any other platform the sender MUST NOT
-  derive it from typed input: it takes the exact `platform:id` string, byte for byte, from the recipient's
-  attestation or `nconnection`.
+- **identity**: an OPTIONAL binding on a slice, checked on every claim (redeem, transfer, consolidate)
+  instead of trusting mere possession of the connection — a raw Nostr `pubkey`, or, for a recipient not on
+  Nostr yet, a `connection_key` (an identifier an Identity Authority vouches for, standing in for a Web
+  Identity — a Discord account, an email, a domain). A slice left unbound is `cash` mode: ordinary ecash,
+  redeemable by whoever holds its secret. A `connection_key`'s `identity_value` is NIP-IC's `ConnectionKey`:
+  `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex, and it always travels with the
+  `ia_pubkey` that attests it. A Nostr pubkey is never hashed into one. A sender MAY derive it from typed
+  input only for a platform NIP-IC gives a canonical form, with the identifier in that form and under
+  NIP-IC's strict input rules: input those rules would change is refused, never mapped. For any other
+  platform the sender MUST NOT derive it from typed input: it takes the exact `platform:id` string, byte
+  for byte, from the recipient's attestation or `nconnection`.
 - **cash mode**: the mode a slice is in when it carries no identity binding at all — `identity_type: "cash"`
   on the wire, with its secret carried as `cash_secret`; its `identity_value` is the SHA-256 commitment of
   that secret. Implementations MUST send and accept only `cash`, and MUST reject `bearer` as an unknown
-  identity type.
-- **Identity Authority (IA)**: a third party the wallet owner trusts to attest, via a kind-35522 event
-  (NIP-IC's own Attestation kind — this document verifies it, it doesn't define it), that a `connection_key` belongs to a given Nostr pubkey, or to the Web Identity behind it.
+  identity type. On the private transport an item for a cash-mode slice carries no item proof, its secret
+  standing in where the method needs one, and is called a **bearer item**.
+- **Identity Authority (IA)**: NIP-IC's third party that verifies a Web Identity and attests, via a
+  kind-35522 event (NIP-IC's own Attestation kind — this document verifies it, it doesn't define it), which
+  Nostr pubkey controls the account a `connection_key` names. A Hub accepts only the IAs on its wallet
+  owner's allowlist.
 - **min_transfer_millis**: a floor, in millis, on how small a piece a split may carve off or leave behind
   (zero = no floor).
 - **redeem_fee_base / redeem_fee_ppm**: a flat amount in millis plus a parts-per-million rate, charged on
