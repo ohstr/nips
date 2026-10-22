@@ -757,34 +757,47 @@ wallet), a full transfer to an identity that already holds an unclaimed slice on
 a zap transfer (one wallet, or two for a partial one). "Split" on its own always means the
 partial split.
 
+The same rules, by request:
+
+| request | outcome | new wallets | new wallets signed under |
+|---|---|---|---|
+| `zap_target`, full | spin-off | 1 | the zap scheme |
+| `zap_target`, partial | spin-off | 2 | the zap scheme for `new_identity`'s, the ordinary one for the remainder |
+| `amount_millis` below the slice's amount | split, a spin-off | 2 | the ordinary scheme |
+| full, to `pubkey` or `connection_key` | in place | 0 | — |
+| full, to an identity already holding an unclaimed slice here | spin-off | 1 | the ordinary scheme |
+| full, to `cash`, the wallet has only ever had one recipient | in place | 0 | — |
+| full, to `cash`, any other wallet | spin-off | 1 | the ordinary scheme |
+
 ### Request
 
-```jsonc
+```json
 {
-  // The proof travels as sibling fields, not a nested "proof" object — identical in
-  // shape to cash_redeem's (§Redeeming a Slice), and identity_event/attestation_event
-  // are likewise complete events JSON-ENCODED AS STRINGS.
-  "identity_type": "pubkey",        // the slice's *current* registered identity
+  "identity_type": "pubkey",
   "identity_value": "<hex pubkey>",
-  "identity_event": "{...}",        // kind-23198, bound to new_identity AND amount_millis
-  // "attestation_event": "{...}",  // connection_key mode only
-  // "cash_secret": "<64 lowercase hex>", // cash mode instead of the three identity_* fields
+  "identity_event": "{...}",
   "new_identity": {"identity_type": "pubkey", "identity_value": "<hex pubkey>"},
-  // new_identity MUST carry "ia_pubkey" when identity_type is connection_key.
-  // new_identity MAY instead be
-  // {"identity_type": "cash", "identity_value": "<hex sha256 commitment the caller generated>"}
-  // — see §Cash-Mode Slices for why identity_value is required, not server-minted, here.
-  "amount_millis": 5000, // OPTIONAL — omit, or equal the slice's current amount, to transfer it
-                        // all; a smaller value splits off exactly that much (§Which outcome a
-                        // request produces above). A split consumes the source slice WHOLE: the
-                        // remainder is not left behind on it, but re-emerges as its own brand-new
-                        // dedicated wallet alongside the carved-off one — see this section's
-                        // own "Split off a piece" description above.
-  "zap_target": "<event id hex, or kind:pubkey:d coordinate>", // OPTIONAL — makes this a zap transfer
-  // "remainder_commitment": "<hex sha256 commitment>", // a partial split of a cash source only
-  "request_id": "<32–64 lowercase hex chars>" // REQUIRED — §Lost Replies
+  "amount_millis": 5000,
+  "zap_target": "<event id hex, or kind:pubkey:d coordinate>",
+  "request_id": "<32–64 lowercase hex chars>"
 }
 ```
+
+The proof travels as sibling fields, not a nested "proof" object — identical in shape to cash_redeem's
+(§Redeeming a Slice), and identity_event/attestation_event are likewise complete events JSON-ENCODED AS
+STRINGS. The example's fields, and the ones it leaves out:
+
+| field | note |
+|---|---|
+| `identity_type`, `identity_value` | the slice's *current* registered identity |
+| `identity_event` | kind-23198, bound to new_identity AND amount_millis |
+| `attestation_event`: `"{...}"` | connection_key mode only |
+| `cash_secret`: `"<64 lowercase hex>"` | cash mode instead of the three identity_* fields |
+| `new_identity` | new_identity MUST carry "ia_pubkey" when identity_type is connection_key. new_identity MAY instead be `{"identity_type": "cash", "identity_value": "<hex sha256 commitment the caller generated>"}` — see §Cash-Mode Slices for why identity_value is required, not server-minted, here |
+| `amount_millis` | OPTIONAL — omit, or equal the slice's current amount, to transfer it all; a smaller value splits off exactly that much (§Which outcome a request produces above). A split consumes the source slice WHOLE: the remainder is not left behind on it, but re-emerges as its own brand-new dedicated wallet alongside the carved-off one — see this section's own "Split off a piece" description above |
+| `zap_target` | OPTIONAL — makes this a zap transfer |
+| `remainder_commitment`: `"<hex sha256 commitment>"` | a partial split of a cash source only |
+| `request_id` | REQUIRED — §Lost Replies |
 
 - `identity_type`, `identity_value`, `identity_event` — REQUIRED together unless the slice's current
   identity is `cash`, in which case `cash_secret` replaces all three. The kind-23198 `identity_event` MUST
@@ -831,25 +844,39 @@ partial split.
 
 ### Response
 
-```jsonc
+```json
 {
-  "amount_millis": 5000,            // the amount moved: for a partial split, the carved amount
+  "amount_millis": 5000,
   "identity_type": "pubkey",
   "identity_value": "..."
-  // for an in-place outcome: nothing further — the response above is complete.
-  // for a full transfer that spins off ONE new wallet (cash mode on a multi-recipient-history
-  // wallet, or an identity that already holds a slice here), additionally:
-  //   "new_wallet_pubkey": "<the new wallet's WalletPubkey, in the clear>",
-  //   "new_wallet_token": "<satscash1... token, NIP-44 encrypted — see below>"
-  // for a PARTIAL split, which spins off TWO new wallets, additionally:
-  //   "remaining_amount_millis": 15000,   // what the caller keeps, now in its own new wallet
-  //   "new_wallet_pubkey":      "<clear>",  "new_wallet_token":      "<encrypted>", // the carved piece -> new_identity (same field names as the single-wallet spin-off above)
-  //   "remainder_wallet_pubkey":"<clear>",  "remainder_wallet_token":"<encrypted>"  // the remainder -> caller
-  // for a ZAP transfer, the spin-off fields above (one wallet, or two if partial), and additionally:
-  //   "issued_at":  1720000000,   // the zap bill's signed issued_at
-  //   "expires_at": 1722592000    // the zap bill's signed expires_at; 0 if it never expires
 }
 ```
+
+`amount_millis` is the amount moved: for a partial split, the carved amount. What the outcome adds:
+
+| outcome | additionally |
+|---|---|
+| in place | nothing further — the response above is complete |
+| a full transfer that spins off ONE new wallet (cash mode on a multi-recipient-history wallet, or an identity that already holds a slice here) | `new_wallet_pubkey`: the new wallet's WalletPubkey, in the clear; `new_wallet_token`: the satscash1... token, NIP-44 encrypted — see below |
+| a PARTIAL split, which spins off TWO new wallets | `remaining_amount_millis`: what the caller keeps, now in its own new wallet; `new_wallet_pubkey` and `new_wallet_token`: the carved piece -> new_identity (same field names as the single-wallet spin-off above); `remainder_wallet_pubkey` and `remainder_wallet_token`: the remainder -> caller |
+| a ZAP transfer | the spin-off fields above (one wallet, or two if partial), and `issued_at`: the zap bill's signed issued_at; `expires_at`: the zap bill's signed expires_at; 0 if it never expires |
+
+A partial split of 5000 off a 20000 slice, for example:
+
+```json
+{
+  "amount_millis": 5000,
+  "identity_type": "pubkey",
+  "identity_value": "...",
+  "remaining_amount_millis": 15000,
+  "new_wallet_pubkey": "<clear>",
+  "new_wallet_token": "<encrypted>",
+  "remainder_wallet_pubkey": "<clear>",
+  "remainder_wallet_token": "<encrypted>"
+}
+```
+
+and a zap transfer adds, for example, `"issued_at": 1720000000` and `"expires_at": 1722592000`.
 
 A zap transfer's response MUST carry the zap bill's `issued_at` and `expires_at`, in unix seconds, exactly as
 signed. The sender copies them into the Cash Zap, from which readers rebuild the payload.
@@ -865,17 +892,18 @@ Dedicated Wallet, Delivery, specifies.
 
 On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
 
-1. Refuse a `zap_target` that is present and empty with `BAD_REQUEST`. Locate the slice: the unclaimed slice
-   registered to `identity_type`/`identity_value`, or for a `cash_secret` the wallet's cash-mode slice, a
-   removed slice counting as none. If the wallet holds no slice for that identity, refuse with `NOT_FOUND`;
-   if it holds only a claimed or terminal one, or the slice is past its expiry, refuse with `RESTRICTED`.
-   Then verify the caller is authorized to act on the slice: for an identity-bound current identity, verify
-   `identity_event` as §Claim Proofs requires, against this specific `new_identity` and this specific
-   `amount_millis` (treating an omitted `amount_millis` as bound to "the slice's full current amount," not
-   as unbound); for a `cash` current identity, verify the presented `cash_secret`. A proof or secret that
-   fails is refused with `UNAUTHORIZED`, an IA no longer trusted with `RESTRICTED`. Once authorization
-   passes, the Hub marks the call's `request_id` used. A request carrying `zap_target` on a
-   source not bound to a `pubkey` MUST then be refused with `RESTRICTED`.
+1. Refuse a `zap_target` that is present and empty with `BAD_REQUEST`. Then:
+   - Locate the slice: the unclaimed slice registered to `identity_type`/`identity_value`, or for a
+     `cash_secret` the wallet's cash-mode slice, a removed slice counting as none. If the wallet holds no
+     slice for that identity, refuse with `NOT_FOUND`; if it holds only a claimed or terminal one, or the
+     slice is past its expiry, refuse with `RESTRICTED`.
+   - Then verify the caller is authorized to act on the slice: for an identity-bound current identity,
+     verify `identity_event` as §Claim Proofs requires, against this specific `new_identity` and this
+     specific `amount_millis` (treating an omitted `amount_millis` as bound to "the slice's full current
+     amount," not as unbound); for a `cash` current identity, verify the presented `cash_secret`. A proof or
+     secret that fails is refused with `UNAUTHORIZED`, an IA no longer trusted with `RESTRICTED`.
+   - Once authorization passes, the Hub marks the call's `request_id` used. A request carrying `zap_target`
+     on a source not bound to a `pubkey` MUST then be refused with `RESTRICTED`.
 2. Validate `new_identity`: for `pubkey`/`connection_key`, the same rules `mint_cash` applies to
    a recipient entry — identity shape, and, for `connection_key` mode, that
    `ia_pubkey` is on the wallet owner's trusted Identity Authority allowlist right now. For `cash`,
