@@ -98,6 +98,10 @@ goes to a named identity (`pubkey` or `connection_key`) or to no one in particul
 slice at creation and thereafter fixed on that slice and inherited unchanged across splits (§The Redeem
 Fee).
 
+Wherever this document carries an expiry timestamp (`expires_at`, or a payload's `<expires_at>`), a reader
+MUST read an omitted field, `null` and `0` alike as "never expires". Each writer still follows its own
+field's rule. A request's `expiry` duration is not a timestamp, and keeps its own rule (§Minting Cash).
+
 ## Methods
 
 | Method | Caller | Scope | Purpose |
