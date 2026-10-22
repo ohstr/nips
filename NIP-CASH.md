@@ -2815,7 +2815,7 @@ stateDiagram-v2
     PartiallyRedeemed --> FullyRedeemed: every slice redeemed
     Funded --> Deleted: expiry sweep / owner delete / auto-drain (see below)
     PartiallyRedeemed --> Deleted: expiry sweep / owner delete / auto-drain
-    FullyRedeemed --> Deleted: owner delete
+    FullyRedeemed --> Deleted: auto-drain / expiry sweep / owner delete
     Deleted --> [*]
 ```
 
@@ -2964,7 +2964,7 @@ flowchart TD
 
     W --> D1["Owner deletes explicitly<br/>(any redemption state, any time)"]
     W --> D2["Expiry sweep<br/>(background ticker,<br/>past the wallet's ExpiresAt)"]
-    W --> D3["Auto-delete on full drain:<br/>a split/consolidate just claimed the LAST<br/>unredeemed slice AND real balance == 0<br/>AND no sibling slice still unclaimed"]
+    W --> D3["Auto-delete on full drain:<br/>the LAST unredeemed slice just reached a terminal state<br/>(redeem, split or consolidate) AND real balance == 0<br/>AND no sibling slice still unclaimed"]
     D1 --> Del["Deleted<br/>(any remaining balance swept back to the Hub)"]
     D2 --> Del
     D3 --> Del
@@ -3211,7 +3211,8 @@ surrenders that, because merging value is what the caller asked for.
 
 Holders SHOULD treat consolidation as an explicit disclosure of common ownership over the bills
 involved, and avoid consolidating bills whose recipients they do not want correlated. A Hub SHOULD NOT
-retain the source-to-target mapping for longer than its own audit policy requires: unlike a redemption,
+retain the source-to-target mapping for longer than its lookup records (§Lost Replies, The Record) and
+its own audit policy require: unlike a redemption,
 which reveals only that one slice was paid, a consolidation record is a standing statement that N bills
 shared a holder.
 
