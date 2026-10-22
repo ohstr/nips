@@ -22,6 +22,17 @@ hop. One `mint_cash` can fund many recipients on one shared connection; each sha
 identity — a Nostr pubkey, or a Web Identity's ConnectionKey vouched for by an Identity Authority — or
 bound only to a secret the caller holds: ordinary ecash, `cash` mode.
 
+**Contents**
+
+| Part | Sections |
+|---|---|
+| Basics | [Terminology](#terminology) · [Methods](#methods) · [Errors](#errors) · [Claim Proofs](#claim-proofs-kind-23198) · [Data Model](#data-model) |
+| Bill methods | [Minting Cash](#minting-cash) · [Redeeming](#redeeming-a-slice-cash_redeem) · [Redeem Fee](#the-redeem-fee) · [Cash Status](#cash-status-cash_status) · [Transferring](#transferring-and-splitting-a-slice-cash_transfer) · [Spin-offs](#spinning-a-slice-off-into-a-dedicated-wallet) · [Consolidating](#consolidating-tokens-cash_consolidate) |
+| Reliability | [Lost Replies](#lost-replies) · [Cash-Mode Slices](#cash-mode-slices) |
+| Private transport | [The Private Transport](#the-private-transport) · [Announcement](#the-hub-announcement-kind-11190) · [Proof of Work](#proof-of-work) · [Envelopes](#envelopes) · [Item Proofs](#item-proofs-kind-23192) · [Bill Proofs](#bill-proofs-kind-23193) · [Responses](#responses-kind-23191) · [Serving an Envelope](#serving-an-envelope) |
+| Credentials | [The Cash Token](#the-cash-token-satscash1-) · [Mint Provenance](#mint-provenance) · [Cash Hub Connection](#the-cash-hub-connection-cashhub1) · [Scope Surface](#scope-surface) |
+| Lifecycle | [Lifecycle and Deletion](#lifecycle-and-deletion) · [Security](#security-considerations) · [Privacy](#privacy-considerations) |
+
 ## Non-Goals
 
 This document doesn't define membership or eligibility policy: the `mint_cash` caller decides, per call,
