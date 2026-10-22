@@ -88,7 +88,7 @@ This document uses MUST, MUST NOT, SHOULD, and MAY as defined in RFC 2119.
 - **Circle Wallet**: the personal, fully-functional wallet a circle member ends up with, one per
   member, starting at zero balance, able to send and receive like any other wallet in this system.
 - **Circle Wallet Hub**: the host's own connection members send their `create_circle_wallet` request
-  to. It issues Circle Wallets against its own balance.
+  to. It issues Circle Wallets on its node, each holding only what its member receives.
 - **Circle Identity**: a reusable record a Circle Wallet Hub references to decide who is currently a
   member, independent of any one Hub's lifetime and shareable across multiple Hubs. Its internal
   admission mechanism (§Membership) is an implementation detail of *how* the host manages the circle,
@@ -115,20 +115,20 @@ Hub's lifetime.
 A Circle Wallet Hub MUST maintain, for itself:
 
 - the Circle Identity governing who may request a wallet from it;
-- a ceiling on the amount a member may request for their own wallet;
+- a ceiling on the send cap (`max_amount`) and one on the receive cap (`max_receive`) a member may
+  request for their own wallet (§Own Funds and Caps);
 - a floor on how tight a member's requested budget-renewal period may be (§Budget Renewal Floor);
 - a ceiling on, and default value for, an issued wallet's lifetime, each in seconds with `0` meaning
   never. A Hub MUST NOT set a default above its ceiling, so a non-zero ceiling rules out a default of `0`;
 - the grace period a member gets before their wallet is deleted (§Lifecycle and Deletion);
-- an optional ceiling on the combined commitment across every currently-active wallet it has issued
-  (§Creating a Circle Wallet's own Processing Algorithm, step 9), separate from and in addition to its own
-  real balance.
+- a holdings ceiling: the most its active wallets may hold together (§Own Funds and Caps);
+- optionally, a ceiling on what its wallets together may send as external traffic in one period of its
+  own (§Own Funds and Caps).
 
-A member's `max_amount` is a spend cap, not a pre-funded transfer: a Circle Wallet starts at zero
-balance and draws against the Hub's own underlying balance as it spends, up to that cap. The Hub MUST
-maintain this cap-vs-balance invariant atomically with every new wallet it creates (§Creating a Circle
-Wallet's own Processing Algorithm, step 9). A wallet stops counting toward the commitment when it stops
-being active (§Lifecycle and Deletion).
+A Circle Wallet spends only what it has received: it starts at zero balance, and the Hub never funds any
+part of a payment (§Own Funds and Caps). A member's `max_amount` and `max_receive` are caps on the
+wallet's external traffic, not allowances on the Hub's balance. A wallet stops counting toward the
+holdings ceiling when it stops being active (§Lifecycle and Deletion).
 
 For each Circle Wallet it issues, a Hub records the member's `connection_pubkey` (§Request) and authorizes
 it as that wallet's client key. It never generates, receives or stores the matching secret (§Pairing
@@ -176,7 +176,7 @@ sequenceDiagram
     Hub->>Hub: check one active wallet per (Hub, identity) (step 5)
     Hub->>Hub: validate max_amount, budget_renewal and expiry against the Hub's limits (step 6)
     Hub->>Hub: rate-limit, and guard concurrent requests (steps 7–8)
-    Hub->>Wallet: in one transaction: check the commitment (remaining caps + max_amount) against balance, create the wallet authorizing connection_pubkey, record membership (step 9)
+    Hub->>Wallet: in one transaction: check the circle's holdings against its holdings ceiling, create the wallet authorizing connection_pubkey, record membership (step 9)
     Hub->>Wallet: after commit, publish its relay subscription (step 10)
     Hub-->>Member: {encrypted_details} (step 11)
     Note over Hub,Member: one NIP-44 ciphertext from the Hub key: every wallet term and connection_pubkey, no secret
@@ -190,6 +190,7 @@ sequenceDiagram
   "pubkey": "<hex requester pubkey>",
   "connection_pubkey": "<hex pubkey of the connection keypair the member generated>",
   "max_amount": 100000,
+  "max_receive": 200000,
   "expiry": 2592000,
   "budget_renewal": "monthly",
   "identity_event": "{...kind 23199 JSON...}"
@@ -202,9 +203,12 @@ sequenceDiagram
   The member keeps the secret and never sends it; the Hub authorizes this pubkey as the wallet's client key.
   A request without it MUST be rejected — there is no Hub-generated alternative. A member SHOULD generate a
   fresh keypair per request, so the connection key links to nothing else they use.
-- `max_amount` — REQUIRED, the spend cap per budget period, in the chain's milli-unit (msats on Bitcoin,
-  the same milli-unit for any other energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own
-  per-wallet ceiling (§Data Model).
+- `max_amount` — REQUIRED, the send cap per budget period on the wallet's external traffic (§Own Funds
+  and Caps), in the chain's milli-unit (msats on Bitcoin, the same milli-unit for any other energy-backed
+  coin), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling (§Data Model).
+- `max_receive` — REQUIRED, the receive cap per budget period on the wallet's external traffic (§Own
+  Funds and Caps), in the same milli-unit. MUST NOT exceed the Hub's own per-wallet receive ceiling
+  (§Data Model).
 - `expiry` — OPTIONAL, the wallet's lifetime in seconds; if omitted or zero, it MUST default to the Hub's
   own default lifetime (§Data Model), not its ceiling.
 - `budget_renewal` — OPTIONAL, one of NIP-47's `daily` | `weekly` | `monthly` | `yearly` | `never`, with
@@ -228,6 +232,7 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
   "connection_pubkey": "<hex, the connection_pubkey of the request>",
   "relays": ["wss://relay.example.com"],
   "max_amount": 100000,
+  "max_receive": 200000,
   "expires_at": 1720000000,
   "fees_ppm": 0,
   "budget_renewal": "monthly"
@@ -248,9 +253,10 @@ request.
 
 `expires_at` is the wallet's expiry in unix seconds, or `0` when the wallet never expires.
 
-`max_amount` is the spend cap as the Hub resolved it, in the same milli-unit as the request. A Hub that
-adjusts the requested value, for example by rounding it down to a unit its node can represent, MUST NOT
-raise it, and reports what it actually applied, so the member is never left assuming a cap they do not have.
+`max_amount` and `max_receive` are the send and receive caps as the Hub resolved them, in the same
+milli-unit as the request. A Hub that adjusts a requested value, for example by rounding it down to a unit
+its node can represent, MUST NOT raise it, and reports what it actually applied, so the member is never
+left assuming a cap they do not have.
 
 **The response carries exactly one field on purpose.** `encrypted_details` MUST be encrypted (NIP-44) to
 the requester's own pubkey, and every term describing the issued wallet MUST be inside it. A Hub MUST NOT
@@ -279,10 +285,10 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    that `connection_pubkey` is a valid x-only secp256k1 pubkey, and that the two differ.
 2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–7: the kind is 23199, the event's
    own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
-   `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, the `connection` tag equals
-   the requested `connection_pubkey`, and the `terms` tag equals the requested `max_amount`, `expiry` and
-   `budget_renewal`. The `id` check is not optional — without it the replay guard in
-   step 3 is bypassable by mutating only that field.
+   `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, the `connection` tag equals the
+   requested `connection_pubkey`, and the `terms` tag equals the requested `max_amount`, `max_receive`,
+   `expiry` and `budget_renewal`. The `id` check is not optional — without it the replay guard in step 3
+   is bypassable by mutating only that field.
 3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 8). A
    previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
    window. The proof's ID is recorded as used here, before any later check.
@@ -294,38 +300,36 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    (§Errors), which the caller can retry.
 5. Check the one-active-wallet-per-(Hub, identity) rule (§Membership), rejecting with `WALLET_EXISTS`
    (§Errors) if the identity already holds an active Circle Wallet under this Hub.
-6. Validate `max_amount` against the Hub's own per-wallet ceiling, the resolved `budget_renewal` against
-   the Hub's own renewal floor, and, if `expiry` was explicitly supplied (non-zero), that it does not
-   exceed the Hub's own expiry ceiling (§Data Model), where a ceiling of `0` means no limit. A request
-   over any of these limits is refused with `LIMIT_EXCEEDED` (§Errors), whose message names the field.
+6. Validate `max_amount` and `max_receive` against the Hub's own per-wallet ceilings, the resolved
+   `budget_renewal` against the Hub's own renewal floor, and, if `expiry` was explicitly supplied
+   (non-zero), that it does not exceed the Hub's own expiry ceiling (§Data Model), where a ceiling of `0`
+   means no limit. A request over any of these limits is refused with `LIMIT_EXCEEDED` (§Errors), whose
+   message names the field.
 7. Rate-limit per requester `pubkey`. A Hub SHOULD bound how often one member may ask, and MUST answer a
    throttled request with a distinct rate-limit error rather than a generic failure, so a caller can tell
    "slow down" from "you are not a member" — the same distinguishability §Identity Proof's ordering exists
    to protect. That error is `RATE_LIMITED` (§Errors). Quota SHOULD be spent only by requests that got
    this far, so a malformed or unauthorized request cannot exhaust a legitimate member's allowance.
 8. Guard against concurrent requests against the same Hub. A Hub MUST NOT let two in-flight requests both
-   pass step 9's commitment check against the same balance; rejecting the second with a retryable error is
+   pass step 9 against the same state; rejecting the second with `RATE_LIMITED` (§Errors) is
    sufficient. This guard is caller-visible, which is why it is specified: a member may see a transient
    failure caused by another member's request, not by anything wrong with their own.
-9. Inside one transaction, verify that the Hub's commitment does not exceed its own current balance (and
-   its optional aggregate ceiling, if configured). The commitment is the sum, over every currently-active
-   wallet the Hub has issued, of that wallet's remaining cap for its current budget period (§Budget
-   Renewal Floor), plus this request's `max_amount`. A wallet's remaining cap is max(0, `max_amount` −
-   what the wallet has drawn on the Hub's balance in the current period); payouts of the wallet's own
-   received balance do not count. This limits what members can draw in one period, not across renewals.
-   Then create the Circle Wallet connection, authorizing `connection_pubkey` as its client key, and insert
-   its membership row. The membership row's uniqueness constraint is the authoritative guard for step 5,
-   so a conflict here, a `connection_pubkey` already authorized for another connection on this node, or a
-   balance/ceiling check failing, MUST roll back the entire transaction, including the just-created
-   connection and permission rows. A failing balance or ceiling check is refused with
+9. Inside one transaction, verify that the circle's holdings (§Own Funds and Caps) are below its holdings
+   ceiling: a new wallet holds nothing, but a circle that can take in no more money has no room for a
+   member who would receive any. Then create the Circle Wallet connection, authorizing `connection_pubkey`
+   as its client key, and insert its membership row. The membership row's uniqueness constraint is the
+   authoritative guard for step 5, so a conflict here, a `connection_pubkey` already authorized for
+   another connection on this node, or a failing holdings check, MUST roll back the entire transaction,
+   including the just-created connection and permission rows. A failing holdings check is refused with
    `INSUFFICIENT_CAPACITY` (§Errors). The transaction MUST NOT commit once the proof is past its freshness
    window (§Identity Proof), checked at commit (§Lost Join Reply). On any rollback, the step-3 replay
    record is not rolled back.
 
    Step 8's guard is not sufficient on its own: it is process-local, so two Hub processes sharing one
-   database could still both pass this check. Making the read-and-create genuinely atomic requires a
+   database could still both pass a holdings check that only one of them should, here or when crediting a
+   payment (§Own Funds and Caps). Making each check and the change it guards genuinely atomic requires a
    database-level lock scoped to the Hub — an implementation whose datastore cannot provide one MUST NOT
-   be run as multiple concurrent processes against a shared database, since the commitment ceiling is
+   be run as multiple concurrent processes against a shared database, since the holdings ceiling is
    otherwise unenforced. A transaction-scoped advisory lock is sufficient where the datastore supports
    one.
 10. After the transaction commits, never before, publish the new connection's relay subscription.
@@ -343,9 +347,9 @@ codes for them, on either transport:
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
 | `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it stops being active (§Lifecycle and Deletion) |
-| `LIMIT_EXCEEDED` | `max_amount`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other values |
-| `RATE_LIMITED` | the requester has asked too often (step 7) | yes, later |
-| `INSUFFICIENT_CAPACITY` | the Hub cannot commit that much now (step 9) | yes, later or for less |
+| `LIMIT_EXCEEDED` | `max_amount`, `max_receive`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other values |
+| `RATE_LIMITED` | the requester has asked too often, or another request held the Hub (steps 7–8) | yes, later |
+| `INSUFFICIENT_CAPACITY` | the circle's holdings have reached its holdings ceiling (step 9) | yes, later |
 
 Other failures (a malformed request, a proof that does not verify) keep whatever codes the implementation
 uses; this document names only the six a caller has to distinguish.
@@ -407,7 +411,7 @@ section for the general reasoning, which applies identically here).
                                               // — see below: this is the pubkey from the Hub's
                                               // PAIRING URI, not any key derived from its secret
     ["connection", "<connection_pubkey from the request>"], // binds proof to the key the wallet is issued to
-    ["terms", "<max_amount>:<expiry>:<budget_renewal>"]    // binds proof to the requested terms
+    ["terms", "<max_amount>:<max_receive>:<expiry>:<budget_renewal>"] // binds proof to the requested terms
   ],
   "content": "",
   "sig": "<schnorr signature by `pubkey`>"
@@ -436,10 +440,11 @@ one list of checks; every other section that verifies a kind-23199 proof refers 
    member's identity to the key the wallet will be issued to, so nobody who sees the request can have the
    wallet issued to a key of their own instead (§Security Considerations).
 7. **The `terms` tag equals the request's terms.** Exactly one such tag, whose value is
-   `<max_amount>:<expiry>:<budget_renewal>` exactly as requested: `max_amount` and `expiry` as decimal
-   integers, an omitted `expiry` written as `0` and an omitted `budget_renewal` as `never`. A Hub MUST
-   reject a request whose params differ. With the signer, `d` and `connection`, this binds every param of
-   the request, so nobody who sees it can resubmit the proof with other terms.
+   `<max_amount>:<max_receive>:<expiry>:<budget_renewal>` exactly as requested: `max_amount`,
+   `max_receive` and `expiry` as decimal integers, an omitted `expiry` written as `0` and an omitted
+   `budget_renewal` as `never`. A Hub MUST reject a request whose params differ. With the signer, `d` and
+   `connection`, this binds every param of the request, so nobody who sees it can resubmit the proof with
+   other terms.
 8. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
@@ -462,8 +467,8 @@ A Circle Identity's admission mechanism (§Terminology) supports two forms:
 
 **Removing a member disables their wallet.** Whichever form it uses, a Hub MUST, within its staleness
 bound, disable the Circle Wallet of any pubkey no longer resolved as a member. A disabled wallet can no
-longer draw on the Hub's balance, but keeps, and can still pay out, any money it received itself. It is
-no longer an active wallet: it stops counting toward step 9's commitment and the one-active-wallet rule.
+longer receive, but keeps, and can still pay out, its balance. It is no longer an active wallet: it stops
+counting toward the holdings ceiling and the one-active-wallet rule.
 A disabled wallet is never re-enabled; a re-added member joins again.
 
 A `follow_set` Hub MUST apply these rules:
@@ -571,6 +576,66 @@ authoritative guard inside the creation transaction. The membership row MUST be 
 Wallet stops being active (§Lifecycle and Deletion), and in any case MUST cascade-delete when the wallet's
 connection record is deleted, freeing the identity to request a new wallet.
 
+## Own Funds and Caps
+
+A Circle Wallet spends only what it has received. Its balance is what it has been paid minus what it has
+paid out, fees included, and `get_balance` reports exactly that. A Hub MUST NOT fund any part of a
+member's payment from its own balance or from another member's wallet, and MUST refuse a payment whose
+full cost exceeds the paying wallet's balance with `INSUFFICIENT_BALANCE`. A payment's full cost is its
+amount plus, for a Lightning payment, its routing fee and its `fees_ppm` fee (§Fees).
+
+**Four kinds of payment.** Every payment a Circle Wallet sends or receives is one of these, by where the
+other side is:
+
+1. **The same circle**: another wallet issued by the same Hub. Fee-free (§In-Circle Transfers), and
+   counted against neither member's caps.
+2. **Another circle on the same node**: a Circle Wallet issued by another Circle Wallet Hub on the same
+   node. Fee-free and counted against neither member's caps, but the receiving circle's holdings ceiling
+   applies to it (below).
+3. **Any other connection on the same node**: the host's own wallet, a Cash Hub or a cash bill, or any
+   other application. Fee-free, but external traffic: a send counts against the sender's send cap and a
+   receipt against the receiver's receive cap. Otherwise a member could move money into another
+   application on the node and pay it out from there, past both caps.
+4. **Lightning**: anyone off the node. External traffic, and the only kind a routing fee and `fees_ppm`
+   apply to.
+
+**Caps.** Each wallet has two caps on its external traffic (kinds 3 and 4), both per budget period
+(§Budget Renewal Floor). Payments of kinds 1 and 2 never count against them.
+
+- **Send cap, `max_amount`.** A Hub MUST refuse, with `QUOTA_EXCEEDED`, a payment whose full cost would
+  take the wallet's external sends in the current period past `max_amount`. A payment counts in the
+  period in which it starts. While it is in flight it counts at the most it may cost, its routing-fee
+  limit included; once it resolves, at what it cost, or not at all if it failed.
+- **Receive cap, `max_receive`.** A Hub MUST refuse, with `QUOTA_EXCEEDED`, to issue an invoice for more
+  than the wallet may still receive in the current period, and MUST fail, never credit, an incoming
+  external payment that would take the period's receipts past `max_receive` — a keysend or any other
+  payment that names no invoice included. A held payment counts from the moment the Hub accepts it until
+  it settles, and stops counting if it is cancelled.
+
+A Hub MUST refuse, with `RESTRICTED`, to issue a Circle Wallet invoice with no amount or a zero amount:
+its amount is what the receive cap and the holdings ceiling count.
+
+**Holdings ceiling.** A Circle Wallet Hub's holdings are the balances of its active wallets plus the
+amounts of every open invoice they have issued, held payments the Hub has accepted included. A Hub MUST
+NOT let a new invoice or a credit take its holdings past its holdings ceiling. It refuses such an invoice,
+and such a payment from the same node, with `INSUFFICIENT_CAPACITY`, and fails such a payment arriving
+over Lightning. A payment within the circle only moves money inside its holdings, and is never refused for
+this ceiling.
+
+**Circle outbound ceiling.** A Hub MAY also bound what all its wallets together send as external traffic
+in one period of its own, `daily` to `yearly`, starting at the Hub's creation as §Budget Renewal Floor
+starts a wallet's. It then refuses, with `QUOTA_EXCEEDED`, a payment that would take that total past the
+bound, counting each payment as for a send cap.
+
+**Only active wallets receive.** A wallet that is no longer active (§Lifecycle and Deletion) can only pay
+out. A Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it stops
+being active, and MUST fail every payment to it, same-circle ones included. Its payouts still count
+against its send cap and the circle's outbound ceiling.
+
+**Rate limits.** Payments that count against no cap are otherwise free to repeat without bound. A Hub MAY
+rate-limit a wallet's same-circle transfers, the hold invoices it issues and the payments it has pending
+at once, refusing the excess with `RATE_LIMITED`.
+
 ## In-Circle Transfers
 
 A payment is treated as an internal, fee-free transfer whenever the invoice being paid was created by
@@ -579,7 +644,8 @@ issued either side. Every member of a circle holds a Circle Wallet on that same 
 another member, or paying the host directly, never actually leaves the node: no routing, no routing
 fee, no dependency on either side's own inbound or outbound liquidity. A payment to anyone outside the
 circle is an ordinary Lightning payment, subject to normal routing and fees, exactly like any other
-wallet on this system.
+wallet on this system. Fee-free is not the same as uncounted: only a payment to another Circle Wallet
+counts against no cap (§Own Funds and Caps).
 
 This property isn't unique to Circle Wallet. It's a general property of any two connections sharing one
 underlying node. But it's the concrete, everyday benefit a circle is built around: a trusted group
@@ -592,16 +658,18 @@ A Circle Wallet Hub MAY apply a forwarding-fee skim to a member's payments — `
 (parts-per-million), a Hub-level setting reported in `create_circle_wallet`'s own response
 (§Creating a Circle Wallet) so a member knows the rate before they ever pay anything.
 
-- **When it applies.** Only to a payment that genuinely leaves the circle over real Lightning routing.
-  An in-circle transfer, or any other payment settled between apps on the same underlying node
-  (§In-Circle Transfers above), is always fee-free — `fees_ppm` never applies to it.
+- **When it applies.** Only to a payment that leaves the node over real Lightning routing (kind 4, §Own
+  Funds and Caps). An in-circle transfer, or any other payment settled between apps on the same
+  underlying node (§In-Circle Transfers above), is always fee-free — `fees_ppm` never applies to it, even
+  where the payment counts against a cap.
 - **How much.** `fees_ppm` times the payment amount, divided by 1,000,000 and **rounded down**. Rounding
   direction is specified because it is observable: at small amounts a rate that rounds up charges a fee on
   a payment the member was quoted as nearly free, and two implementations disagreeing here disagree about
   the member's balance. Flooring also means a small enough payment carries no fee at all, which is the
   intended behaviour rather than an artifact.
 - **Who pays.** The paying member, on top of the payment amount, out of their own wallet balance —
-  never any other member's, and never the Hub's own underlying balance.
+  never any other member's, and never the Hub's own underlying balance. With the routing fee it is part
+  of the payment's full cost, which counts against the member's send cap (§Own Funds and Caps).
 - **Which rate.** The one reported in that member's own `create_circle_wallet` response, fixed for the
   life of the wallet. A Hub MAY change its rate, but the new rate applies only to wallets created after
   the change, and `get_info`'s `circle_wallet.fees_ppm` (§The Circle Wallet Hub Connection) reports the rate
@@ -642,25 +710,26 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
 
 ```jsonc
 "circle_wallet": {
-  "available_millis": 1000000, // what the Hub can still commit: balance minus the active wallets' remaining caps
+  "available_millis": 1000000, // what the circle can still take in: its holdings ceiling minus its holdings
   "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
   "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
   "identity": "<hex x-only>",  // OPTIONAL: present iff the Hub offers §Private Join
   "per_wallet_max_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_amount (§Data Model)
+  "per_wallet_max_receive_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_receive
   "min_budget_renewal": "monthly"  // OPTIONAL: the Hub's renewal floor (§Budget Renewal Floor)
 }
 ```
 
 The first three are the Hub's **terms**: a prospective member needs them before deciding whether to join,
 and a Hub that withheld them would only push the question into a support channel. `available_millis` is a
-snapshot, not a reservation — it MAY be stale by the time a request lands, and step 9's commitment check
-remains authoritative.
+snapshot, not a reservation — it MAY be stale by the time a request or a payment lands, and the
+holdings checks remain authoritative (§Own Funds and Caps).
 
-`per_wallet_max_millis` (the chain's milli-unit, like `max_amount`) and `min_budget_renewal` (`daily` |
-`weekly` | `monthly` | `yearly` | `never`) are the other limits step 6 checks, so a client can validate a
-request before sending it. A Hub SHOULD report both. They can change after `get_info`, so a client MUST still
-handle a refusal.
+`per_wallet_max_millis` and `per_wallet_max_receive_millis` (the chain's milli-unit, like `max_amount`)
+and `min_budget_renewal` (`daily` | `weekly` | `monthly` | `yearly` | `never`) are the other limits step 6
+checks, so a client can validate a request before sending it. A Hub SHOULD report all three. They can
+change after `get_info`, so a client MUST still handle a refusal.
 
 `circle_policy` is different in kind: it discloses the Hub's **admission mechanism**, not its terms. This is
 a deliberate disclosure, and §Privacy Considerations states what it costs.
@@ -830,14 +899,14 @@ There's no claimed/unclaimed distinction here. A Circle Wallet is active from cr
 happens:
 
 - **Disabled.** Its pubkey is no longer resolved as a member (§Membership).
-- **Expired.** Its `expires_at` has passed. The wallet stops spending against the Hub, and the member may
-  join again.
+- **Expired.** Its `expires_at` has passed. The wallet can no longer receive, and the member may join
+  again.
 - **Closing.** The host has deleted it, on its own or by tearing down the whole Hub.
 
 There is no Expired → Closing edge: an expired wallet is already in its grace period.
 
-A wallet in any of these states is no longer active: it can no longer draw on the Hub's balance, and can
-only pay out its own received balance.
+A wallet in any of these states is no longer active: it can no longer receive, and can only pay out its
+balance (§Own Funds and Caps).
 
 **Member balances.** Before a wallet is deleted, whether by the host, at its expiry or in a bulk teardown,
 the Hub MUST give the member a grace period (e.g. 7 days) during which the wallet can only pay out its own
@@ -856,25 +925,26 @@ members. The requester `pubkey` in a `create_circle_wallet` call
 MUST NOT be trusted bare. Without the identity-proof requirement, anyone holding the connection could
 claim to be any pubkey they merely knew — enabling rate-limit denial-of-service against a real member,
 an allowlist-membership oracle (probing who's on the list via the error-code difference), and
-commitment/balance griefing (minting max-amount wallets "as" real members).
+capacity griefing (claiming wallets "as" real members, under their caps).
 
 **Single-use replay guard is necessary.** A Circle Wallet identity proof has no invoice to bind it to.
 Without an explicit single-use guard keyed on the proof's event ID, a captured proof could be
 resubmitted repeatedly within its own freshness window.
 
-**The connection key is bound, not merely sent.** The wallet is issued to whatever `connection_pubkey`
-the Hub accepts, so a request whose proof did not bind it could be re-pointed: anyone who reads the
-request before the Hub does could resubmit it with their own key and receive a wallet that spends
-against the Hub on the real member's membership. The kind-23199 `connection` tag (§Identity Proof,
-check 6) closes this on both transports.
+**The connection key is bound, not merely sent.** The wallet is issued to whatever `connection_pubkey` the
+Hub accepts, so a request whose proof did not bind it could be re-pointed: anyone who reads the request
+before the Hub does could resubmit it with their own key and receive the wallet the real member's
+membership entitles them to, and every payment made to it. The kind-23199 `connection` tag (§Identity
+Proof, check 6) closes this on both transports.
 
 **The identity proof binds every param, on either transport.** Its `connection` and `terms` tags
-(§Identity Proof, checks 6–7) bind the connection key, `max_amount`, `expiry` and `budget_renewal`, beside
-the requester and the Hub. Anyone who reads a request on the standard transport before the Hub does — a
-co-member holding the shared connection who sees it on a relay — can still resubmit it first and consume
-the proof, but only unchanged: the Hub issues exactly the wallet the requester asked for, to their own key,
-with its details encrypted to them. The requester's own copy is then refused as a replay, and on a Hub
-that lists `cash_lookup` (§Lost Join Reply) their client recovers the reply.
+(§Identity Proof, checks 6–7) bind the connection key, `max_amount`, `max_receive`, `expiry` and
+`budget_renewal`, beside the requester and the Hub. Anyone who reads a request on the standard transport
+before the Hub does — a co-member holding the shared connection who sees it on a relay — can still
+resubmit it first and consume the proof, but only unchanged: the Hub issues exactly the wallet the
+requester asked for, to their own key, with its details encrypted to them. The requester's own copy is
+then refused as a replay, and on a Hub that lists `cash_lookup` (§Lost Join Reply) their client recovers
+the reply.
 
 **The private-transport inbox is trusted through `get_info`, and the reply through the Hub's key.** A
 client encrypts a private join to whatever inbox the announcement names, and trusts the announcement only
