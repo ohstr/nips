@@ -634,7 +634,7 @@ On receiving `cash_status` for a bill that still exists, the wallet MUST, in ord
 
 ### Answering About a Destroyed Bill
 
-A Hub deletes a bill once nothing is left on it and then, by default, answers
+A Hub deletes a bill once nothing is left on it, and outside a retention window it then answers
 nothing about it. A Hub MAY keep answering about a bill it destroyed, for a **retention window** of its own
 choosing, with a tombstone in place of the roster:
 
@@ -1379,8 +1379,8 @@ so either transport is acceptable.
 There is **no fallback**. A bill whose items cannot be built or served is an error, not a reroute to the
 standard transport.
 
-Consequently every bill MUST carry mint provenance, whose signature identifies the Hub an
-announcement is verified against, and every item MUST carry a bill proof.
+Consequently every bill MUST carry mint provenance, whose signature identifies the node whose
+announcement is verified against it, and every item MUST carry a bill proof.
 
 ### Kinds
 
