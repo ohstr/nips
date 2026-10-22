@@ -19,6 +19,22 @@ with `cash_lookup`.
 A bill made this way is an ordinary NIP-CASH bill, except that it never expires and its Hub's owner cannot
 delete it.
 
+```mermaid
+sequenceDiagram
+    participant C as Buyer's client
+    participant H as Hub
+    participant P as Payer (any wallet)
+    C->>H: get_info on the Order connection
+    H-->>C: terms
+    C->>H: cash_order (private transport)
+    H-->>C: order: invoice or address, pay_by
+    P->>H: payment
+    Note over H: mints the bill on its own
+    H-->>C: order notice (kind 23189)
+    C->>H: cash_lookup
+    H-->>C: done: the order with its bills
+```
+
 ## Terminology
 
 - **order**: one `cash_order` call and everything that follows from it: the payment it asks for, and every
@@ -83,17 +99,30 @@ A retired Order connection refuses new `cash_order` items with `RESTRICTED`. Its
 
 `get_info` on an Order connection returns the Hub's selling terms in a `cash_order` object:
 
-```jsonc
+```json
 {
   "methods": ["get_info"],
   "private_methods": ["cash_lookup", "cash_order"],
   "cash_order": {
-    "lightning": {"min_millis": 1000000, "max_millis": 1000000000, "fee_base": 1000, "fee_ppm": 1000,
-                  "window": 3600},
-    "onchain": {"min_millis": 10000000, "max_millis": 1000000000, "fee_base": 21000, "fee_ppm": 2000,
-                "window": 86400,
-                "confirmations": [{"up_to_millis": 100000000, "n": 1}, {"up_to_millis": 1000000000, "n": 3},
-                                  {"n": 6}]},
+    "lightning": {
+      "min_millis": 1000000,
+      "max_millis": 1000000000,
+      "fee_base": 1000,
+      "fee_ppm": 1000,
+      "window": 3600
+    },
+    "onchain": {
+      "min_millis": 10000000,
+      "max_millis": 1000000000,
+      "fee_base": 21000,
+      "fee_ppm": 2000,
+      "window": 86400,
+      "confirmations": [
+        {"up_to_millis": 100000000, "n": 1},
+        {"up_to_millis": 1000000000, "n": 3},
+        {"n": 6}
+      ]
+    },
     "bill": {"redeem_fee_base": 0, "redeem_fee_ppm": 5000, "min_transfer_millis": 1000}
   }
 }
@@ -101,13 +130,24 @@ A retired Order connection refuses new `cash_order` items with `RESTRICTED`. Its
 
 - A payment kind the Hub does not sell is absent. An object with neither kind means the Hub sells nothing on
   this connection.
-- `min_millis` and `max_millis` bound an order's `amount_millis`; `max_millis` MUST NOT exceed the Hub's
-  per-wallet funding ceiling. `fee_base` (millis) and `fee_ppm` set the order fee. `window` is the payment
-  window in seconds.
-- `confirmations` lists tiers in ascending `up_to_millis`; a payment uses the first tier whose `up_to_millis`
-  is at least the payment's value, and the last tier, which carries no `up_to_millis`, covers every larger
-  value. Every `n` MUST be at least 1.
-- `bill` gives the terms the Hub will stamp on an ordered bill.
+
+| field | in | meaning |
+|---|---|---|
+| `min_millis`, `max_millis` | each kind | bound an order's `amount_millis`; `max_millis` MUST NOT exceed the Hub's per-wallet funding ceiling |
+| `fee_base`, `fee_ppm` | each kind | set the order fee; `fee_base` is in millis |
+| `window` | each kind | the payment window in seconds |
+| `confirmations` | `onchain` | lists tiers in ascending `up_to_millis`, used as below |
+| `bill` | — | the terms the Hub will stamp on an ordered bill |
+
+`confirmations`: a payment uses the first tier whose `up_to_millis` is at least the payment's value, and the
+last tier, which carries no `up_to_millis`, covers every larger value. Every `n` MUST be at least 1. With the
+terms above:
+
+| payment's value | tier used | confirmations |
+|---|---|---|
+| 21,063,000 millis | `up_to_millis` 100000000 | 1 |
+| 500,000,000 millis | `up_to_millis` 1000000000 | 3 |
+| 2,000,000,000 millis | the last tier | 6 |
 
 A client MUST read the terms before ordering and MUST show the buyer the order fee, the bill's redeem fee and,
 for on-chain, the confirmations that apply. Terms are fixed per order when the order is placed.
@@ -119,23 +159,28 @@ on the standard transport: every holder of an Order connection can read what tra
 
 ### The Item
 
-```jsonc
+```json
 {
   "id": "1",
   "target": "<Order connection pubkey>",
   "method": "cash_order",
-  "params": { },
-  "proof": { },        // kind 23192, signed by the buyer key
-  "bill_proof": { }    // kind 23193, signed with the Order connection's secret
+  "params": {},
+  "proof": {},
+  "bill_proof": {}
 }
 ```
+
+| field | kind | signed with | shows |
+|---|---|---|---|
+| `proof` | 23192 | the buyer key | who placed the order, and so who may read it |
+| `bill_proof` | 23193 | the Order connection's secret | that the request found this Hub's shop |
 
 Both proofs carry the tags NIP-CASH gives every item: `d` the Order connection pubkey, `h` the Hub identity
 from the connection's type `4`, `m` `cash_order`, `ph`, `en` and `expiration`.
 
 ### Request
 
-```jsonc
+```json
 {
   "recipient": {"identity_type": "cash", "identity_value": "<sha256 commitment>"},
   "amount_millis": 21000000,
@@ -145,10 +190,15 @@ from the connection's type `4`, `m` `cash_order`, `ph`, `en` and `expiration`.
 }
 ```
 
-- `recipient` — REQUIRED, exactly one: `{"identity_type": "pubkey", "identity_value": <hex>}`,
-  `{"identity_type": "connection_key", "identity_value": <hex>, "ia_pubkey": <hex>}`, or
-  `{"identity_type": "cash", "identity_value": <commitment>}`, each validated exactly as a `mint_cash`
+- `recipient` — REQUIRED, exactly one of the shapes below, each validated exactly as a `mint_cash`
   recipient.
+
+  | recipient | shape |
+  |---|---|
+  | a Nostr pubkey | `{"identity_type": "pubkey", "identity_value": <hex>}` |
+  | a Web Identity | `{"identity_type": "connection_key", "identity_value": <hex>, "ia_pubkey": <hex>}` |
+  | nobody in particular | `{"identity_type": "cash", "identity_value": <commitment>}` |
+
 - `amount_millis` — REQUIRED, the bill's amount, strictly positive. For `onchain` it MUST be a whole number of
   base units, a multiple of 1000.
 - `payment` — REQUIRED, `lightning` or `onchain`.
@@ -178,7 +228,7 @@ order is closed. A buyer key MUST NOT be the buyer's or the recipient's Nostr ke
 
 ### Response
 
-```jsonc
+```json
 {
   "state": "open",
   "payment": "lightning",
@@ -191,20 +241,32 @@ order is closed. A buyer key MUST NOT be the buyer's or the recipient's Nostr ke
 }
 ```
 
-- `fee_millis` — the order fee, `fee_base + floor(fee_ppm × amount_millis / 1,000,000)`; for `onchain`
-  rounded up so that `pay_millis` is a whole number of base units.
-- `pay_millis` — `amount_millis + fee_millis`, what the buyer is asked to pay.
-- `invoice` — for `lightning`: a fresh invoice for exactly `pay_millis`, expiring at `pay_by`.
-- `address` — for `onchain`, instead of `invoice`: a fresh address, with `confirmations`, the `n` of the tier
-  `pay_millis` falls in.
-- `pay_by` — the end of the payment window.
-- `bills` — the bills minted so far, below.
+| field | `lightning` | `onchain` |
+|---|---|---|
+| `fee_millis` | the order fee, `fee_base + floor(fee_ppm × amount_millis / 1,000,000)` | the same, rounded up so that `pay_millis` is a whole number of base units |
+| `pay_millis` | `amount_millis + fee_millis`, what the buyer is asked to pay | the same |
+| `invoice` / `address` | `invoice`: a fresh invoice for exactly `pay_millis`, expiring at `pay_by` | `address`, instead of `invoice`: a fresh address, with `confirmations`, the `n` of the tier `pay_millis` falls in |
+| `pay_by` | the end of the payment window | the same |
+| `bills` | the bills minted so far, below | the same |
+
+With the terms above, an order of 21,000,000 millis:
+
+| | Lightning | on-chain |
+|---|---|---|
+| `fee_millis` | 1000 + floor(1000 × 21000000 / 1000000) = 22000 | 21000 + floor(2000 × 21000000 / 1000000) = 63000 |
+| `pay_millis` | 21022000 | 21063000, already whole base units |
+| confirmations | — | 1 |
 
 Each entry of `bills`:
 
-```jsonc
-{"wallet_pubkey": "<hex>", "cash_token": "satscash1...", "amount_millis": 21000000,
- "paid_millis": 21022000, "outpoint": "<txid>:<vout>"}
+```json
+{
+  "wallet_pubkey": "<hex>",
+  "cash_token": "satscash1...",
+  "amount_millis": 21000000,
+  "paid_millis": 21022000,
+  "outpoint": "<txid>:<vout>"
+}
 ```
 
 `paid_millis` is the payment the bill was minted from, and `outpoint` its on-chain output, absent for
@@ -224,9 +286,11 @@ After NIP-CASH's envelope and item steps, a Hub MUST, in order:
 5. Refuse with `QUOTA_EXCEEDED` an order that would take the open orders of its payment kind past the Hub's
    open-order ceiling, or a Lightning order the Hub cannot expect to receive.
 6. Create the invoice or the address.
-7. In one atomic commit, record the order (target, buyer key, recipient, amount, payment kind, `notify`, the
-   terms that apply, the invoice or address), its reservation against the open-order ceiling, and the
-   `request_id` record, checking the deadline again as it commits.
+7. In one atomic commit, checking the deadline again as it commits, record:
+   - the order: target, buyer key, recipient, amount, payment kind, `notify`, the terms that apply, the
+     invoice or address;
+   - its reservation against the open-order ceiling;
+   - the `request_id` record.
 8. Return the order.
 
 A request that fails any step before 7 leaves no order. Placing an order moves no funds.
@@ -248,6 +312,9 @@ placed. A Hub MUST then:
   is minted as several bills, none above it, the first ones of exactly `max_millis`;
 - stamp every bill with the recipient and the terms fixed when the order was placed, with no expiry, and mark
   its slice ordered.
+
+For example, with `max_millis` 1000000000 and `fee_millis` 63000, a payment bringing in 2500063000 millis
+mints 2500000000 millis as three bills: 1000000000, 1000000000 and 500000000.
 
 A payment of `fee_millis` or less mints nothing and is kept by the Hub.
 
@@ -278,6 +345,20 @@ At `pay_by` the Hub looks at what it has seen for the order, confirmed or not:
   it are minted the same way;
 - nothing seen: the Hub MAY delete the order at once; a payment arriving afterwards is kept by the Hub.
 
+For the on-chain order above (`pay_millis` 21063000, `fee_millis` 63000), these rules give:
+
+| what arrives at the address | outcome |
+|---|---|
+| 21063000 millis, confirmed | one bill of 21000000 |
+| 20000000 millis | one bill of 19937000 |
+| 25000000 millis | one bill of 24937000 |
+| two outputs of 10000000 millis | two bills of 9937000 |
+| 10000000 millis after `pay_by`, a payment having been seen before it | one bill of 9937000 |
+| 50000 millis | nothing: at most `fee_millis`, kept by the Hub |
+| a payment a reorganisation removes before it is minted | nothing yet |
+| a payment a reorganisation removes after it is minted | the bill stands, at the Hub's loss |
+| a first payment after `pay_by`, nothing seen before | kept by the Hub if it deleted the order |
+
 A client MUST tell its user to pay before `pay_by`, and MUST NOT present a payment the Hub did not see by
 then as one that will be minted.
 
@@ -304,6 +385,18 @@ other item.
 A Lightning order is `minted` or `expired` for good once it reaches either. An on-chain order in `closed` may
 gain bills later.
 
+```mermaid
+stateDiagram-v2
+    [*] --> open
+    open --> paid: a payment arrives
+    paid --> minted: its bill is minted
+    open --> expired: pay_by, nothing seen
+    minted --> closed: pay_by, on-chain
+    closed --> closed: a later payment is minted
+    minted --> [*]: Lightning
+    expired --> [*]
+```
+
 ## Reading an Order
 
 A client reads an order with NIP-CASH's `cash_lookup`, with the order's `request_id` and deadline:
@@ -324,7 +417,7 @@ When an order changes state or gains a bill, the Hub publishes an order notice, 
 ```
 kind        23189
 pubkey      a fresh key, used once and discarded
-tags         [["p", "<the order's notify>"]]
+tags        [["p", "<the order's notify>"]]
 content     ""
 ```
 
@@ -346,6 +439,11 @@ notices, since ephemeral events can be missed.
 5. Keep each bill as it appears. A client MUST NOT treat a Lightning order as finished before `minted` or
    `expired`, nor an on-chain one before `expired` or `closed`, and SHOULD let its user read a closed
    on-chain order again later.
+
+   | payment kind | finished at |
+   |---|---|
+   | Lightning | `minted` or `expired` |
+   | on-chain | `expired` or `closed`, and a `closed` order may still gain bills |
 
 A lost reply is read with `cash_lookup`. After `unknown` the order was never placed, and a client places it
 again only with its user's confirmation, since a new order asks for a new payment.
