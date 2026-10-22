@@ -82,7 +82,7 @@ All `p` (recipient) and `P` (sender) tags use:
 ["p/P", "<hex-pubkey-or-ConnectionKey>", "<platform>"]
 ```
 
-- `[1]` is a 64-character hex Nostr pubkey **or** a ConnectionKey.
+- `[1]` is a 64-character lowercase hex Nostr pubkey **or** a ConnectionKey. A receiver MUST reject any other value, uppercase hex included, and never lowercases it.
 - `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey.
 
 `9521` receipts additionally allow a 4th element, `["p/P", "<hex-or-ConnectionKey>", "<platform>", "<handle>"]` — a stable, human-readable provider handle (e.g. a Discord username). It is informational only and MUST NOT be used for identity resolution.
@@ -198,7 +198,7 @@ Signature verification MUST happen before any tag content is trusted; the remain
 | # | Rule | LNURL server | Relay |
 |---|------|--------------|-------|
 | 1 | `id`/`sig` verify against `pubkey` per NIP-01. | MUST | MUST |
-| 2 | Exactly one `p` tag. | MUST | MUST |
+| 2 | Exactly one `p` tag, whose `[1]` is 64-character lowercase hex. | MUST | MUST |
 | 3 | `9520` has no `P` tag; `9523` has exactly one. | MUST | MUST |
 | 4 | `chain` is present, non-empty, and one of the chains the endpoint advertises. | MUST | SHOULD (presence only) |
 | 5 | `amount` is a positive integer and equals the callback's `amount` parameter. | MUST | SHOULD (positive integer only) |
