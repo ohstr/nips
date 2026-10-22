@@ -779,8 +779,8 @@ An implementation MUST determine the outcome as follows, in this order:
    The source slice is consumed whole and its value re-emerges as two brand-new, dedicated wallets
    (§Spinning a Slice Off Into a Dedicated Wallet), regardless of `new_identity`'s type or this wallet's
    recipient history: one holds `amount_millis` for `new_identity`, one holds the remainder for the caller's
-   own unchanged identity. There is no in-place outcome for a split, and no residual amount left on the
-   source slice.
+   own unchanged identity — or, for a `cash` source, for the fresh `remainder_commitment` the caller
+   supplies. There is no in-place outcome for a split, and no residual amount left on the source slice.
 2. **`amount_millis` is omitted, or equals the slice's current committed amount** → this is a **full
    transfer**. Its outcome depends on `new_identity`'s type:
    - `pubkey` or `connection_key` → reassigned **in place**: same wallet, same connection, only the
@@ -846,6 +846,7 @@ sequenceDiagram
                         // dedicated wallet alongside the carved-off one — see this section's
                         // own "Split off a piece" description above.
   "zap_target": "<event id hex, or kind:pubkey:d coordinate>", // OPTIONAL — makes this a zap transfer
+  // "remainder_commitment": "<hex sha256 commitment>", // a partial split of a cash source only
   "request_id": "<32–64 lowercase hex chars>" // OPTIONAL — §Lost Replies
 }
 ```
@@ -894,6 +895,11 @@ sequenceDiagram
   never `cash`), and `new_identity` MUST be `pubkey`: a zap is signed to a Nostr recipient, and a value sent
   to a `connection_key` carries no `zap_target`. Like every param, it is bound by the item proof's `ph`
   (§Item Proofs).
+- `remainder_commitment` — REQUIRED for a partial split of a `cash` source, and MUST NOT be present
+  otherwise: a fresh commitment the caller generated (§Creating a Cash-Mode Slice), which the remainder
+  wallet's cash-mode slice takes in place of the source's, so the source's secret opens nothing once the
+  split commits. A Hub MUST refuse a missing, malformed or misplaced one, or one equal to the source's own
+  commitment, with `BAD_REQUEST`.
 - `request_id` — OPTIONAL; a caller SHOULD send one, and a used one MUST be refused with `REQUEST_REUSED`
   (§Lost Replies).
 
@@ -955,7 +961,8 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
    `min_transfer_millis` (0 = no floor), and that the remainder it would leave behind (current amount
    minus `amount_millis`) is either exactly zero or itself at least `min_transfer_millis` — a split that
    would leave unmovable dust behind MUST be refused with `RESTRICTED` rather than silently allowed
-   (§Transferring and Splitting a Slice).
+   (§Transferring and Splitting a Slice). For a `cash` source, verify `remainder_commitment` as that field
+   requires.
 5. For an in-place reassignment: atomically transfer the slice. The old registered identity MUST stop
    authorizing `cash_redeem` or `cash_transfer` on this slice from the moment this step completes. The new
    identity becomes the slice's sole registered identity, for the same committed amount, unchanged.
@@ -1463,8 +1470,9 @@ Hub payout needs when the same connection goes out to many recipients at once (�
 A slice MAY still move into or out of cash-mode status via `cash_transfer` (§Transferring and Splitting a
 Slice) — either wholly (a full transfer) or partially (a split carves a new cash note off, while the
 remainder, if any, stays under the giver's own unchanged identity — that remainder is never itself
-cash unless the giver's own identity is cash, in which case it keeps the giver's commitment in its new
-wallet). Moving *out* of cash-mode status presents the current secret as `cash_transfer`'s proof, the same
+cash unless the giver's own identity is cash, in which case it takes the fresh `remainder_commitment` the
+giver supplies in its new wallet, never the giver's old one, since whoever handed the giver that secret
+still knows it). Moving *out* of cash-mode status presents the current secret as `cash_transfer`'s proof, the same
 way `cash_redeem` does. Moving *into* cash-mode status in place — reassigning the current wallet's connection
 to serve a cash-mode slice — is restricted to a full transfer on a wallet that has **ever** had only one
 recipient, not merely one still-unclaimed one, for the reasons §Transferring and Splitting a Slice and
@@ -1488,7 +1496,8 @@ carrying a raw `cash_secret` MUST be refused, not have the field ignored.
 
 The caller SHOULD generate the secret from a CSPRNG with at least 256 bits of entropy, since guessing it is
 the only attack on a cash-mode slice. The risk of a weak secret falls on the caller who chose it, and a
-recipient can re-key the slice to a secret of their own with `cash_transfer`. The Hub never learns the
+recipient can re-key the slice to a secret of their own with `cash_transfer`, and SHOULD do so promptly on
+receiving one, since whoever handed it over still knows the secret. The Hub never learns the
 secret, so nothing can retrieve it: losing it is equivalent to losing the funds — same as losing any
 cash-mode ecash note. A caller-generated secret is what lets `cash_lookup` recover a lost mint reply (§Lost
 Replies): the token comes back from the Hub, and the secret was never in the reply.
@@ -2205,7 +2214,8 @@ access to that storage into a theft of every unredeemed cash-mode slice on the H
 
 **A caller that generates a cash-mode secret MUST persist it before placing the call that commits it.**
 This is the mirror image of the rule above, and it binds the *caller* rather than the Hub. For every
-cash-mode target — `mint_cash`, `cash_transfer`, `cash_consolidate` — the caller supplies the commitment
+cash-mode target — `mint_cash`, `cash_transfer` (a split's `remainder_commitment` included),
+`cash_consolidate` — the caller supplies the commitment
 itself (§Cash-Mode Slices), so only a one-way commitment ever crosses the wire and the Hub never learns
 or returns the preimage. Between the request leaving and the caller recording it, that secret therefore exists
 in exactly one place: the caller's own volatile memory. If the caller dies in that window after the Hub has
