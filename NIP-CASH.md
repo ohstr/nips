@@ -1783,9 +1783,9 @@ Every bill method carries its own replay guard.
 
 ### Which Methods a Hub Serves
 
-A Hub MUST serve over this transport only the methods that operate on a **bill**:
-`cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate`, plus `cash_lookup`, which reads
-the outcome of one. NIP-CW's `create_circle_wallet` MAY also be served here.
+A Hub MUST serve over this transport only the methods that operate on a **bill** —
+`cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate` — plus `cash_lookup`, which reads
+the outcome of one, and NIP-CW's `create_circle_wallet`, which a Hub MAY also serve here.
 `cash_lookup` is the one method whose target need not be a live bill: it names
 the original call's target, which may be a bill the Hub has destroyed, its Cash Hub connection, or a
 Circle Hub connection.
