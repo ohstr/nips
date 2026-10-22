@@ -44,7 +44,7 @@ A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoi
 |---|---|---|
 | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
-Other energy-backed coins list their own token prefix, chain name and signing prefix. A token whose prefix has no entry carries no valid signature (rule 6).
+This table lists only `satscash`. For any other energy-backed coin, that coin's implementation defines its token prefix, chain name, signing prefix and milli-unit (NIP-CASH §Mint Provenance). A token whose prefix has no row the verifier knows carries no valid signature (rule 6).
 
 ### Identity Tags
 
