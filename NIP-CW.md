@@ -120,7 +120,8 @@ A Circle Wallet Hub MUST maintain, for itself:
 - a floor on how tight a member's requested budget-renewal period may be (§Budget Renewal Floor);
 - a ceiling on, and default value for, an issued wallet's lifetime, each in seconds with `0` meaning
   never. A Hub MUST NOT set a default above its ceiling, so a non-zero ceiling rules out a default of `0`;
-- the grace period a member gets before their wallet is deleted (§Lifecycle and Deletion);
+- the grace period a member gets before their wallet is deleted, and a dust threshold: the largest
+  balance it may keep from a wallet it deletes (§Lifecycle and Deletion);
 - a holdings ceiling: the most its Active wallets may hold together (§Own Funds and Caps);
 - optionally, a ceiling on what its wallets together may send as external traffic in one period of its
   own (§Own Funds and Caps).
@@ -235,6 +236,7 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
   "max_receive": 200000,
   "expires_at": 1720000000,
   "fees_ppm": 0,
+  "dust_threshold_millis": 1000,
   "budget_renewal": "monthly"
 }
 ```
@@ -252,6 +254,9 @@ the same conversation key, so without it an old genuine reply could be passed of
 request.
 
 `expires_at` is the wallet's expiry in unix seconds, or `0` when the wallet never expires.
+
+`dust_threshold_millis` is the Hub's dust threshold when the wallet was created, fixed for the wallet's
+life like `fees_ppm` (§Lifecycle and Deletion).
 
 `max_amount` and `max_receive` are the send and receive caps as the Hub resolved them, in the same
 milli-unit as the request. A Hub that adjusts a requested value, for example by rounding it down to a unit
@@ -724,6 +729,7 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
   "available_millis": 1000000, // what the circle can still take in: its holdings ceiling minus its holdings
   "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
+  "dust_threshold_millis": 1000, // a balance at or below it is dust (§Lifecycle and Deletion)
   "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
   "identity": "<hex x-only>",  // OPTIONAL: present iff the Hub offers §Private Join
   "per_wallet_max_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_amount (§Data Model)
@@ -732,7 +738,7 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
 }
 ```
 
-The first three are the Hub's **terms**: a prospective member needs them before deciding whether to join,
+The first four are the Hub's **terms**: a prospective member needs them before deciding whether to join,
 and a Hub that withheld them would only push the question into a support channel. `available_millis` is a
 snapshot, not a reservation — it MAY be stale by the time a request or a payment lands, and the
 holdings checks remain authoritative (§Own Funds and Caps).
@@ -898,12 +904,12 @@ stateDiagram-v2
     Suspended --> Expired: expiry reached
     Active --> Closing: host delete, or bulk Hub teardown
     Suspended --> Closing: grace period over, host delete, or bulk Hub teardown
-    Expired --> Deleted: grace period over (balance swept)
-    Closing --> Deleted: grace period over (balance swept)
-    Active --> Deleted: member deletes it (balance swept)
-    Suspended --> Deleted: member deletes it (balance swept)
-    Expired --> Deleted: member deletes it (balance swept)
-    Closing --> Deleted: member deletes it (balance swept)
+    Expired --> Deleted: grace period over, at most dust left
+    Closing --> Deleted: grace period over, at most dust left
+    Active --> Deleted: member deletes it, at most dust left
+    Suspended --> Deleted: member deletes it, at most dust left
+    Expired --> Deleted: member deletes it, at most dust left
+    Closing --> Deleted: member deletes it, at most dust left
     Deleted --> [*]
 ```
 
@@ -926,16 +932,24 @@ A wallet in any state but Active can no longer receive, and can only pay out its
 Caps). Only an Active wallet counts toward the holdings ceiling; an Active or Suspended one counts for the
 one-wallet-per-member rule.
 
-**Member balances.** Before a wallet is deleted, whether by the host, at its expiry or in a bulk teardown,
-the Hub MUST give the member a grace period (e.g. 7 days) during which the wallet can only pay out its own
-received balance. For a suspended wallet it starts at its suspension; for an expired one, at expiry; for a
-closing one, when the host deletes it, unless it was already in its grace period.
-Bulk teardown without that grace is forbidden. A deletion the member asks for needs none, but before
-sending it the client MUST warn the member that any remaining balance returns to the host, and SHOULD pay
-it out first.
+**Member balances are never swept.** A Hub MUST NOT delete a wallet that holds more than dust, whoever
+asks, and MUST NOT move a member's money anywhere the member did not pay it. A balance is dust when it is
+at most the wallet's `dust_threshold_millis` (§Response). A Suspended, Expired or Closing wallet that holds
+more than dust stays in its state, paying out only, for as long as it does.
 
-Deletion MUST sweep any remaining balance back to the Circle Wallet Hub before the connection record is
-removed, and MUST be available regardless of the wallet's spend state.
+**Grace period.** Before it deletes a wallet the member did not delete, the Hub MUST give the member a
+grace period (e.g. 7 days) during which the wallet can only pay out. For a suspended wallet it starts at
+its suspension; for an expired one, at expiry; for a closing one, when the host deletes it, unless it was
+already in its grace period. It ends at its start plus its length, and the wallet is within it while now
+is earlier than that. Once it has ended, and only while the wallet holds at most dust, the Hub MAY delete
+the wallet and keep that dust.
+
+**Hub teardown.** Tearing down a Hub moves each of its wallets to Closing, as a host delete does, and
+teardown without that grace is forbidden. An implementation MUST NOT remove the Hub itself while any of
+its wallets holds more than dust: the Hub goes only after its last wallet is deleted.
+
+Deleting a wallet removes its connection record. A member's own deletion of a wallet holding at most dust
+MUST be available regardless of the wallet's spend state.
 
 ## Security Considerations
 
