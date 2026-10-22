@@ -54,7 +54,7 @@ This table lists only `satscash`. For any other energy-backed coin, that coin's 
 ["p", "<hex-pubkey-or-ConnectionKey>", "<platform>"]
 ```
 
-If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` names a platform (`discord`, `email`, `x`, ...) and `[1]` is a ConnectionKey.
+`[1]` is 64 characters of lowercase hex, as in NIP-AZ; a reader rejects any other value, uppercase hex included, and never lowercases it (rule 2). If `[2]` is missing, empty or `nostr`, `[1]` is a Nostr pubkey. Otherwise `[2]` names a platform (`discord`, `email`, `x`, ...) and `[1]` is a ConnectionKey.
 
 ### Sending
 
@@ -167,7 +167,7 @@ Signature verification MUST come before trusting any tag.
 | # | Rule | Client | Recipient wallet |
 |---|------|--------|------------------|
 | 1 | `id`/`sig` verify against `pubkey`. | MUST | MUST |
-| 2 | Tags meet the cardinality in §Kind 9522 — Cash Zap, `amount`, `issued_at` and `expires_at` are unsigned decimal ASCII with no leading zeros (`0` for zero), `p` and `w` are lowercase hex, and `w` equals the token's TLV `0`. | MUST | MUST |
+| 2 | Tags meet the cardinality in §Kind 9522 — Cash Zap, `amount`, `issued_at` and `expires_at` are unsigned decimal ASCII with no leading zeros (`0` for zero), `p`, `P` and `w` are 64-character lowercase hex, and `w` equals the token's TLV `0`. | MUST | MUST |
 | 3 | `cash` decodes per NIP-CASH §Wire Format. | MUST | MUST |
 | 4 | The token's prefix matches `chain` (§Chains). | MUST | MUST |
 | 5 | The token's identity-required hint (TLV `3`), if present, is `1`. | MUST | MUST |
