@@ -139,8 +139,8 @@ bill is answered with a `result`, never with an error. On the private
 transport a refusal is an error only once the item's bill proof has verified, and an omission otherwise.
 
 **A client MUST NOT read an error other than `BAD_REQUEST` on a call carrying a `request_id` as a
-failure.** The call's outcome is open: the client keeps it pending and looks it up, and
-tries again only as that section allows, never by resending the same `request_id`.
+failure.** The call's outcome is open: the client keeps it pending and looks it up with `cash_lookup`,
+and tries again only as §Lost Replies allows, never by resending the same `request_id`.
 
 ### Freshness
 
@@ -525,7 +525,7 @@ recipient's expense. The routing-fee bound of §Redeeming a Slice, step 4, caps 
 ## Cash Status (`cash_status`)
 
 Any holder of a Cash Wallet connection MAY call `cash_status` to ask what state the bill is in. It is the
-only read method a bill has, and it answers one of two ways: the roster of recipients the bill was created
+one bill method that only reads, and it answers one of two ways: the roster of recipients the bill was created
 for — scoped per §Scoping the Roster — or, for a bill the Hub has already destroyed, a tombstone saying so.
 
 `cash_status` is served over the private transport only. Asked with `scope: all`,
@@ -534,8 +534,8 @@ scope at all, it returns only the calling recipient's own row — a Hub MUST hon
 
 ### Scoping the Roster
 
-Every item carries a kind-23192 item proof signed by one recipient's identity key and a
-kind-23193 bill proof.
+Every item carries a kind-23193 bill proof and, except on a cash-mode bill, a kind-23192 item proof
+signed by one recipient's identity key.
 
 `cash_status` therefore takes an OPTIONAL `scope`:
 
@@ -553,9 +553,9 @@ the bill proof alone, with that single row as "mine". `mine` is a *view*, not an
 changes what is returned, never what a caller may do, so a Hub MUST NOT treat having asked for `mine` as
 narrowing any later call's permissions.
 
-A caller whose item proof verifies but who holds no slice of this bill receives no rows. A Hub MUST NOT
-widen to the full roster on no match. Where the caller has also proved possession of the bill — as every
-item must — the Hub MUST instead answer `NOT_FOUND`, which says "this bill is not addressed
+A caller whose item proof verifies but who holds no slice of this bill receives no rows, but an error.
+A Hub MUST NOT widen to the full roster on no match. Since the caller has also proved
+possession of the bill — as every item must — the Hub MUST answer `NOT_FOUND`, which says "this bill is not addressed
 to you" without describing it.
 
 ### Request
@@ -695,10 +695,11 @@ move nothing.
 A recipient who hasn't redeemed their slice MAY ask to move some or all of its value on, without ever
 touching a Lightning wallet themselves. Two shapes of this exist, unified under one method:
 
-- **Transfer it all** — hand the whole slice to an identity the caller does control (which MAY be
-  themselves under a different mode, e.g. converting into `cash`). No funds move in the Lightning
-  sense, and no value is created. Only one thing changes: which identity is authorized to redeem, or
-  transfer/split again, that one slice, for the amount it was already funded with.
+- **Transfer it all** — hand the whole slice to another identity (which MAY be the caller under a
+  different mode, e.g. converting into `cash`). No funds move in the Lightning sense, and no value is
+  created. Usually only one thing changes: which identity is authorized to redeem, or transfer/split
+  again, that one slice, for the amount it was already funded with; the spin-off cases below move it
+  into a new wallet instead.
 - **Split off a piece** — carve `amount_millis` (less than the slice's current total) off for a target
   identity. The source slice is consumed whole, and its value re-emerges as **two brand-new, dedicated Cash
   Wallets** — one holding the carved-off `amount_millis` for the target, one holding the remainder for the
@@ -937,7 +938,7 @@ the value moved to, for its own bookkeeping, but this is informational only.
 
 The new wallet's connection MUST NOT be placed in this response in a form decryptable by every holder of the
 old wallet's shared connection. Instead, the response carries, for **each** new wallet (one for a
-full-to-cash spin-off, both the carved and the remainder wallet for a partial split), a matched pair of
+full-transfer spin-off, both the carved and the remainder wallet for a partial split), a matched pair of
 fields:
 
 - `*_wallet_pubkey` — that new wallet's own `WalletPubkey`, in the clear, for the recipient to derive the
@@ -975,8 +976,8 @@ splits.
 
 ## Consolidating Tokens (`cash_consolidate`)
 
-The inverse of a split: combine several unredeemed slices the same node custodies into **one** new cash
-token. No value is created (the result is exactly the sum of its inputs) and no Lightning hop is involved
+The inverse of a split: combine several unredeemed slices of the same Cash Hub on this node into **one**
+new cash token. No value is created (the result is exactly the sum of its inputs) and no Lightning hop is involved
 (funding is internal transfers between wallets this node already holds).
 
 ### What Can Be Consolidated Together
@@ -1098,8 +1099,8 @@ any source consumed or partially merged.
 ## Lost Replies
 
 A call that creates a bill — `mint_cash`, a spin-off `cash_transfer`, a `cash_consolidate` — returns the new
-bill's token only in its reply. A `request_id` on the call, and a `cash_lookup` by it afterwards, recovers a
-lost reply.
+bill's token only in its reply. Every such call, and every in-place `cash_transfer`, carries a `request_id`,
+and a `cash_lookup` by it afterwards recovers a lost reply.
 
 ### `request_id`
 
@@ -1170,8 +1171,9 @@ Connection secrets are re-derived, so the Hub stores no secret. It MAY also stor
 the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
 not MUST store them.
 
-**Retention.** The Hub MUST keep a `request_id` record while now is no later than the call's deadline plus
-`H`, and MAY drop it only once now is later than that. An implementation that evaluates this boundary in
+**Retention.** The Hub MUST keep a `request_id` record at least while now is no later than the call's
+deadline plus `H`, and MAY drop it only once now is later than that and the rule on created bills below
+allows. An implementation that evaluates this boundary in
 more than one place MUST make those places agree with the `unknown` rule. The Hub keeps
 the full record while any bill the call created is live, plus that bill's tombstone window. After both, it MAY drop the record, and a lookup is then answered `expired`. A client SHOULD look up a lost reply promptly, and well before any bill it might have created could
 expire.
@@ -1351,8 +1353,8 @@ decodes as usual. An implementation MAY instead present the two values separatel
 
 ### The Private Transport
 
-The **private transport** carries the bill methods encrypted to the Hub's announced inbox rather than
-addressed to the bill's pubkey. It changes nothing about what they do, what they authorize, or what they
+The **private transport** carries the bill methods, and `cash_lookup`, encrypted to the Hub's announced
+inbox rather than addressed to the bill's pubkey. It changes nothing about what they do, what they authorize, or what they
 return.
 
 #### It is the ONLY transport for the bill methods
@@ -1449,7 +1451,8 @@ the ciphertext, in `not_after` below.
 ### Envelopes
 
 The plaintext inside that ciphertext is an **envelope** carrying one or more **items**. Each item is one
-call to one of the methods below, against one wallet — and different items MAY name **different wallets**.
+call to one of the methods below, against one target, usually a wallet — and different items MAY name
+**different wallets**.
 
 ```jsonc
 {
@@ -1474,7 +1477,7 @@ call to one of the methods below, against one wallet — and different items MAY
 - **`params`** — exactly the method's own request params, including their kind-23198 sibling proof fields or
   `cash_secret`. The kind-23192 item proof is carried in addition to them, never instead: it
   binds the item to this envelope, while the kind-23198 proof binds the call.
-- **`proof`** — the item's kind-23192 slice proof. Absent only for a bearer
+- **`proof`** — the item's kind-23192 item proof. Absent only for a bearer
   item, whose `cash_secret` in `params` is that authorization instead.
 - **`bill_proof`** — REQUIRED on every item, with no exemption for any identity mode. It
   proves the sender holds this bill's token, which `proof` does not.
@@ -1511,7 +1514,7 @@ refuse an envelope that breaks either rule with an envelope-level `BAD_REQUEST`.
 its own authorization: a kind-23193 bill proof always, signed with *that bill's own* connection secret, plus
 a kind-23192 proof signed by *that bill's own* registered identity, the same key as its claim proof for a
 value method, or, for a cash-mode slice, the secret itself. So one envelope routinely
-carries proofs from several different keys, alongside items with no slice proof at all, and a Hub MUST
+carries proofs from several different keys, alongside items with no item proof at all, and a Hub MUST
 evaluate each on its own. An envelope's assembler need not hold any of the bills.
 
 **Every item MUST bind to the same Hub.** An item's proof commits to the Hub's own identity (the `h` tag),
@@ -1886,12 +1889,13 @@ requires only that exceeding them is reported as such, and that they respect the
 
 ## The Cash Token (`satscash1...`, ...)
 
-A cash token is the same pairing data as `pairing_uri`, a plain NWC `nostr+walletconnect://` string, wrapped
-in a NIP-19-style bech32 identifier: `satscash1...` for a Bitcoin-backed Cash Wallet, and a prefix of its
+A cash token is the same pairing data as `pairing_uri`, a plain NWC `nostr+walletconnect://` string, plus
+the bill's mint provenance, wrapped in a NIP-19-style bech32 identifier: `satscash1...` for a Bitcoin-backed Cash Wallet, and a prefix of its
 own for any other coin this format is extended to.
 
 **The token doesn't need to be kept secret.** `cash_redeem` and `cash_transfer` both check the caller
-against the slice's registered identity. Neither trusts mere possession of the string.
+against the slice's registered identity, or for a cash-mode slice against its cash secret, which the token
+does not carry. Neither trusts mere possession of the string.
 
 ### Wire Format
 
@@ -2024,7 +2028,8 @@ signature by the minting node's own Lightning identity key, proving offline whic
 and for how much. It lets a holder verify a token's origin and denomination, and refuse one from a minter
 they don't trust, without contacting anyone.
 
-The signature identifies the **minting Hub**, against which a client verifies the transport announcement.
+The signature identifies the minting Hub's node, whose identity signs the transport announcement a client
+verifies.
 
 A Hub that cannot obtain the signature MUST fail the operation rather than issue an unsigned token, and MUST
 do so before committing any funds. No request parameter opts in or out.
