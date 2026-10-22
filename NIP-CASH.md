@@ -1655,8 +1655,9 @@ needed.
 - **`relays`** — OPTIONAL. Where the Hub reads its inbox. A bill's own token already carries relay
   hints (§The Cash Token), but those were fixed when the bill was minted and a Hub may have moved
   since; a bill minted years earlier is exactly the case this field exists for. When present a
-  client SHOULD prefer these, falling back to the token's hints. A Hub omitting it is saying "the
-  hints you already have are still correct.
+  client SHOULD try these first, in their order, then the token's hints in encoded order, skipping
+  any already tried; it fetches the announcement itself from the token's hints. A Hub omitting it
+  is saying "the hints you already have are still correct."
 
 **Limits are advertised, never assumed.** A client that guesses them earns a rejection it
 could have predicted locally, and a Hub that changes them cannot notify anyone. So a client
@@ -2545,7 +2546,7 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   A Hub that issues a bill's token again with different relay hints signs it afresh; a token issued earlier
   keeps verifying. A Hub that has moved is found through its announcement's `relays` (§The Hub
-  Announcement), which a client prefers over a token's hints anyway, so signing the hints strands no bill.
+  Announcement), which a client tries before a token's hints anyway, so signing the hints strands no bill.
 
   Scheme `2` is used only for a bill created by a zap transfer (§Transferring and Splitting a Slice,
   `zap_target`); every other bill is signed under scheme `1`. Its extra fields:
