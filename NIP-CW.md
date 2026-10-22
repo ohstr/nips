@@ -72,7 +72,7 @@ A Circle Wallet Hub MUST maintain, for itself:
 - a floor on how tight a member's requested budget-renewal period may be;
 - a ceiling on, and default value for, an issued wallet's lifetime, each in seconds with `0` meaning
   never. A Hub MUST NOT set a default above its ceiling, so a non-zero ceiling rules out a default of `0`;
-- the grace period a member gets before their wallet is deleted, and a dust threshold: the largest
+- the grace period a member gets before their wallet may be deleted, and a dust threshold: the largest
   balance it may keep from a wallet it deletes;
 - a holdings ceiling: the most its Active wallets may hold together;
 - a routing-fee reserve rule, the most routing fee a member's Lightning payment may pay;
