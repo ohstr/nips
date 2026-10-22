@@ -1169,6 +1169,12 @@ carrying the same `request_id` — whatever their methods, targets or envelopes,
 envelope — never both pass; whichever is second is refused with `REQUEST_REUSED`. A `cash_lookup` item
 carries a `request_id` but is not a call, and never marks one used.
 
+| item | its `request_id` is marked used |
+|---|---|
+| `mint_cash` | at the reuse check itself |
+| `cash_transfer`, `cash_consolidate` | once the item proof and every claim proof or cash secret has verified |
+| `cash_lookup` | never |
+
 **The Hub MUST keep a used mark for good.** The mark is the `request_id` alone, kept after the full record
 is dropped, so a reuse is refused for the life of the node, not only while the record lasts.
 
@@ -1198,6 +1204,14 @@ deadline is too close for the Hub to reach in time.
 arrives. A Hub MUST refuse a call that reaches its commit after its deadline with `BAD_REQUEST`; the refusal
 is final.
 
+| the deadline | standard transport | private transport (`not_after`) |
+|---|---|---|
+| missing | `BAD_REQUEST` | envelope-level `BAD_REQUEST` |
+| already passed on arrival | `BAD_REQUEST` | not run, no reply |
+| more than `H` ahead | `BAD_REQUEST` | envelope-level `BAD_REQUEST` |
+| at most `H` ahead | accepted | accepted |
+| passed when the call commits | `BAD_REQUEST`, final | `BAD_REQUEST`, final |
+
 ### The Record
 
 In the same atomic step that commits the call, the Hub records against its `request_id`:
@@ -1215,12 +1229,16 @@ Connection secrets are re-derived, so the Hub stores no secret. It MAY also stor
 the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
 not MUST store them.
 
-**Retention.** The Hub MUST keep a `request_id` record at least while now is no later than the call's
-deadline plus `H`, and MAY drop it only once now is later than that and the rule on created bills below
-allows. An implementation that evaluates this boundary in
-more than one place MUST make those places agree with the `unknown` rule. The Hub keeps
-the full record while any bill the call created is live, plus that bill's tombstone window. After both, it MAY drop the record, and a lookup is then answered `expired`. A client SHOULD look up a lost reply promptly, and well before any bill it might have created could
-expire.
+**Retention.**
+
+- The Hub MUST keep a `request_id` record at least while now is no later than the call's deadline plus
+  `H`, and MAY drop it only once now is later than that and the rule on created bills below allows. An
+  implementation that evaluates this boundary in more than one place MUST make those places agree with the
+  `unknown` rule.
+- The Hub keeps the full record while any bill the call created is live, plus that bill's tombstone window.
+  After both, it MAY drop the record, and a lookup is then answered `expired`.
+- A client SHOULD look up a lost reply promptly, and well before any bill it might have created could
+  expire.
 
 ### Looking Up a Call (`cash_lookup`)
 
@@ -1264,6 +1282,13 @@ matches the commitment the Hub holds for the target's slice, and is otherwise re
 client SHOULD look a cash-authorized call up first without the secret, and send it only once that lookup is
 refused with `UNAUTHORIZED`. A verifying item is then answered `pending`, `unknown` or `expired`.
 
+| record held? | the item carries | checked against | fails with |
+|---|---|---|---|
+| yes | a `proof` | the recorded authorizer, and the recorded target | `UNAUTHORIZED` |
+| yes, authorized by a cash commitment | no `proof`, a `cash_secret` | the recorded commitment | `UNAUTHORIZED` |
+| no | a `proof` | its usual bindings | `UNAUTHORIZED` |
+| no | no `proof` | `deadline` alone; a `cash_secret`, if present, the commitment the Hub holds for the target's slice | `UNAUTHORIZED` |
+
 For a join lookup, a record is matched on (signer, `connection_pubkey`): a
 record under another signer is no match, and with no match the answer is by `deadline` as below, with 6
 minutes in place of `H`.
@@ -1278,6 +1303,12 @@ The answer is one of:
 ```
 
 The Hub decides the status on its own clock, and `deadline` has passed when now > `deadline`.
+
+| on the Hub's clock | no record | a record |
+|---|---|---|
+| now ≤ `deadline` | `pending`, `retry_after` = `deadline` + 1 | `done` |
+| `deadline` < now ≤ `deadline` + `H` | `unknown` | `done` |
+| now > `deadline` + `H` | `expired` | `done`, while the record is kept |
 
 - **`done`** — the call committed. `result` is the original response, rebuilt: the same fields and the same
   tokens byte for byte, each encrypted to the same keys as originally. Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
@@ -1315,6 +1346,18 @@ by the device that placed it. A client SHOULD bound how many times it re-places 
 call to its user once that bound is reached. After `expired` a client MUST NOT place the call again
 automatically, and surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as
 `unknown`.
+
+```
+derived request_id = hex(sha256("retry:" ‖ <replaced request_id>))
+```
+
+| answer | what the client does |
+|---|---|
+| `done` | takes the result; never resends |
+| `pending` | asks again at `retry_after` |
+| `unknown` | only the client that placed the call may place it again, under the derived id: a `cash_transfer` or `cash_consolidate` automatically, a `mint_cash` only with its user's explicit confirmation |
+| `expired` | never places it again automatically; surfaces it to its user |
+| omitted | nothing: an omission is not `unknown` |
 
 A client SHOULD keep every `request_id` as private as the call it names.
 
