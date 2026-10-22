@@ -152,11 +152,11 @@ Connection, §Security Considerations), since this proof has no invoice to bind 
 
 ### Budget Renewal Floor
 
-This floor protects the Hub from a member resetting their caps too often, rather than bounding how
-loose a cap the Hub itself may offer. With renewal periods ranked tightest-to-loosest (daily, weekly,
-monthly, yearly, never), a
-Hub MUST refuse a request with `LIMIT_EXCEEDED` when its requested renewal is tighter than the Hub's floor. For example, a
-`monthly` floor allows `monthly`/`yearly`/`never` and rejects `daily`/`weekly`.
+This floor protects the Hub from a member resetting their caps too often, rather than bounding how loose a
+cap the Hub itself may offer. With renewal periods ranked tightest-to-loosest (daily, weekly, monthly,
+yearly, never), a Hub MUST refuse a request with `LIMIT_EXCEEDED` when its requested renewal is tighter
+than the Hub's floor. For example, a `monthly` floor allows `monthly`/`yearly`/`never` and rejects
+`daily`/`weekly`.
 
 A budget period starts when the wallet is created, in UTC. Daily and weekly periods start at the
 creation instant plus k×86400 or k×604800 seconds. Monthly periods stay anchored to the creation day,
@@ -177,14 +177,14 @@ sequenceDiagram
     participant Wallet as new Circle Wallet connection
 
     Member->>Member: generate the connection keypair locally (secret never leaves)
-    Member->>Hub: create_circle_wallet {pubkey, connection_pubkey, max_amount, expiry?, budget_renewal?, identity_event}
+    Member->>Hub: create_circle_wallet {pubkey, connection_pubkey, max_amount, max_receive, expiry?, budget_renewal?, identity_event}
     Hub->>Hub: validate pubkey and connection_pubkey (step 1)
     Hub->>Hub: verify the identity proof and its terms, then burn its event ID (steps 2–3)
     Hub->>Hub: authorize the requester as a circle member (step 4)
     Hub->>Hub: check one wallet per (Hub, identity) (step 5)
-    Hub->>Hub: validate max_amount, budget_renewal and expiry against the Hub's limits (step 6)
+    Hub->>Hub: validate max_amount, max_receive, budget_renewal and expiry against the Hub's limits (step 6)
     Hub->>Hub: rate-limit, and guard concurrent requests (steps 7–8)
-    Hub->>Wallet: in one transaction: check the circle's holdings against its holdings ceiling, create the wallet authorizing connection_pubkey, record membership (step 9)
+    Hub->>Wallet: in one transaction: check the circle's holdings against its holdings ceiling, create the wallet authorizing connection_pubkey, record membership and the join record (step 9)
     Hub->>Wallet: after commit, publish its relay subscription (step 10)
     Hub-->>Member: {encrypted_details} (step 11)
     Note over Hub,Member: one NIP-44 ciphertext from the Hub key: every wallet term and connection_pubkey, no secret
@@ -673,10 +673,10 @@ in one period of its own, `daily` to `yearly`, starting at the Hub's creation as
 starts a wallet's. It then refuses, with `QUOTA_EXCEEDED`, a payment that would take that total past the
 bound, counting each payment as for a send cap.
 
-**Only Active wallets receive.** A wallet in any other state (§Lifecycle and Deletion) can only pay
-out. A Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it leaves
-Active, and MUST fail every payment to it, same-circle ones included. Its payouts still count
-against its send cap and the circle's outbound ceiling.
+**Only Active wallets receive.** A wallet in any other state (§Lifecycle and Deletion) can only pay out. A
+Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it leaves Active,
+and MUST fail every payment to it, same-circle ones included. Its payouts still count against its send cap
+and the circle's outbound ceiling.
 
 **Rate limits.** Payments that count against no cap are otherwise free to repeat without bound. A Hub MAY
 rate-limit a wallet's same-circle transfers, the hold invoices it issues and the payments it has pending
@@ -753,12 +753,13 @@ A Hub MAY let a member move a wallet to a new connection key. A Hub that does re
 `circle_wallet.rotation_delay_secs` in `get_info` (§The Circle Wallet Hub Connection), and one that does
 not MUST omit it. The delay is the Hub's choice; a Hub SHOULD use 432000 seconds (5 days) unless it has
 reason to choose otherwise. Each wallet's delay is the one in force when it was created, reported in its
-details (§Response) and fixed for its life. A wallet whose details carry none cannot be rotated.
+details (§Response) and fixed for its life. A wallet whose details carry none cannot be rotated, and a
+Hub refuses a member request naming it with `NOT_IMPLEMENTED`.
 
-**The host submits, the member authorizes.** A member who has lost the secret cannot reach the wallet,
-so the request reaches the Hub through the host's own administration of it, which this document does
-not define. It MUST carry a member request, a kind-23199 event the member signed, and a Hub MUST NOT
-rotate, freeze or unfreeze a wallet on the host's word alone:
+**The host submits, the member authorizes.** A member who has lost the secret cannot reach the wallet, so
+the request reaches the Hub through the host's own administration of it, which this document does not
+define. The host's submission MUST carry a member request, a kind-23199 event the member signed, and a Hub
+MUST NOT rotate, freeze or unfreeze a wallet on the host's word alone:
 
 ```jsonc
 {
