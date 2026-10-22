@@ -316,6 +316,12 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   request mixing a `cash` entry with any other entry in its entirety with `BAD_REQUEST`, not just that one
   recipient. A Hub MUST refuse with `BAD_REQUEST` a request naming the same (`identity_type`,
   `identity_value`, `ia_pubkey`) twice.
+
+  | `identity_type` | the entry also carries | never carries | alongside other entries? |
+  |---|---|---|---|
+  | `pubkey` | `identity_value`, `amount_millis` | — | yes |
+  | `connection_key` | `identity_value`, `ia_pubkey`, `amount_millis` | — | yes |
+  | `cash` | `identity_value` (the commitment), `amount_millis` | `ia_pubkey`, `cash_secret` | no, the only entry |
 - `expiry` — OPTIONAL. If omitted or zero, it MUST default to the Hub's own expiry ceiling —
   which itself MAY be "never," in which case an omitted/zero `expiry` here produces a Cash Wallet that never
   expires, not an already-expired one. A caller MAY still request its own, finite `expiry` even when the
@@ -323,7 +329,12 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   implementation's own time representation imposes. Such a bound is a representational limit, not a policy:
   it MUST be far beyond any lifetime a caller would legitimately request, and a Hub MUST refuse a request
   exceeding it with `BAD_REQUEST` rather than silently clamp it. For example, a bound of 100 years stays
-  clear of a nanosecond-resolution timestamp's wraparound.
+  clear of a nanosecond-resolution timestamp's wraparound. Step 5 below resolves it:
+
+  | the Hub's expiry ceiling | `expiry` omitted or zero | `expiry` given |
+  |---|---|---|
+  | "never" | a Cash Wallet with no expiry at all | honored exactly, up to the representational bound; beyond it, `BAD_REQUEST` |
+  | a real, positive value | the ceiling | honored up to the ceiling; a longer one, `RESTRICTED` |
 - `request_id` — REQUIRED, and a Hub MUST refuse a request without one with `BAD_REQUEST`.
   The caller MUST also put a NIP-47 `expiration` tag on the request, no more than the Hub's
   `max_request_age` ahead, and the Hub MUST NOT commit it after that instant, checked at commit time. A Hub MUST refuse a request carrying `idempotency_key` with `BAD_REQUEST` (step 4
@@ -334,19 +345,21 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 
 ### Response
 
-```jsonc
+```json
 {
   "wallet_pubkey": "<hex>",
   "pairing_uri": "nostr+walletconnect://...",
   "cash_token": "satscash1...",
-  "expires_at": 1720000000, // omitted entirely if this wallet never expires — see §Data Model and this
-                             // section's own Processing Algorithm, step 5
+  "expires_at": 1720000000,
   "recipients": [
     {"identity_type": "pubkey", "identity_value": "...", "amount_millis": 21000},
     {"identity_type": "connection_key", "identity_value": "abc123", "ia_pubkey": "<hex IA pubkey>", "amount_millis": 5000}
   ]
 }
 ```
+
+`expires_at` is omitted entirely if this wallet never expires — see §Data Model and this section's own
+Processing Algorithm, step 5.
 
 `cash_token` packages the same pairing data as `pairing_uri` — the two MUST decode to an
 identical wallet pubkey, secret, and relay set. Either string alone is a fully sufficient connection
@@ -415,17 +428,23 @@ connection, together with proof binding them to the slice they're redeeming.
 
 ### Request
 
-```jsonc
+```json
 {
   "invoice": "lnbc...",
-  "amount": 5000,                  // OPTIONAL — see below
-  "identity_type": "pubkey",       // the registered identity the caller is claiming
+  "amount": 5000,
+  "identity_type": "pubkey",
   "identity_value": "<hex pubkey>",
-  "identity_event": "{...}"        // a kind-23198 event, JSON-ENCODED AS A STRING
-  // "attestation_event": "{...}"  // connection_key mode only, likewise a JSON string
-  // "cash_secret": "<64 lowercase hex>" // cash mode instead of the three identity_* fields
+  "identity_event": "{...}"
 }
 ```
+
+| field | note |
+|---|---|
+| `amount` | OPTIONAL — see below |
+| `identity_type`, `identity_value` | the registered identity the caller is claiming |
+| `identity_event` | a kind-23198 event, JSON-ENCODED AS A STRING |
+| `attestation_event`: `"{...}"` | connection_key mode only, likewise a JSON string |
+| `cash_secret`: `"<64 lowercase hex>"` | cash mode instead of the three identity_* fields |
 
 **The proof travels as sibling fields, not as a nested `proof` object.** `identity_event` and
 `attestation_event` each carry a complete Nostr event **serialized to a JSON string**, not an embedded JSON
@@ -471,12 +490,14 @@ On receiving `cash_redeem`, the wallet MUST, in order:
    receiving — this determination MUST use the same predicate the wallet's own payment
    path uses internally, not a separate, potentially-divergent check. If so, the required invoice amount is
    the slice's full committed amount and the fee is zero; otherwise it's the slice's committed amount minus
-   its own redeem fee. Then, in this order: an `amount` on an invoice that carries one is
-   refused with `BAD_REQUEST`; an amountless invoice without `amount` resolves to 0; a required amount of 0
-   is refused with `RESTRICTED`, before any comparison; and a resolved amount other than
-   the required one is refused with `BAD_REQUEST`. A Hub MAY also refuse with `RESTRICTED` an invoice whose
-   expiry or final CLTV delta exceeds its own policy. The amount is resolved and paid within the same atomic
-   claim below.
+   its own redeem fee. Then, in this order:
+   - an `amount` on an invoice that carries one is refused with `BAD_REQUEST`;
+   - an amountless invoice without `amount` resolves to 0;
+   - a required amount of 0 is refused with `RESTRICTED`, before any comparison;
+   - and a resolved amount other than the required one is refused with `BAD_REQUEST`.
+
+   A Hub MAY also refuse with `RESTRICTED` an invoice whose expiry or final CLTV delta exceeds its own
+   policy. The amount is resolved and paid within the same atomic claim below.
 4. Pay `invoice` and mark the slice redeemed, atomically — the claim MUST be first-wins, so a slice a
    concurrent `cash_transfer`/`cash_consolidate`, an expiry sweep, an owner delete or a removal already
    claimed is refused here with `RESTRICTED` rather than paid twice. A failure
@@ -501,6 +522,18 @@ On receiving `cash_redeem`, the wallet MUST, in order:
 
 A request that fails step 1, 2, or 3 MUST be rejected before any payment is attempted, leaving the slice
 claimable. Where step 3 runs inside step 4's atomic claim, a failure there MUST release the claim.
+
+Step 4's cases:
+
+| what happens | answer | the slice afterwards |
+|---|---|---|
+| already claimed by a concurrent call, a sweep, an owner delete or a removal | `RESTRICTED` | not paid twice |
+| over the Hub's bound on payments in flight | `RATE_LIMITED`, before the claim | claimable |
+| the payment fails before it can have settled, a refused same-node credit included | `PAYMENT_FAILED` | claimable |
+| it cannot be routed within the Hub's routing-fee bound | `PAYMENT_FAILED` | claimable |
+| it fails after payment began and may still settle | — | not redeemable a second time |
+| it is then known to have definitely failed | — | claimable again, with further redemptions possibly refused `RATE_LIMITED` for a while |
+| it succeeds | `{preimage, fees_paid}` | redeemed |
 
 ## The Redeem Fee
 
@@ -695,6 +728,14 @@ Outcomes:
   answer. The tombstone tells a holder of the bill only what a `cash_status` would. Past
   the window, or with a window of zero, the Hub no longer holds the bill, so no bill proof for it verifies
   and the item is omitted, as for a bill the Hub never held.
+
+| the item names | its bill proof | the answer |
+|---|---|---|
+| a live bill | verifies | the method's own result or error |
+| a destroyed bill, inside the retention window | verifies | the tombstone as `result`; `cash_lookup` gets its own answer |
+| a destroyed bill, past the window or with a window of zero | — | omitted |
+| a pubkey the Hub never served | — | silence |
+| any bill | missing, or does not verify | omitted |
 
 **A client MUST NOT report a bill as spent or expired on the strength of a timeout alone**, whether or not
 the Hub it is talking to implements this.
