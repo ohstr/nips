@@ -11,9 +11,9 @@ Cash Hub
 
 ## Abstract
 
-Cash Hub is a Chaumian ecash system for energy-backed Lightning coins — flokicoin, Bitcoin, and any other
-coin this format extends to. It mints **cash tokens**: bech32 strings (`lokicash1...` for flokicoin,
-`satscash1...` for Bitcoin) that carry real, spendable value the moment they're minted, as a
+Cash Hub is a Chaumian ecash system for energy-backed Lightning coins — Bitcoin, and any other
+coin this format extends to. It mints **cash tokens**: bech32 strings (`satscash1...` for Bitcoin,
+another prefix for each other coin) that carry real, spendable value the moment they're minted, as a
 specially-scoped NWC connection (§The Cash Token).
 
 Send one the way you'd hand over a bill — in a zap ([NIP-CZ](./NIP-CZ.md)), a chat message, read out loud, even to someone offline
@@ -48,7 +48,7 @@ goes to a named identity (`pubkey` or `connection_key`) or to no one in particul
 
 ## Terminology
 
-- **cash token**: a bech32 string like `lokicash1...` (flokicoin) or `satscash1...` (Bitcoin) — the
+- **cash token**: a bech32 string like `satscash1...` (Bitcoin) — the
   NIP-19-style credential a recipient holds and redeems. For a single-recipient wallet it doubles as "the
   bill" itself, the way physical cash does; for a multi-recipient wallet it's shared access to a pool of
   several recipients' independent shares instead (see the next entry). See §The Cash Token.
@@ -87,9 +87,9 @@ goes to a named identity (`pubkey` or `connection_key`) or to no one in particul
 - **redeem_fee_ppm**: a parts-per-million rate charged on a slice only when `cash_redeem` resolves to an
   external Lightning payment (zero = free). See §The Redeem Fee.
 - **millis**: this document's amount unit — one-thousandth of whatever base unit the connection's own coin
-  uses for Lightning-payable amounts (milli-satoshi for a Bitcoin-backed Cash Hub, milli-loki for a
-  flokicoin-backed one, and so on). Fixed per Cash Hub by which coin it mints for; never mixed within one
-  wallet or one call.
+  uses for Lightning-payable amounts (milli-satoshi for a Bitcoin-backed Cash Hub, and for any other
+  energy-backed coin the milli-unit its implementation defines). Fixed per Cash Hub by which coin it mints
+  for; never mixed within one wallet or one call.
 
 Both `min_transfer_millis` and `redeem_fee_ppm` are Hub-level defaults, stamped onto each slice at creation
 and thereafter fixed on that slice and inherited unchanged across splits (§The Redeem Fee).
@@ -2148,13 +2148,12 @@ a generic failure — a caller that cannot tell "slow down" from "this slice is 
 strategy, and §Answering About a Destroyed Bill's whole purpose is making that distinction reliable. This
 document does not prescribe the rates; it requires only that exceeding them is reported as such.
 
-## The Cash Token (`lokicash1...`, `satscash1...`, ...)
+## The Cash Token (`satscash1...`, ...)
 
 One recognizable string is all a recipient needs — hand it over in a chat message, embed it in a zap ([NIP-CZ](./NIP-CZ.md)), read
 it out loud. Under the hood it's the same pairing data as `pairing_uri`, a plain NWC
-`nostr+walletconnect://` string, wrapped in a NIP-19-style bech32 identifier: `lokicash1...` for a
-flokicoin-backed Cash Wallet, `satscash1...` for a Bitcoin-backed one, and so on for any other coin this
-format is extended to.
+`nostr+walletconnect://` string, wrapped in a NIP-19-style bech32 identifier: `satscash1...` for a
+Bitcoin-backed Cash Wallet, and a prefix of its own for any other coin this format is extended to.
 
 That convenience is the point, not a side effect. **The token doesn't need to be kept secret.**
 `cash_redeem` and `cash_transfer` both check the caller against the slice's registered identity
@@ -2165,7 +2164,7 @@ without turning it into a race for whoever acts first.
 
 ### Wire Format
 
-A cash-token-family string is a NIP-19-style bech32 string: a human-readable prefix (`lokicash`, `satscash`,
+A cash-token-family string is a NIP-19-style bech32 string: a human-readable prefix (`satscash`,
 ...), the digit `1`, then TLV-encoded pairing data converted from 8-bit to 5-bit groups exactly as NIP-19
 does for `nprofile`/`nevent`/`naddr`. Implementations MUST NOT enforce BIP-173's 90-character total-length
 limit — the same practice existing `nprofile` encoders already follow, since a wallet pubkey, a secret,
@@ -2231,7 +2230,7 @@ general rule.
 ### Relay Hints Are Mandatory
 
 **Every credential this document defines MUST carry at least one relay hint, and every hint MUST be
-non-empty.** That holds for a cash token (`lokicash1...`, `satscash1...`, ...) exactly as it holds for a
+non-empty.** That holds for a cash token (`satscash1...`, ...) exactly as it holds for a
 Hub connection (`cashhub1...`), and NIP-CW imposes the same rule on `circlehub1...`.
 
 The reason is that there is nothing else to fall back on. NWC is relay-mediated: a client does not
@@ -2395,7 +2394,10 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   `<hrp>` is the token's HRP, `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
   committed amount (TLV `6`) in decimal. Every integer in a payload is unsigned decimal ASCII with no leading
-  zeros (`0` for zero); every hex value is lowercase; `<ia_pubkey_hex>` is the 32-byte x-only key.
+  zeros (`0` for zero); every hex value is lowercase; `<ia_pubkey_hex>` is the 32-byte x-only key. The
+  scheme labels `satscash-mint:v2`, `satscash-zap:v1` and the legacy `lokicash-mint:v1` are fixed ASCII
+  constants, the same for every HRP: the token's own HRP appears only as `<hrp>`, and a signer or verifier
+  MUST NOT substitute it into the label.
 
   Binding the amount is only sound because a wallet's amount is immutable for its whole life
   (§Transferring and Splitting a Slice, §Spinning a Slice Off Into a Dedicated Wallet), so the value the
@@ -2465,10 +2467,10 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   |---|---|---|
   | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
-  Bitcoin's is the unqualified original. Every other energy-backed coin uses its own HRP, chain name and
-  its implementation's signed-message prefix, which a verifier needs to check it. A verifier MUST
-  therefore select the prefix from the token's own HRP (§The Cash Token), which is precisely what identifies
-  the base asset. An implementation encountering an HRP it has no prefix for MUST treat the token as
+  Bitcoin's is the unqualified original. Every other energy-backed coin uses its own HRP, chain name,
+  signed-message prefix and milli-unit, which that coin's implementation defines, not this document; a
+  verifier needs the prefix to check it. A verifier MUST therefore select the prefix from the token's own
+  HRP (§The Cash Token), which is precisely what identifies the base asset. An implementation encountering an HRP it has no prefix for MUST treat the token as
   carrying no valid provenance rather than guessing, and MUST NOT refuse to decode it.
 
   Both hashes are required: the convention is double-SHA256, matching the `SingleHash = false` default of
@@ -2497,11 +2499,12 @@ A client MUST treat the mint signature as a portable origin claim, never as a su
 succeeding.
 
 This wire format is intentionally the same for every prefix in this cash-token family. This design isn't specific to
-flokicoin: the same identity-bound, transferable-and-splittable-before-redemption pattern, and the same
+Bitcoin: the same identity-bound, transferable-and-splittable-before-redemption pattern, and the same
 TLV layout, apply to a Cash Wallet holding any energy-backed (proof-of-work) coin — only the bech32
-prefix changes. `lokicash1...` names flokicoin behind the wallet; a Bitcoin-backed Cash Wallet would carry
-its funds the same way under `satscash1...`. A decoder MUST NOT assume a fixed prefix; it should accept
-whichever one a token actually carries and use it to determine which base asset backs the wallet.
+prefix changes. `satscash1...` names Bitcoin behind the wallet; a Cash Wallet backed by another
+energy-backed coin carries its funds the same way under the HRP that coin's implementation defines. A
+decoder MUST NOT assume a fixed prefix; it should accept whichever one a token actually carries and use it
+to determine which base asset backs the wallet.
 
 ## The Cash Hub Connection (`cashhub1...`)
 
@@ -2510,11 +2513,11 @@ pairing, indistinguishable by string alone from a Cash Wallet, a Circle Wallet, 
 connection sharing the same underlying node. An owner moving that connection between tools or devices, or
 a client recognizing what kind of connection was just pasted in, has no way to tell without a live
 `get_info` round-trip. A Cash Wallet's own connection already has a recognizable form (§The Cash Token,
-`lokicash1...`) — this section closes the other half of the gap: the Hub connection an owner mints
+`satscash1...`) — this section closes the other half of the gap: the Hub connection an owner mints
 *from*, which previously had no distinct form of its own.
 
 `cashhub1...` packages the same pairing data as an ordinary `nostr+walletconnect://` string, wrapped in a
-NIP-19-style bech32 identifier the same way `lokicash1...`/`satscash1...` already wrap a Cash Wallet's:
+NIP-19-style bech32 identifier the same way `satscash1...` and its sibling prefixes wrap a Cash Wallet's:
 recognizable at a glance, and machine-parseable without a network call. Wire format: the same TLV encoding
 as §The Cash Token's Wire Format (8-bit to 5-bit grouping, `<type: 1 byte><length: 1 byte><value: length
 bytes>` entries, unrecognized types ignored), with a payload deliberately smaller than a cash token's,
@@ -2542,7 +2545,7 @@ before a client is ever asked to actually dial the connection.
 
 A decoder MUST reject a `cashhub1...` string missing either required field (`0` or `2`), carrying a
 wrong-length value for a typed field, or repeating one — the same class of malformed-input rule §The Cash
-Token's Wire Format applies to `lokicash1...`.
+Token's Wire Format applies to `satscash1...`.
 
 This wire format is informative for connection portability and recognition, not a new authorization
 mechanism: everything §Security Considerations and §Scope Surface say about the underlying NWC connection
@@ -2552,7 +2555,7 @@ connection's own scope already carries — nothing more, nothing less.
 **Recommended presentation.** An implementation SHOULD present a Cash Hub connection to its owner as
 `cashhub1...` by default — including in any QR code offered for scanning — rather than the raw
 `nostr+walletconnect://` string, since the bech32 form is instantly recognizable and copy-paste-safe in a
-way the URI form isn't (the same rationale §The Cash Token already gives for `lokicash1...`). For a tool
+way the URI form isn't (the same rationale §The Cash Token already gives for `satscash1...`). For a tool
 that doesn't yet decode this format, the implementation SHOULD offer an explicit way to reveal the
 equivalent `nostr+walletconnect://` URI instead — e.g. a toggle beneath the primary QR code/string labeled
 "Show as classic NWC URI," flipping to "Show as `cashhub1...`" once switched — never silently, so whoever
@@ -2812,7 +2815,7 @@ Slices for that case.
 same connection. So can anyone else who later sees the connection, or a cash token derived from it.
 That's why neither payout (`cash_redeem`) nor transfer/split (`cash_transfer`) trusts the connection alone.
 Both are gated against a slice's registered identity (§Redeeming a Slice, §Transferring and Splitting a
-Slice). Holding the connection, or a `lokicash1...` token, is necessary to attempt a call. It's never
+Slice). Holding the connection, or a `satscash1...` token, is necessary to attempt a call. It's never
 sufficient to succeed with one.
 
 **Responses are exactly as shared as requests — a server-generated secret MUST NOT be placed in one.**
@@ -3029,7 +3032,7 @@ retain the source-to-target mapping for longer than its own audit policy require
 which reveals only that one slice was paid, a consolidation record is a standing statement that N bills
 shared a holder.
 
-A Cash Wallet's `pairing_uri` or `lokicash1...` token doesn't reveal which recipient it's meant for, not
+A Cash Wallet's `pairing_uri` or `satscash1...` token doesn't reveal which recipient it's meant for, not
 from its bytes alone. The wallet owner controls where and how it's shared, including sharing all
 recipients' one connection through a single broadcast channel. But sharing a slice's identity through
 `cash_transfer`'s `new_identity` parameter, or through a zap or chat message a token rides along with, MAY
