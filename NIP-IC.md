@@ -40,16 +40,16 @@ Every client hashing a ConnectionKey for the same account MUST get the same hash
 
 | Platform | `<platform>` | `<platform-user-id>` |
 |---|---|---|
-| X | `x` | The numeric account ID, in decimal. Not the handle. |
-| Discord | `discord` | The numeric account ID, in decimal. Not the username. |
-| Email | `email` | The whole address, trimmed and lowercased, its domain part as IDNA A-labels. |
-| DNS domain | `dns` | The domain as IDNA A-labels, lowercased, without a trailing dot. |
+| X | `x` | The numeric account ID, in decimal: 1 to 20 ASCII digits with no leading zero, sign or whitespace, below 2^64 (so `0` is not canonical). Not the handle. |
+| Discord | `discord` | The numeric account ID, in decimal: 1 to 20 ASCII digits with no leading zero, sign or whitespace, below 2^64 (so `0` is not canonical). Not the username. |
+| Email | `email` | The whole address, trimmed and lowercased, its domain part as IDNA A-labels without a trailing dot. |
+| DNS domain | `dns` | The domain, trimmed, as IDNA A-labels, lowercased, without a trailing dot. |
 
 Any other platform works through an IA, which defines that platform's user-id format and how it verifies an account. Its ConnectionKey is the hash of the exact `<platform>:<platform-user-id>` string the IA attests (the `35522`'s `platform` tag and `evidence.user_id`), byte for byte, with no normalization. A sender MUST NOT derive such a ConnectionKey from typed input: it MUST take the key from the recipient's `35522` attestation or `nconnection`. Wherever such a key addresses value, it travels with the pubkey of the IA that attested it (`ia_pubkey`), and trust in it rests on that IA alone: two IAs may define different user ids, and so different ConnectionKeys, for one account.
 
 A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, `_` and `-`, so it never contains `:`. An IA MUST NOT issue a `35522` whose `platform` is outside this format, and a client MUST NOT build or accept a ConnectionKey for one.
 
-A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed.
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed. A client MUST refuse a value that is not in its canonical form after trimming, and never repairs one (e.g. by removing a leading zero); a refused value has no ConnectionKey.
 
 No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
 
