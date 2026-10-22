@@ -402,7 +402,7 @@ sequenceDiagram
   "identity_value": "<hex pubkey>",
   "identity_event": "{...}"        // a kind-23198 event, JSON-ENCODED AS A STRING
   // "attestation_event": "{...}"  // connection_key mode only, likewise a JSON string
-  // "cash_secret": "<opaque>"     // cash mode instead of the three identity_* fields
+  // "cash_secret": "<64 lowercase hex>" // cash mode instead of the three identity_* fields
 }
 ```
 
@@ -837,7 +837,7 @@ sequenceDiagram
   "identity_value": "<hex pubkey>",
   "identity_event": "{...}",        // kind-23198, bound to new_identity AND amount_millis
   // "attestation_event": "{...}",  // connection_key mode only
-  // "cash_secret": "<opaque>",     // cash mode instead of the three identity_* fields
+  // "cash_secret": "<64 lowercase hex>", // cash mode instead of the three identity_* fields
   "new_identity": {"identity_type": "pubkey", "identity_value": "<hex pubkey>"},
   // new_identity MAY also carry "ia_pubkey" when identity_type is connection_key.
   // new_identity MAY instead be
@@ -1501,8 +1501,12 @@ slice (§Data Model, §Redemption Metadata) — mixing them would let a co-recip
 connection decrypt and steal a cash secret the moment it's used (§Security Considerations). A request
 carrying a raw `cash_secret` MUST be refused, not have the field ignored.
 
-The caller SHOULD generate the secret from a CSPRNG with at least 256 bits of entropy, since guessing it is
-the only attack on a cash-mode slice. The risk of a weak secret falls on the caller who chose it, and a
+A cash secret is 32 bytes from a CSPRNG, since guessing it is the only attack on a cash-mode slice, carried
+on the wire as 64 lowercase hex characters. Its commitment, the `identity_value` of a cash-mode slice, is
+the 64-character lowercase hex SHA-256 of those 32 bytes, not of their hex text. A Hub MUST refuse a
+`cash_secret` or a commitment in any other form with `BAD_REQUEST`, and MUST compare commitments in
+constant time. For example, the secret `000102…1f` (the bytes `0x00`–`0x1f`) commits to
+`630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd`. The risk of a weak secret falls on the caller who chose it, and a
 recipient can re-key the slice to a secret of their own with `cash_transfer`, and SHOULD do so promptly on
 receiving one, since whoever handed it over still knows the secret. The Hub never learns the
 secret, so nothing can retrieve it: losing it is equivalent to losing the funds — same as losing any
@@ -1514,7 +1518,7 @@ Replies): the token comes back from the Hub, and the secret was never in the rep
 `cash_redeem` (§Redeeming a Slice) on a cash-mode slice replaces `proof` with the secret itself:
 
 ```jsonc
-{"invoice": "lnbc...", "cash_secret": "<opaque>"}
+{"invoice": "lnbc...", "cash_secret": "<64 lowercase hex>"}
 ```
 
 No Identity Authority check, no signature to verify — presenting the correct secret is the entire proof.
