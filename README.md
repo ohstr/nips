@@ -1,6 +1,6 @@
 # nips
 
-Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-contained: it specifies a protocol on its own terms and can be implemented without anything else in this repository.
+Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP lists in its header the NIPs it depends on, in this repository or upstream; implementing it needs those too.
 
 ## NIPs in this repository
 
