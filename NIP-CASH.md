@@ -66,12 +66,14 @@ goes to a named identity (`pubkey` or `connection_key`) or to no one in particul
   of the connection — a raw Nostr `pubkey`, or a `connection_key` (an opaque identifier an Identity
   Authority vouches for, standing in for a Web Identity — a Discord account, an email, a domain — for a
   recipient not on Nostr yet). A slice left unbound is `cash` mode (§Cash-Mode Slices): ordinary ecash,
-  redeemable by whoever holds its secret. A `connection_key`'s `identity_value` MUST be computed as
-  `hex(SHA256(platform + ":" + externalID))`, in lowercase hex, with the identifier in its canonical
-  form (NIP-IC §Canonical Platform User IDs) — the same deterministic formula NIP-IC's `ConnectionKey`
-  defines — so two independent implementations deriving a connection_key for the same (platform,
-  externalID) pair always agree, and a real NIP-IC-issued attestation's own `d`-tag matches without
-  coordination.
+  redeemable by whoever holds its secret. A `connection_key`'s `identity_value` is NIP-IC's
+  `ConnectionKey`: `hex(SHA256(platform + ":" + externalID))`, in lowercase hex, and it always travels with
+  the `ia_pubkey` that attests it. A sender MAY derive it from typed input only for a platform NIP-IC gives a
+  canonical form (NIP-IC §Canonical Platform User IDs), with the identifier in that form and under NIP-IC's
+  strict input rules: input those rules would change is refused, never mapped. For any other platform the
+  sender MUST NOT derive it from typed input: it takes the exact `platform:id` string, byte for byte, from
+  the recipient's attestation or `nconnection`. Either way two implementations naming the same account
+  agree, and a real NIP-IC-issued attestation's own `d`-tag matches without coordination.
 - **cash mode**: the mode a slice is in when it carries no identity binding at all — `identity_type:
   "cash"` on the wire, with its secret carried as `cash_secret`. An earlier revision of this document
   called this mode `bearer`, with the secret field named `bearer_secret`; that spelling is gone.
