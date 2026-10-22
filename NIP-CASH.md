@@ -11,7 +11,7 @@ Cash Hub
 
 ## Abstract
 
-Cash Hub is a custodial ecash system for energy-backed Lightning coins — Bitcoin, and any other
+Cash Hub is an ecash system for energy-backed Lightning coins — Bitcoin, and any other
 coin this format extends to. It mints **cash tokens**: bech32 strings (`satscash1...` for Bitcoin,
 another prefix for each other coin) that carry real, spendable value the moment they're minted, as a
 specially-scoped NWC connection.
