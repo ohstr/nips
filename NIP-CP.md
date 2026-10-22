@@ -118,10 +118,11 @@ The balance, per `chain`, is the sum of `amount` over entries in state `live`. A
 | Result | State |
 |--------|-------|
 | the wallet's own spend succeeded | `spent` |
-| a tombstone after `expires_at` | `expired` |
+| a tombstone (`{"status": "spent", "reason": …}`, NIP-CASH §Answering About a Destroyed Bill) whose `reason` is `expired` | `expired` |
+| a tombstone whose `reason` is `reclaimed` | `reclaimed` |
 | `NOT_FOUND` on a live bill, for an item proof signed by the entry's `identity` key or, for a `cash` entry, an item made with its `secret` | `reclaimed` |
 | `NOT_FOUND` for any other proof | `unknown`, as no answer |
-| any other tombstone | `spent` |
+| any other tombstone (another `reason`, or none) | `spent` |
 | no answer | `unknown`, never `spent` |
 
 A device MUST write a final state only from a definitive result (its own spend, a tombstone, `NOT_FOUND` for a proof signed by the entry's `identity` key or, for a `cash` entry, an item made with its `secret`), never from a timeout or a cached view. Where the Hub quotes it, a wallet SHOULD show `net_redeemable_millis` rather than `amount`.
