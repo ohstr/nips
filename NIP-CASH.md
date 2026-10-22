@@ -264,12 +264,12 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 - `recipients` — MUST contain at least one entry, and an implementation MAY cap how many (e.g. at 100; an
   implementation that caps both SHOULD use the same limit for `cash_consolidate`'s `sources`, so the two
   batch operations stay symmetrical — §Consolidating Tokens). A Hub MUST refuse a request over the cap whole
-  with `QUOTA_EXCEEDED`, never partially fulfil it: a caller cannot be left guessing which recipients were funded. Each entry's
-  `identity_type` MUST be `pubkey`, `connection_key`, or `cash`. A `connection_key` entry MUST also carry
-  `ia_pubkey`. A `cash` entry MUST carry `identity_value`, the `sha256` commitment of a secret the caller
-  generated, and MUST NOT carry `ia_pubkey` or `cash_secret` (§Creating a Cash-Mode Slice). A `cash` entry
-  MUST be the request's only entry; a Hub MUST refuse a request mixing a `cash` entry with any other entry in
-  its entirety with `BAD_REQUEST`, not just that one recipient.
+  with `QUOTA_EXCEEDED`, never partially fulfil it: a caller cannot be left guessing which recipients were
+  funded. Each entry's `identity_type` MUST be `pubkey`, `connection_key`, or `cash`. A `connection_key` entry
+  MUST also carry `ia_pubkey`. A `cash` entry MUST carry `identity_value`, the `sha256` commitment of a secret
+  the caller generated, and MUST NOT carry `ia_pubkey` or `cash_secret` (§Creating a Cash-Mode Slice). A
+  `cash` entry MUST be the request's only entry; a Hub MUST refuse a request mixing a `cash` entry with any
+  other entry in its entirety with `BAD_REQUEST`, not just that one recipient.
 - `expiry` — OPTIONAL. If omitted or zero, it MUST default to the Hub's own expiry ceiling (§Data Model) —
   which itself MAY be "never," in which case an omitted/zero `expiry` here produces a Cash Wallet that
   never expires, not an already-expired one. A caller MAY still request its own, finite `expiry` even when
@@ -317,12 +317,12 @@ decode to an identical wallet pubkey, secret, and relay set. Either string alone
 connection credential; a recipient only ever needs one of them, not both.
 
 **A Hub MUST NOT return an empty `cash_token`.** Token encoding can fail where URI construction cannot —
-the mint signature may be unobtainable, and the TLV stream has length limits a long relay URL can exceed — and the
-tempting response is to emit `""` and rely on `pairing_uri` still being valid. That is not safe: a client
+the mint signature may be unobtainable, and the TLV stream has length limits a long relay URL can exceed — and
+the tempting response is to emit `""` and rely on `pairing_uri` still being valid. That is not safe: a client
 that prefers the token, or that treats the field's presence as meaning it is usable, receives something that
-looks like a credential and is not, with nothing indicating which of the two failed. A Hub that cannot
-produce the token MUST fail the mint with `INTERNAL`, and MUST build the token, mint signature included,
-before committing any funds, so that the failure costs the caller nothing (§Mint Provenance).
+looks like a credential and is not, with nothing indicating which of the two failed. A Hub that cannot produce
+the token MUST fail the mint with `INTERNAL`, and MUST build the token, mint signature included, before
+committing any funds, so that the failure costs the caller nothing (§Mint Provenance).
 
 For the single-`cash`-recipient request shape above, the response's `recipients` entry echoes the caller's
 commitment. It never carries a secret: the caller generated it and already holds it (§Creating a Cash-Mode
@@ -370,10 +370,10 @@ On receiving `mint_cash`, the Hub MUST, in order:
    `INSUFFICIENT_BALANCE` otherwise.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis`, `redeem_fee_base` and `redeem_fee_ppm` defaults (§Data Model) and a
-   one-way commitment of the secret for `cash`-mode slices, never the secret itself — and perform a single internal transfer
-   from the Hub to the new connection for the full sum. This MUST be atomic: a failure at any point after
-   this step MUST leave no partial state. If a `request_id` was supplied, write its record (§Lost Replies)
-   now, in the same atomic step, checking `expiration` again as it commits.
+   one-way commitment of the secret for `cash`-mode slices, never the secret itself — and perform a single
+   internal transfer from the Hub to the new connection for the full sum. This MUST be atomic: a failure at
+   any point after this step MUST leave no partial state. If a `request_id` was supplied, write its record
+   (§Lost Replies) now, in the same atomic step, checking `expiration` again as it commits.
 8. Return the pairing connection string and the resolved recipient list.
 
 A request that fails any check above MUST be rejected before step 7. No partial wallet, slice, or
@@ -459,9 +459,9 @@ On receiving `cash_redeem`, the wallet MUST, in order:
    path uses internally, not a separate, potentially-divergent check. If so, the required invoice amount
    is the slice's full committed amount and the fee is zero; otherwise it's the slice's committed amount
    minus its own redeem fee (§The Redeem Fee). An invoice for any other amount, or an `amount` on an
-   invoice that carries one, is refused with `BAD_REQUEST`. A slice's committed amount is immutable (§Data Model), so this
-   value can't shift under a racing operation — but the slice's *claimed* state can, so the amount is
-   resolved and paid within the same atomic claim below.
+   invoice that carries one, is refused with `BAD_REQUEST`. A slice's committed amount is immutable (§Data
+   Model), so this value can't shift under a racing operation — but the slice's *claimed* state can, so the
+   amount is resolved and paid within the same atomic claim below.
 4. Pay `invoice` and mark the slice redeemed, atomically — the claim MUST be first-wins, so a slice a
    concurrent `cash_transfer`/`cash_consolidate` already claimed is refused here with `RESTRICTED` rather
    than paid twice (§Security Considerations). A failure after payment begins MUST NOT leave the slice
@@ -497,12 +497,12 @@ out of the Hub's own balance — the Hub subsidising someone else's withdrawal. 
 fee cover the delivery it is withheld for.
 
 **The fee MUST NOT exceed the amount it is charged on, and a Hub MUST refuse a `cash_redeem` whose
-payout would be zero** with `RESTRICTED` rather than performing it. The two rules are one consequence: once the fee is
-capped at the slice, a slice at or below the base quotes a payout of zero, and a zero payout matches
-an amountless invoice exactly — so without the refusal the slice is consumed to pay nothing, and the
-recipient reads a success. The refusal MUST leave the slice claimable, and SHOULD say that the slice
-can still be consolidated with another or redeemed same-node, because both remain true: a slice below
-the base fee is not worthless, it is only not independently withdrawable to Lightning.
+payout would be zero** with `RESTRICTED` rather than performing it. The two rules are one consequence: once
+the fee is capped at the slice, a slice at or below the base quotes a payout of zero, and a zero payout
+matches an amountless invoice exactly — so without the refusal the slice is consumed to pay nothing, and the
+recipient reads a success. The refusal MUST leave the slice claimable, and SHOULD say that the slice can still
+be consolidated with another or redeemed same-node, because both remain true: a slice below the base fee is
+not worthless, it is only not independently withdrawable to Lightning.
 
 This is deliberately a redeem-time rule, not a minting rule. Whether a slice can pay out depends on
 whether the redemption resolves same-node, which is unknowable when the slice is created, and a Hub
@@ -513,10 +513,11 @@ decide whether to skip real Lightning routing — not a second check that could 
 overcharge a same-node redemption or undercharge a genuinely external one.
 
 A slice's `redeem_fee_base`, `redeem_fee_ppm` and `min_transfer_millis` (§Transferring and Splitting a
-Slice) are all fixed the moment the slice is created — from the Hub's current default (§Data Model) for a freshly-minted wallet, or inherited
-unchanged from the source slice for one produced by a split — and never change afterward, even if the Hub's
-default later changes or the slice changes hands via `cash_transfer`. A recipient's economics MUST NOT
-shift underneath them because the operator adjusted a setting after the value was committed.
+Slice) are all fixed the moment the slice is created — from the Hub's current default (§Data Model) for a
+freshly-minted wallet, or inherited unchanged from the source slice for one produced by a split — and never
+change afterward, even if the Hub's default later changes or the slice changes hands via `cash_transfer`. A
+recipient's economics MUST NOT shift underneath them because the operator adjusted a setting after the value
+was committed.
 
 ### Why
 
@@ -574,8 +575,8 @@ can only answer everyone or no one — and that is among the reasons it no longe
 
 A Hub MUST determine "mine" from the item proof's own signer, never from anything the item asserts about
 itself. For a bearer item, "mine" is the cash-mode slice whose commitment matches the item's
-`cash_secret`. And `mine` is a *view*, not an authorization boundary: it changes what is returned, never what a
-caller may do, so a Hub MUST NOT treat having asked for `mine` as narrowing any later call's permissions.
+`cash_secret`. And `mine` is a *view*, not an authorization boundary: it changes what is returned, never what
+a caller may do, so a Hub MUST NOT treat having asked for `mine` as narrowing any later call's permissions.
 
 A caller whose item proof verifies but who holds no slice of this bill receives no rows. A Hub MUST NOT
 widen to the full roster on no match, which would turn every mismatch into a full disclosure. Where the
@@ -736,8 +737,9 @@ This gives three outcomes where there were two:
 - A request naming a pubkey the Hub never served, or one past its retention window, MUST still be met with
   silence.
 - Only `cash_status` answers this way, apart from `cash_lookup`'s own answer (§Looking Up a Call).
-  `cash_redeem`, `cash_transfer` and `cash_consolidate` naming a destroyed bill MUST remain silent: a status read is a question about existence, where those are attempts
-  to move value, and answering them would widen what a past holder of a spent secret can confirm.
+  `cash_redeem`, `cash_transfer` and `cash_consolidate` naming a destroyed bill MUST remain silent: a status
+  read is a question about existence, where those are attempts to move value, and answering them would widen
+  what a past holder of a spent secret can confirm.
 
 **A client MUST NOT report a bill as spent or expired on the strength of a timeout alone**, whether or not
 the Hub it is talking to implements this. Silence is indeterminate by construction, and a client that
@@ -746,10 +748,10 @@ treats it as definitive will tell users their money is gone during an ordinary o
 The same applies to an **omission** on the private transport, for the same reason and more sharply: an
 omission is information-free by design, so it is the single answer a Hub gives for a bill it does not
 hold and a possession proof it could not confirm; once possession is proved, every refusal is a named
-error instead (§Bill Proofs). A client MUST NOT resend an omitted `cash_redeem`, `cash_transfer` or `cash_consolidate` blind —
-it cannot be told apart from a request that WAS applied and whose reply was lost, so resending may pay
-twice. A client that sent a `request_id` asks for the outcome with `cash_lookup` instead (§Lost Replies).
-`cash_status` and `cash_lookup` are safe to retry, since they move nothing.
+error instead (§Bill Proofs). A client MUST NOT resend an omitted `cash_redeem`, `cash_transfer` or
+`cash_consolidate` blind — it cannot be told apart from a request that WAS applied and whose reply was lost,
+so resending may pay twice. A client that sent a `request_id` asks for the outcome with `cash_lookup` instead
+(§Lost Replies). `cash_status` and `cash_lookup` are safe to retry, since they move nothing.
 
 ## Transferring and Splitting a Slice (`cash_transfer`)
 
@@ -1114,12 +1116,12 @@ follows, and the ECDH argument for why it holds.
 
 Every new wallet a spin-off produces — the carved piece and, for a partial split, the remainder alike —
 inherits its `min_transfer_millis`, `redeem_fee_base`, `redeem_fee_ppm`, and expiry from the source
-slice's own configuration, not from the Hub's current config (which only supplies the default for a wallet minted directly by
-`mint_cash`). A split relocates an existing entitlement; it does not grant a fresh one, shorten it, or
-lengthen it. This holds even when the old wallet never expires: each new wallet inherits that same "never"
-status rather than an arbitrary fallback duration. The inheritance chain holds across any number of splits:
-a cash token split from one that was itself split from an original Hub-minted slice carries the same values
-its immediate parent had, however many hops back that traces to the original hub-set default.
+slice's own configuration, not from the Hub's current config (which only supplies the default for a wallet
+minted directly by `mint_cash`). A split relocates an existing entitlement; it does not grant a fresh one,
+shorten it, or lengthen it. This holds even when the old wallet never expires: each new wallet inherits that
+same "never" status rather than an arbitrary fallback duration. The inheritance chain holds across any number
+of splits: a cash token split from one that was itself split from an original Hub-minted slice carries the
+same values its immediate parent had, however many hops back that traces to the original hub-set default.
 
 ## Consolidating Tokens (`cash_consolidate`)
 
@@ -1245,9 +1247,9 @@ On receiving `cash_consolidate`, the node MUST, in order:
 
 1. Verify that the item's `target` is `sources[0]`'s `wallet_pubkey`, refusing with `BAD_REQUEST`
    otherwise. Locate every source. Each MUST be a `cash_wallet` this node custodies, unredeemed, and
-   distinct. A source this node did not issue, or that is already claimed, MUST refuse the whole request with `RESTRICTED`;
-   fewer than two sources or a repeated one with `BAD_REQUEST`; more sources than the Hub's cap with
-   `QUOTA_EXCEEDED`.
+   distinct. A source this node did not issue, or that is already claimed, MUST refuse the whole request with
+   `RESTRICTED`; fewer than two sources or a repeated one with `BAD_REQUEST`; more sources than the Hub's cap
+   with `QUOTA_EXCEEDED`.
 2. Verify all sources are children of the **same** Cash Hub. Refuse with `RESTRICTED` otherwise (this
    revision).
 3. Verify the caller controls each source: a valid `proof` against that slice's current registered
@@ -1258,8 +1260,8 @@ On receiving `cash_consolidate`, the node MUST, in order:
 4. Validate `new_identity` exactly as `mint_cash`/`cash_transfer` do: identity shape and live IA trust for
    `connection_key`, a well-formed caller-supplied commitment for `cash`.
 5. Sum every source's committed amount with an explicit overflow check, and refuse with `QUOTA_EXCEEDED`
-   if the sum exceeds the shared Hub's own per-wallet ceiling (§Data Model) — the consolidated wallet obeys its Hub's ceiling like
-   any other.
+   if the sum exceeds the shared Hub's own per-wallet ceiling (§Data Model) — the consolidated wallet obeys
+   its Hub's ceiling like any other.
 6. Resolve the merged terms: expiry is the **earliest** among the sources (never later — a consolidate can
    only shorten, never extend, an entitlement, §Security Considerations); `min_transfer_millis`,
    `redeem_fee_base` and `redeem_fee_ppm` MUST be identical across all sources — refuse with `RESTRICTED`
@@ -1365,11 +1367,11 @@ SHOULD look up a lost reply promptly, and well before any bill it might have cre
 `cash_lookup` is served on the private transport only (§The Private Transport). Its item names the original
 call's target — the bill a `cash_transfer` item named, a `cash_consolidate`'s first source, the Cash Hub
 connection for `mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even
-if it has since destroyed that bill. Its bill proof is signed with that target's connection secret, as for any item (§Bill
-Proofs). For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV `0`, §The
-Cash Hub Connection), and the item and bill proofs are both signed with that connection's client key. A
-client learns that Hub's identity, whose announcement carries the inbox (§The Hub Announcement), from the
-`pubkey` that `get_info` returns on the Cash Hub connection — the node identity that signs the Hub's bills
+if it has since destroyed that bill. Its bill proof is signed with that target's connection secret, as for any
+item (§Bill Proofs). For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV
+`0`, §The Cash Hub Connection), and the item and bill proofs are both signed with that connection's client
+key. A client learns that Hub's identity, whose announcement carries the inbox (§The Hub Announcement), from
+the `pubkey` that `get_info` returns on the Cash Hub connection — the node identity that signs the Hub's bills
 and its announcement, compared in its x-only form — and fetches the announcement from that connection's
 relays. A Hub MUST return that identity there.
 
@@ -1489,13 +1491,13 @@ Slice) — either wholly (a full transfer) or partially (a split carves a new ca
 remainder, if any, stays under the giver's own unchanged identity — that remainder is never itself
 cash unless the giver's own identity is cash, in which case it takes the fresh `remainder_commitment` the
 giver supplies in its new wallet, never the giver's old one, since whoever handed the giver that secret
-still knows it). Moving *out* of cash-mode status presents the current secret as `cash_transfer`'s proof, the same
-way `cash_redeem` does. Moving *into* cash-mode status in place — reassigning the current wallet's connection
-to serve a cash-mode slice — is restricted to a full transfer on a wallet that has **ever** had only one
-recipient, not merely one still-unclaimed one, for the reasons §Transferring and Splitting a Slice and
-§Spinning a Slice Off Into a Dedicated Wallet both explain. This restriction never strands a
-multi-recipient wallet's slice, though: it always has the split path available instead, whether it wants
-to move all of its value into a cash note or just part of it.
+still knows it). Moving *out* of cash-mode status presents the current secret as `cash_transfer`'s proof, the
+same way `cash_redeem` does. Moving *into* cash-mode status in place — reassigning the current wallet's
+connection to serve a cash-mode slice — is restricted to a full transfer on a wallet that has **ever** had
+only one recipient, not merely one still-unclaimed one, for the reasons §Transferring and Splitting a Slice
+and §Spinning a Slice Off Into a Dedicated Wallet both explain. This restriction never strands a
+multi-recipient wallet's slice, though: it always has the split path available instead, whether it wants to
+move all of its value into a cash note or just part of it.
 
 No entry point generates a cash secret for the caller. `mint_cash`, `cash_transfer` and `cash_consolidate`
 all take a commitment the caller supplies — an implementation MUST NOT mint a secret and return it in any
@@ -1516,12 +1518,12 @@ on the wire as 64 lowercase hex characters. Its commitment, the `identity_value`
 the 64-character lowercase hex SHA-256 of those 32 bytes, not of their hex text. A Hub MUST refuse a
 `cash_secret` or a commitment in any other form with `BAD_REQUEST`, and MUST compare commitments in
 constant time. For example, the secret `000102…1f` (the bytes `0x00`–`0x1f`) commits to
-`630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd`. The risk of a weak secret falls on the caller who chose it, and a
-recipient can re-key the slice to a secret of their own with `cash_transfer`, and SHOULD do so promptly on
-receiving one, since whoever handed it over still knows the secret. The Hub never learns the
-secret, so nothing can retrieve it: losing it is equivalent to losing the funds — same as losing any
-cash-mode ecash note. A caller-generated secret is what lets `cash_lookup` recover a lost mint reply (§Lost
-Replies): the token comes back from the Hub, and the secret was never in the reply.
+`630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd`. The risk of a weak secret falls on the
+caller who chose it, and a recipient can re-key the slice to a secret of their own with `cash_transfer`, and
+SHOULD do so promptly on receiving one, since whoever handed it over still knows the secret. The Hub never
+learns the secret, so nothing can retrieve it: losing it is equivalent to losing the funds — same as losing
+any cash-mode ecash note. A caller-generated secret is what lets `cash_lookup` recover a lost mint reply
+(§Lost Replies): the token comes back from the Hub, and the secret was never in the reply.
 
 ### Redeeming a Cash-Mode Slice
 
@@ -2570,9 +2572,9 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   `<hrp>` is the token's HRP in lowercase — bech32 is case-insensitive, and a decoder lowercases the whole
   string before decoding — `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
   committed amount (TLV `6`) in decimal. Every integer in a payload is unsigned decimal ASCII with no leading
-  zeros (`0` for zero); every hex value is lowercase. The scheme labels `satscash-mint:v2`, `satscash-zap:v1` and the legacy `lokicash-mint:v1` are fixed ASCII
-  constants, the same for every HRP: the token's own HRP appears only as `<hrp>`, and a signer or verifier
-  MUST NOT substitute it into the label.
+  zeros (`0` for zero); every hex value is lowercase. The scheme labels `satscash-mint:v2`, `satscash-zap:v1`
+  and the legacy `lokicash-mint:v1` are fixed ASCII constants, the same for every HRP: the token's own HRP
+  appears only as `<hrp>`, and a signer or verifier MUST NOT substitute it into the label.
 
   Binding the amount is only sound because a wallet's amount is immutable for its whole life
   (§Transferring and Splitting a Slice, §Spinning a Slice Off Into a Dedicated Wallet), so the value the
@@ -2590,8 +2592,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   It is what makes a token's hints and secret part of what the minter signed. Without it, a copy of a token
   carrying other relays still verifies, and a holder trying every copy it sees would dial relays an attacker
   chose. An encoder MUST sign over exactly the TLV `1` entries it encodes. A verifier hashes every TLV `1`
-  entry exactly as encoded, including one a client would skip when dialing. A client choosing among copies of one bill SHOULD use only a copy whose provenance verifies;
-  a legacy token's hints are not signed.
+  entry exactly as encoded, including one a client would skip when dialing. A client choosing among copies of
+  one bill SHOULD use only a copy whose provenance verifies; a legacy token's hints are not signed.
 
   A Hub that issues a bill's token again with different relay hints signs it afresh; a token issued earlier
   keeps verifying. A Hub that has moved is found through its announcement's `relays` (§The Hub
@@ -2712,14 +2714,14 @@ since a Hub connection carries no slice, no expiry, and no provenance:
 | `3` | label | a human-readable name, UTF-8 | zero or one, OPTIONAL |
 
 Types `0`–`2` carry the identical meaning §The Cash Token's own table gives them, including its relay
-cardinality: at least one non-empty hint, and none empty from an encoder. An earlier revision of this document allowed a cash token's
-relay hint to be absent, reasoning from the NIP-19 precedent that a relay-less string still has another
-discovery path to fall back on. **That reasoning was wrong and the allowance is withdrawn** — see
-§Relay Hints Are Mandatory. This format's type
-numbers are scoped to its own HRP and don't need to, and don't, line up with a cash token's types `3`/`5`/
-`6` — identity-required, mint provenance — which describe concepts that don't apply to a Hub connection at
-all. A decoder MUST ignore any TLV entry of an unrecognized type rather than rejecting the string, per the
-same forward-compatibility rule §The Cash Token's Wire Format establishes.
+cardinality: at least one non-empty hint, and none empty from an encoder. An earlier revision of this document
+allowed a cash token's relay hint to be absent, reasoning from the NIP-19 precedent that a relay-less string
+still has another discovery path to fall back on. **That reasoning was wrong and the allowance is withdrawn**
+— see §Relay Hints Are Mandatory. This format's type numbers are scoped to its own HRP and don't need to, and
+don't, line up with a cash token's types `3`/`5`/`6` — identity-required, mint provenance — which describe
+concepts that don't apply to a Hub connection at all. A decoder MUST ignore any TLV entry of an unrecognized
+type rather than rejecting the string, per the same forward-compatibility rule §The Cash Token's Wire Format
+establishes.
 
 `label` (type `3`) exists purely for the human on the other end of a share — "Alice's Cash Hub" — surfaced
 before a client is ever asked to actually dial the connection.
