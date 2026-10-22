@@ -11,23 +11,12 @@ Identity Connection: Web Identity Linking
 
 ## Abstract
 
-This NIP defines two event kinds — Kind `35521` (Identity Connection) and Kind `35522` (IA Attestation) — that let a user cryptographically bind their Nostr public key to an account on a non-Nostr platform (a **Web Identity**: Discord, X, email, ...), witnessed by a permissionless, federated network of **Identity Authorities** (IAs). A deterministic verification-state model lets any client resolve a ConnectionKey — the hash NIP-AZ, NIP-CZ and NIP-CASH use to address a recipient who has no Nostr keypair yet — back into a verified Nostr identity, without trusting the claim on its own.
-
-## Motivation
-
-A self-signed claim of "this Nostr key is mine, and I also own this Discord account" is worthless on its own — anyone can sign that claim for any account they don't own. Something has to have actually checked the claim before publishing it.
-
-This NIP splits the claim into two signed layers instead of one:
-
-1. **The user's own claim** (Kind 35521) — cheap, replaceable, and can be freely re-published, but by itself proves nothing.
-2. **A third party's witnessed proof** (Kind 35522) — a signature from an Identity Authority that actually performed the verification (checked a public post, sent an OTP, etc.) and is willing to stake its own reputation on the result.
-
-Splitting these apart — rather than having a single self-attested event — means the *verification logic* (challenge issuance, evidence checking) is decoupled from the *identity graph* (which pubkey claims which account). Multiple independent IAs can attest the same connection without coordinating with each other, and a client only needs to trust **one** of them.
+Two event kinds bind a user's Nostr pubkey to an account on a non-Nostr platform (a **Web Identity**): Kind `35521` (Identity Connection), the user's own claim, and Kind `35522` (IA Attestation), signed by an **Identity Authority** (IA) that verified the account. A client resolves a ConnectionKey, the hash NIP-AZ, NIP-CZ and NIP-CASH use to address a recipient with no Nostr keypair yet, to a verified Nostr pubkey (§Verification Model).
 
 ## Terminology
 
-- **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
-- **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). Any platform can be linked through an IA (§Canonical Platform User IDs). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
+- **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one, and each client chooses which IAs it trusts; there is no protocol-level allowlist.
+- **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). Any platform can be linked through an IA (§Canonical Platform User IDs).
 - **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. A client MUST build it from the canonical `<platform-user-id>` given in §Canonical Platform User IDs, or, for any other platform, take it from the IA's attestation as described there. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
@@ -49,7 +38,7 @@ Any other platform works through an IA, which defines that platform's user-id fo
 
 A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, `_` and `-`, so it never contains `:`. An IA MUST NOT issue a `35522` whose `platform` is outside this format, and a client MUST NOT build or accept a ConnectionKey for one.
 
-A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed. A client MUST refuse a value that is not in its canonical form after trimming, and never repairs one (e.g. by removing a leading zero); a refused value has no ConnectionKey.
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed. For `email` and `dns`, a client applies only trimming, ASCII lowercasing and the A-label conversion below; it applies nothing to an `x` or `discord` ID. A client MUST refuse a value that these steps do not bring to its canonical form, and never repairs one (e.g. by removing a leading zero, a leading `@` or a trailing dot); a refused value has no ConnectionKey.
 
 After trimming and ASCII lowercasing, a client MUST refuse, never map, a domain that UTS #46 non-transitional mapping or NFC normalization would change (e.g. non-ASCII uppercase such as `Ü`, full-width forms, or a decomposed `ü`), and one that contains a deviation character (`ß`, `ς`, U+200C or U+200D), which UTS #46 processing modes convert differently. It converts an accepted domain to A-labels with UTS #46 ToASCII, non-transitional, with CheckHyphens, CheckBidi, CheckJoiners, UseSTD3ASCIIRules and VerifyDnsLength set, and MUST refuse a domain ToASCII rejects. The local part of an `email` gets no IDNA processing; a client MUST refuse one that NFC normalization would change.
 
@@ -64,7 +53,7 @@ Test vectors:
 | `dns` input `BÜCHER.example` | refused (non-ASCII uppercase) |
 | `dns` input `faß.de` | refused (deviation character) |
 
-No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
+No value carries a leading `@`.
 
 ### Event Kinds
 
@@ -93,13 +82,13 @@ Both are kind-30000-range parameterized replaceable events per NIP-01: a new eve
 }
 ```
 
-Published by the end user to claim a connection. On its own this is an unverified claim — see Verification Model.
+Published by the end user to claim a connection; on its own it is unverified (§Verification Model).
 
-**Required tags**: `d` (the bare ConnectionKey — **MUST NOT** carry a platform prefix like `discord:`; a prefixed `d` tag breaks `#d` filter queries from third-party clients), `platform` (the Web Identity's platform name, for relay-side filtering), `e` (references the witnessing `35522`; see below).
+**Required tags**: `d` (the bare ConnectionKey; it **MUST NOT** carry a platform prefix like `discord:`), `platform` (the Web Identity's platform name, for relay-side filtering), `e` (references the witnessing `35522`; see below).
 
-**`e` tag**: `["e", "<attestation-event-id>", "<ia-relay-url>"]` — a **reference**, not an embed. The attestation is fetched from `<ia-relay-url>` on demand, keeping the `35521` event small (~100 bytes vs. 1-2 KB for an inlined attestation). A user MAY include multiple `e` tags, one per IA that has independently attested the same connection ("stacking") — a client only needs to trust one of them.
+**`e` tag**: `["e", "<attestation-event-id>", "<ia-relay-url>"]` — a **reference**, not an embed. The attestation is fetched from `<ia-relay-url>` on demand. A user MAY include multiple `e` tags, one per IA that has independently attested the same connection ("stacking") — a client only needs to trust one of them.
 
-**`content`**: cleartext JSON profile metadata (`display_name`, `picture`, `user_id`, `username`) — a display convenience copied from the IA's evidence, **not authoritative**. The authoritative `user_id`/`username` live in the referenced `35522`'s `evidence` tag; a client that renders `content` without cross-checking it against the fetched attestation is trusting an unverified, user-controlled field (see Security Considerations).
+**`content`**: cleartext JSON profile metadata (`display_name`, `picture`, `user_id`, `username`) — copied from the IA's evidence for display, **not authoritative**: the authoritative `user_id`/`username` are in the referenced `35522`'s `evidence` tag (§Security Considerations).
 
 ### Kind 35522 — IA Attestation
 
@@ -121,9 +110,9 @@ Published by the end user to claim a connection. On its own this is an unverifie
 }
 ```
 
-Signed by the IA immediately upon completing a successful verification flow. `content` is always empty — everything relevant is in the tags.
+Signed by the IA on completing a successful verification. `content` is always empty. Its `created_at` is the time the IA signs it: an IA MUST NOT date a `35522` in the future.
 
-**Required tags**: `d` (same ConnectionKey as the `35521` it will be referenced by), `p` (the Nostr pubkey that proved ownership — a client MUST verify this equals the outer `35521`'s `pubkey` when cross-checking, to prevent an attestation issued to one user being replayed inside a different user's `35521`), `platform`, `evidence` (see below). `expiration` is a [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) timestamp; a default of 90 days is RECOMMENDED, and an IA MAY omit it for a non-expiring attestation.
+**Required tags**: `d` (same ConnectionKey as the `35521` it will be referenced by), `p` (the Nostr pubkey that proved ownership — a client MUST verify this equals the outer `35521`'s `pubkey` when cross-checking), `platform`, `evidence` (see below). `expiration` is a [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) timestamp; a default of 90 days is RECOMMENDED, and an IA MAY omit it for a non-expiring attestation.
 
 #### The `evidence` Tag
 
@@ -141,13 +130,11 @@ A cleartext JSON (v1) string:
 | `challenge` | string | `public_post` only: the `npv11...` challenge token published at `evidence_url`. |
 | `pre_auth_code` | string | `public_post` only: the raw code the challenge was derived from — REQUIRED for cross-IA re-verification (see below). |
 
-With `public_post`, verification is backed by a public, independently-fetchable URL, so any IA can re-verify the same claim without user interaction: fetch `evidence_url` and confirm `challenge` is present.
-
-With any other `auth_type` (e.g. an email or phone handshake), there is no public evidence to re-check. The attestation rests only on the IA's signature, and a client that trusts the IA accepts that the IA completed the handshake. Such an attestation cannot be re-verified by another IA.
+With `public_post`, any IA can re-verify the claim without user interaction: fetch `evidence_url` and confirm `challenge` is present. With any other `auth_type`, the attestation rests only on the IA's signature and cannot be re-verified by another IA.
 
 #### The `npv1` Challenge Token
 
-A bech32-encoded TLV binding a challenge to one specific user and session, preventing replay across sessions:
+A bech32-encoded TLV binding a challenge to one user and session:
 
 ```
 type=0x00 || length=0x20 || value=SHA256(pubkey_bytes || pre_auth_code_bytes)
@@ -155,27 +142,35 @@ type=0x00 || length=0x20 || value=SHA256(pubkey_bytes || pre_auth_code_bytes)
 
 `pubkey_bytes` is the 32-byte raw public key (the hex pubkey, decoded). `pre_auth_code_bytes` is the UTF-8 encoding of the `pre_auth_code` string exactly as it appears in `evidence`. The bech32 human-readable part is `npv1`, so encoded tokens start with `npv11`.
 
+Test vector: pubkey `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798` and `pre_auth_code` `123456` give the session hash `b577731d8cea3eade64af38643bddd9c17d13718b1421dc7618ea3d74cdb629a` and the token `npv11qqst2amnrkxw504due908pjrhhwec973xuvtzssacascag7hfndk9xsn78h2f`.
+
 A second IA performing cross-IA re-verification from existing evidence MUST:
 1. Bech32-decode `challenge` to its 34-byte TLV payload.
 2. Strip the 2-byte header (`0x00 0x20`) to recover the 32-byte session hash.
 3. Recompute `SHA256(pubkey_bytes || pre_auth_code_bytes)` from the attestation's `p` tag and `evidence.pre_auth_code`.
 4. Assert the two hashes are equal.
 
-Step 4 is what distinguishes a genuinely session-bound challenge from a token replayed out of a different session — which is why `public_post` evidence MUST include `pre_auth_code`; without it, step 3 cannot be performed.
+`public_post` evidence MUST include `pre_auth_code`, without which step 3 cannot be performed.
 
 ### The `nconnection` Bech32 Encoding
 
-A portable, shareable string (e.g. handed from a Discord bot to a mobile wallet) bundling a ConnectionKey with the relays where its `35521` events are published, structured as TLV — the same pattern [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) uses for `nprofile`/`nevent`:
+A string bundling a ConnectionKey with the relays where its `35521` events are published, as TLV in the pattern [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) uses for `nprofile`/`nevent`:
 
-| Type | Name | Length | Description |
-|---|---|---|---|
-| `0` | Special | 32 bytes | The raw ConnectionKey bytes (hex-decoded). |
-| `1` | Relay | variable | A relay URL, UTF-8. Repeatable. |
-| `2` | Platform | variable | The `<platform>` name (§Canonical Platform User IDs), ASCII. Zero or one, OPTIONAL. |
+| Type | Name | Length | Description | Cardinality |
+|---|---|---|---|---|
+| `0` | Special | 32 bytes | The raw ConnectionKey bytes (hex-decoded). | exactly one, REQUIRED |
+| `1` | Relay | variable | A relay URL, ASCII. | zero or more, order preserved |
+| `2` | Platform | variable | The `<platform>` name (§Canonical Platform User IDs), ASCII. | zero or one, OPTIONAL |
 
-A decoder MUST ignore a TLV of an unrecognized type.
+The encoding is NIP-19's: the TLV entries `<type: 1 byte><length: 1 byte><value>`, concatenated and bech32-encoded with the human-readable part `nconnection`, with no length limit on the string. A decoder MUST ignore a TLV of an unrecognized type. A decoder MUST reject an `nconnection` that has no type `0`, more than one type `0` or type `2`, a type `0` whose length is not 32, or a TLV whose length runs past the end of the data. An encoder MUST NOT produce any of these.
 
-`nconnection` is **not** a registered NIP-19 prefix — it is a distinct, protocol-specific encoding that happens to reuse NIP-19's TLV convention for consistency.
+Test vector: the Discord ConnectionKey `22ced17fc7b3a6f7262d2dbe00b42d302948595468e025f4392b0a5022b8319d` (§Canonical Platform User IDs), relay `wss://relay.example.com` and platform `discord`, in that order, are the TLV bytes `002022ced17fc7b3a6f7262d2dbe00b42d302948595468e025f4392b0a5022b8319d01177773733a2f2f72656c61792e6578616d706c652e636f6d0207646973636f7264`, which encode as:
+
+```
+nconnection1qqsz9nk30lrm8fhhyckjm0sqksknq22gt92x3cp97sujkzjsy2urr8gpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgzqajxjumrdaexg6u9jzw
+```
+
+`nconnection` is not a registered NIP-19 prefix.
 
 ## Verification Model
 
@@ -192,9 +187,10 @@ A client MUST NOT show a connection as **Verified** unless every check in step 3
    - its `d` and `platform` tags equal the `35521`'s `d` and `platform` tags;
    - its `p` tag equals the `35521`'s `pubkey`;
    - it is unexpired (NIP-40) and not deleted (NIP-09);
+   - its `created_at` is no more than 900 seconds (15 minutes) ahead of the verifier's clock;
    - it is the IA's current attestation: querying the IA's relay for `{"kinds": [35522], "authors": ["<ia-pubkey>"], "#d": ["<ConnectionKey>"]}` returns this same event ID.
 4. A `35521` with at least one attestation that counts is **Verified**. A `35521` without one is **Spoofed**: someone published a claim that does not check out, which is distinct from *Unverified*.
-5. If trusted IAs' current attestations name different pubkeys for the same ConnectionKey, the attestation with the latest `created_at` wins; claims from every other pubkey are **Spoofed**.
+5. If trusted IAs' current attestations name different pubkeys for the same ConnectionKey, the attestation with the latest `created_at` wins; claims from every other pubkey are **Spoofed**. Only attestations that pass step 3 take part, so a verifier MUST ignore one dated more than 900 seconds ahead of its clock here too: a future-dated attestation cannot outrank every later re-verification.
 
 | State | Condition | Recommended UI |
 |---|---|---|
@@ -210,17 +206,13 @@ A client MUST NOT show a connection as **Verified** unless every check in step 3
 4. **Re-issue and transfer**: when the IA verifies the same account again, for the same pubkey or a new one, it publishes a new `35522` with the same `d` tag, which replaces the earlier one. Claims pointing to the replaced attestation stop verifying; the current owner publishes a new `35521` pointing to the new attestation.
 5. **Revocation**: to revoke, the IA publishes a [Kind 5](https://github.com/nostr-protocol/nips/blob/master/09.md) deletion targeting the `35522` ID. This immediately fails any subsequent Deep Check.
 
-## Federated Trust Model & Multi-IA Stacking
-
-The IA layer is federated, not centralized: anyone can run an IA, and different wallets/clients choose which IAs they trust — there is no protocol-level allowlist. A user can strengthen their identity by having *multiple* independent IAs attest the same Web Identity account, referencing all of them via multiple `e` tags on one `35521`. A client only needs to trust one attesting IA to consider the connection verified, which gives resilience against any single IA going offline or being compromised.
-
 ## Security Considerations
 
-- **Content-field spoofing**: `35521`'s `content` is user-controlled and unverified. An LNURL server MUST route payments strictly by the cryptographic `d`-tag hash, never by `content` — a user cannot redirect funds by editing their display name. A verifying client MUST cross-check `content` claims against the fetched `35522`'s `evidence` and flag a mismatch as spoofed, rather than rendering `content` at face value.
-- **Self-attestation**: a `35522` is only meaningful because it's signed by a key distinct from the user's own — a verifier MUST confirm the attesting `pubkey` is a key it (or its trust set) recognizes as an IA, not the user's own key.
-- **Cross-session replay**: the `npv1` challenge binds a specific `pubkey` + `pre_auth_code` pair (see above); without checking that binding, a challenge published for one verification session could be replayed to justify an unrelated one.
-- **`p`-tag confusion attack**: an attacker could copy a real `35522` (issued to user A) and reference it from a `35521` published by user B. A verifying client MUST check that the attestation's `p` tag equals the outer `35521` event's own `pubkey` — a mismatch means the attestation does not belong to this connection, regardless of how it was referenced.
-- **`d`-tag substitution attack**: user B verifies their own account X, then publishes a `35521` whose `d` is victim Y's ConnectionKey but whose `e` points to B's attestation for X. The `p` check passes, because that attestation really was issued to B. A verifying client MUST check that the attestation's `d` and `platform` equal the `35521`'s; otherwise B could claim Y's account and receive payments addressed to it.
+- **Content-field spoofing**: `35521`'s `content` is user-controlled and unverified. An LNURL server MUST route payments strictly by the cryptographic `d`-tag hash, never by `content`. A verifying client MUST cross-check `content` claims against the fetched `35522`'s `evidence` and flag a mismatch as spoofed, rather than rendering `content` at face value.
+- **Self-attestation**: a verifier MUST confirm the attesting `pubkey` is a key it (or its trust set) recognizes as an IA, not the user's own key.
+- **Cross-session replay**: without the `npv1` binding check (§The `npv1` Challenge Token), a challenge published for one session could justify another.
+- **`p`-tag confusion**: a verifying client MUST check that the attestation's `p` tag equals the outer `35521` event's own `pubkey`, however the attestation was referenced.
+- **`d`-tag substitution**: the `p` check alone passes when a user points a `35521` for someone else's ConnectionKey at their own attestation for another account. A verifying client MUST check that the attestation's `d` and `platform` equal the `35521`'s.
 - **Stale attestations**: a replaced or transferred `35522` can still be served by relays other than the IA's. A verifying client MUST confirm the referenced attestation is the IA's current one for that ConnectionKey (Verification Model, step 3), not just that it exists somewhere.
-- **No private mode**: `evidence.user_id`/`evidence.username` are always cleartext and public once a `35522` is published. There is no way to link an identity without disclosing these fields on the relay.
-- **Attestation expiry**: an IA SHOULD default to a bounded `expiration` (90 days is RECOMMENDED) rather than an unexpiring attestation, so a compromised or abandoned IA's attestations naturally age out even if the IA never explicitly revokes them.
+- **No private mode**: `evidence.user_id`/`evidence.username` are always cleartext and public once a `35522` is published.
+- **Attestation expiry**: an IA SHOULD default to a bounded `expiration` (90 days is RECOMMENDED) rather than an unexpiring attestation.
