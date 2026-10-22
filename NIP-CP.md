@@ -72,7 +72,7 @@ A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline
 - `request_id`: the call's NIP-CASH `request_id`.
 - `deadline`: the call's deadline as sent (the envelope's `not_after`, or `mint_cash`'s NIP-47 `expiration`).
 - `target`: the `w` of the bill the call named (the first source for `cash_consolidate`), or for `mint_cash` the Cash Hub connection's wallet pubkey (its TLV `0`).
-- `device`: a random id for the device that wrote the entry, generated on that device and not copied by backup or restore, in lowercase hex.
+- `device`: a random id for the device that wrote the entry, generated on that device and not copied by backup or restore, in lowercase hex. A wallet that finds it is running from copied or restored state SHOULD generate a new `device` id; it then treats the old id's open entries as another device's.
 
 **Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
 
