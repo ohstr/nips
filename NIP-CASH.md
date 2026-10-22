@@ -150,7 +150,7 @@ NIP-47's:
 | `UNAUTHORIZED` | a slice proof, attestation or cash secret that does not verify, or a proof already used | yes, with a valid proof |
 | `INSUFFICIENT_BALANCE` | the Hub's balance, or a source wallet's, does not cover the call | yes, later |
 | `QUOTA_EXCEEDED` | a ceiling or cap: the per-wallet funding ceiling, a recipient or source cap, an envelope limit, the verification budget | yes, with less |
-| `RATE_LIMITED` | the caller has asked too often | yes, later |
+| `RATE_LIMITED` | the caller has asked too often, or a `mint_cash` could not be serialized (§Minting Cash) | yes, later |
 | `NOT_FOUND` | the sender holds the bill but no slice of it (§Bill Proofs) | no |
 | `NOT_IMPLEMENTED` | the method is not served on this transport or connection | no |
 | `PAYMENT_FAILED` | `cash_redeem`'s payment failed, and the slice stays claimable | yes |
@@ -1328,7 +1328,9 @@ RECOMMENDED to default to 300. A Hub MUST NOT announce a smaller `H` than it has
 current `H` is also the largest it has ever announced, and every rule in this section uses that one value.
 
 A Hub MUST refuse with `BAD_REQUEST` a call whose deadline has already passed, or lies more than its current
-`H` past the moment it arrives; a deadline exactly `H` ahead is accepted. A caller MUST NOT set a deadline
+`H` past the moment it arrives; a deadline exactly `H` ahead is accepted. On the private transport both
+checks fall on the envelope's `not_after` (§Envelopes): an envelope past it is not run and gets no reply,
+and one too far ahead gets an envelope-level `BAD_REQUEST`. A caller MUST NOT set a deadline
 more than the `H` it last read past the moment it sends. A caller SHOULD set its deadline well inside `H`,
 leaving room for clock skew between itself and the Hub and for relay delay, and SHOULD NOT send a call
 whose deadline is too close for the Hub to reach in time: such a call is refused or never commits, and
@@ -1425,9 +1427,9 @@ The Hub decides the status on its own clock, and `deadline` has passed when now 
 - **`pending`** — the call may still commit: the Hub has no record, and `deadline` has not passed. A
   committed call is never `pending`, because its record is written in the commit itself (§Spinning a Slice
   Off Into a Dedicated Wallet, Atomicity). `retry_after` is the deadline plus 1, in absolute unix seconds:
-  the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a
-  join lookup by `connection_pubkey`, at most 6 minutes from now (the 5-minute kind-23199 freshness window
-  plus its 1-minute future allowance; §Lost Join Reply in NIP-CW).
+  the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a join lookup by
+  `connection_pubkey`, at most 6 minutes from now (the 5-minute kind-23199 freshness window plus its
+  1-minute future allowance; §Lost Join Reply in NIP-CW).
 - **`unknown`** — the call was not applied and never will be: the Hub has no record, `deadline` has passed,
   and now is no later than `deadline` plus `H` (6 minutes in place of `H` for a join lookup by
   `connection_pubkey`), so a record the call left would still be held (§The Record, Retention). A copy of
@@ -1446,8 +1448,8 @@ original after any of them. Only the client that placed the call MAY place it ag
 one device), and only after `unknown`. A re-placed call always uses the derived id of the call it replaces,
 never a fresh one: the lowercase hex of `sha256("retry:" ‖ <replaced request_id>)`, over the ASCII bytes of
 `retry:` followed by the replaced call's `request_id` as sent. Two attempts to re-place the same call send
-the same `request_id`; the Hub refuses the second only once it has committed the first, so a client also
-relies on the rule below and on its own record of the ids it has placed (NIP-CP §Writing). A client MUST NOT
+the same `request_id`; the Hub refuses the second once the first has passed its reuse check, so a client
+also relies on the rule below and on its own record of the ids it has placed (NIP-CP §Writing). A client MUST NOT
 place a call again if it has already placed that call's derived id, or holds a written-ahead record of it
 (NIP-CP §Writing); it only closes the older call. A client MUST NOT place a `mint_cash` call again without
 its user's explicit confirmation: unlike a transfer, whose source the first call already claimed, a
@@ -1795,7 +1797,8 @@ links them disappears.
   further ahead with an envelope-level `BAD_REQUEST`, and MUST remember each nonce it has served
   until that envelope's `not_after` has passed.
 - **`nonce`** — REQUIRED, and the only per-envelope replay state a Hub keeps; `request_id`
-  records (§Lost Replies) are separate. A Hub MUST reject a nonce it has already served.
+  records (§Lost Replies) are separate. A Hub MUST NOT run or answer an envelope whose nonce it
+  has already served (§Responses).
   Because items bind to it (below), a Hub needs no per-item state to stop an item being
   replayed: an item lifted into a different envelope fails on the binding. A Hub need only
   remember a nonce until its envelope could no longer be accepted anyway, which is what bounds
@@ -2022,10 +2025,11 @@ means no item ran (§Chunked Replies):
 {"v": 1, "req_nonce": "…", "seq": 1, "total": 1, "error": {"code": "QUOTA_EXCEEDED", "message": "…"}}
 ```
 
-A Hub MUST reply to every envelope it decrypts and parses, with `"results": []` when it omits
-every item, so a client can tell a complete reply of omissions from a lost one. A Hub MUST NOT
-reply to a copy of an envelope whose nonce it has already served, nor to one whose `not_after`
-has passed: such a reply would report an envelope-level error for items the first copy ran.
+Except as below, a Hub MUST reply to every envelope it decrypts and parses, with `"results": []`
+when it omits every item, so a client can tell a complete reply of omissions from a lost one. A
+Hub MUST NOT reply to a copy of an envelope whose nonce it has already served, nor to one whose
+`not_after` has passed: such a reply would report an envelope-level error for items the first
+copy ran.
 
 **Results need not cover every item, and omission is meaningful.** An item whose target the
 Hub does not hold, or whose bill proof is missing or did not verify, MUST be **omitted** rather
