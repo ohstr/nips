@@ -37,7 +37,7 @@ ordinary Lightning.
 
 Who counts as a member — an allowlist, a named follow set the host publishes, or every account a business creates —
 is just a configuration choice, not what a Circle Wallet fundamentally is. This document specifies that
-mechanism, the wallet's data model, and the one-active-wallet-per-member rule. The circle's real value
+mechanism, the wallet's data model, and the one-wallet-per-member rule. The circle's real value
 is the free wallet and free in-circle transfers, not the admission rule.
 
 ## Motivation
@@ -121,23 +121,23 @@ A Circle Wallet Hub MUST maintain, for itself:
 - a ceiling on, and default value for, an issued wallet's lifetime, each in seconds with `0` meaning
   never. A Hub MUST NOT set a default above its ceiling, so a non-zero ceiling rules out a default of `0`;
 - the grace period a member gets before their wallet is deleted (§Lifecycle and Deletion);
-- a holdings ceiling: the most its active wallets may hold together (§Own Funds and Caps);
+- a holdings ceiling: the most its Active wallets may hold together (§Own Funds and Caps);
 - optionally, a ceiling on what its wallets together may send as external traffic in one period of its
   own (§Own Funds and Caps).
 
 A Circle Wallet spends only what it has received: it starts at zero balance, and the Hub never funds any
 part of a payment (§Own Funds and Caps). A member's `max_amount` and `max_receive` are caps on the
 wallet's external traffic, not allowances on the Hub's balance. A wallet stops counting toward the
-holdings ceiling when it stops being active (§Lifecycle and Deletion).
+holdings ceiling when it leaves Active (§Lifecycle and Deletion).
 
 For each Circle Wallet it issues, a Hub records the member's `connection_pubkey` (§Request) and authorizes
 it as that wallet's client key. It never generates, receives or stores the matching secret (§Pairing
 Connection).
 
-For each member who currently holds an active Circle Wallet under a given Hub, an implementation MUST
-be able to determine that fact. §Membership's one-active-wallet-per-member rule is checked against it.
-That fact MUST stop being true once the member's wallet stops being active (§Lifecycle and Deletion),
-freeing them to request a new one.
+For each member who currently holds an Active or Suspended Circle Wallet under a given Hub, an
+implementation MUST be able to determine that fact. §Membership's one-wallet-per-member rule is checked
+against it. That fact MUST stop being true once the member's wallet is neither Active nor Suspended
+(§Lifecycle and Deletion), freeing them to request a new one.
 
 A Hub that serves §Lost Join Reply also keeps, for each Circle Wallet, the `encrypted_details` it returned
 (§Lost Join Reply).
@@ -173,7 +173,7 @@ sequenceDiagram
     Hub->>Hub: validate pubkey and connection_pubkey (step 1)
     Hub->>Hub: verify the identity proof and its terms, then burn its event ID (steps 2–3)
     Hub->>Hub: authorize the requester as a circle member (step 4)
-    Hub->>Hub: check one active wallet per (Hub, identity) (step 5)
+    Hub->>Hub: check one wallet per (Hub, identity) (step 5)
     Hub->>Hub: validate max_amount, budget_renewal and expiry against the Hub's limits (step 6)
     Hub->>Hub: rate-limit, and guard concurrent requests (steps 7–8)
     Hub->>Wallet: in one transaction: check the circle's holdings against its holdings ceiling, create the wallet authorizing connection_pubkey, record membership (step 9)
@@ -298,8 +298,8 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    window before any answer is available — MUST NOT fall back to denying membership, because a denial is
    indistinguishable to the caller from "you are not a member." It MUST instead answer `NOT_READY`
    (§Errors), which the caller can retry.
-5. Check the one-active-wallet-per-(Hub, identity) rule (§Membership), rejecting with `WALLET_EXISTS`
-   (§Errors) if the identity already holds an active Circle Wallet under this Hub.
+5. Check the one-wallet-per-(Hub, identity) rule (§Membership), rejecting with `WALLET_EXISTS`
+   (§Errors) if the identity already holds an Active or Suspended Circle Wallet under this Hub.
 6. Validate `max_amount` and `max_receive` against the Hub's own per-wallet ceilings, the resolved
    `budget_renewal` against the Hub's own renewal floor, and, if `expiry` was explicitly supplied
    (non-zero), that it does not exceed the Hub's own expiry ceiling (§Data Model), where a ceiling of `0`
@@ -346,7 +346,7 @@ codes for them, on either transport:
 |---|---|---|
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
-| `WALLET_EXISTS` | the requester already holds an active Circle Wallet under this Hub (step 5) | no, until it stops being active (§Lifecycle and Deletion) |
+| `WALLET_EXISTS` | the requester already holds an Active or Suspended Circle Wallet under this Hub (step 5) | no, until it is neither (§Lifecycle and Deletion) |
 | `LIMIT_EXCEEDED` | `max_amount`, `max_receive`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other values |
 | `RATE_LIMITED` | the requester has asked too often, or another request held the Hub (steps 7–8) | yes, later |
 | `INSUFFICIENT_CAPACITY` | the circle's holdings have reached its holdings ceiling (step 9) | yes, later |
@@ -468,11 +468,14 @@ A Circle Identity's admission mechanism (§Terminology) supports two forms:
   `d`. Adding or removing someone from a circle is just editing that set; the Hub acts on the change
   itself (below).
 
-**Removing a member disables their wallet.** Whichever form it uses, a Hub MUST, within its staleness
-bound, disable the Circle Wallet of any pubkey no longer resolved as a member. A disabled wallet can no
-longer receive, but keeps, and can still pay out, its balance. It is no longer an active wallet: it stops
-counting toward the holdings ceiling and the one-active-wallet rule.
-A disabled wallet is never re-enabled; a re-added member joins again.
+**Removing a member suspends their wallet.** Whichever form it uses, a Hub MUST, within its staleness
+bound, suspend the Active Circle Wallet of any pubkey a successful resolution (below) no longer names as a
+member. A Suspended wallet can only pay out its balance (§Own Funds and Caps): it cannot receive and stops
+counting toward the holdings ceiling, but still counts for the one-wallet-per-member rule (below). If a
+later successful resolution names the member again before the wallet's grace period ends (§Lifecycle and
+Deletion), the Hub MUST return it to Active: the same wallet, connection, balance, caps and periods, with
+nothing for the member to redo. A Hub SHOULD alert the host when one resolution would suspend a large
+share of its wallets at once, which is more often a bad publish than a decision.
 
 A `follow_set` Hub MUST apply these rules:
 
@@ -500,9 +503,11 @@ A `follow_set` Hub MUST apply these rules:
 - **Staleness.** The set lives on relays rather than in the Hub, so "current" means the Hub's most
   recent resolution of it. An implementation MAY cache it and refresh it, and MUST bound that
   staleness.
-- **Unresolved is not empty.** A set the Hub has not found yet MUST be treated as unresolved, not as
-  empty (§Creating a Circle Wallet, step 4). A resolved set with no members is empty: nobody is a
-  member, and every wallet issued under it is disabled (above).
+- **Unresolved is not empty.** A Hub MUST act only on a successful resolution: a version of the set it
+  has fetched and verified as above. A Hub MUST treat a set it has not found yet, and a refresh that
+  fails or finds no version, as unresolved, not as empty (§Creating a Circle Wallet, step 4); a failed
+  refresh leaves the last successful resolution in force. A resolved set with no members is empty:
+  nobody is a member, and every wallet issued under it is suspended (above).
 - **Deletion is ignored.** A Hub MUST ignore a NIP-09 deletion of the set; only a newer version changes
   membership. To close a circle, a host publishes the set with no members.
 
@@ -561,8 +566,9 @@ value only the provider and the Hub can read:
   `hidden_p` entry afresh, and SHOULD shuffle their order, each time it publishes the set. Unchanged
   payloads would show exactly which entry was added or removed between two versions.
 - **Inbox rotation.** A hidden entry is bound to the inbox key it was encrypted to. A Hub that rotates
-  its inbox key SHOULD keep trying its retired keys on `hidden_p` entries until the provider has
-  republished the set to the new one; otherwise every hidden member loses access at the rotation.
+  its inbox key MUST keep trying each retired key on `hidden_p` entries for as long as any wallet issued
+  while that key was current is Active or Suspended; otherwise the rotation alone would suspend every
+  hidden member's wallet.
 
 A host's kind:3 contact list is not a membership source. It is one list per account, so it cannot
 describe more than one circle, and it already means something else to every client that reads it —
@@ -572,12 +578,13 @@ A "followers" mechanism — checking the *requester's own* published lists to se
 claim to follow the host — MUST NOT be offered. Anyone can publish a list claiming to follow
 anyone, for free. It asserts nothing a host can rely on.
 
-Independent of which admission mechanism a Hub uses, a member MUST hold at most one active Circle
-Wallet per Hub at a time. This is enforced twice: a pre-check immediately after authorization, which
-short-circuits the common case before further work, and the membership table's unique constraint as the
-authoritative guard inside the creation transaction. The membership row MUST be removed when its Circle
-Wallet stops being active (§Lifecycle and Deletion), and in any case MUST cascade-delete when the wallet's
-connection record is deleted, freeing the identity to request a new wallet.
+Independent of which admission mechanism a Hub uses, a member MUST hold at most one Circle Wallet per Hub
+at a time that is Active or Suspended: this is the one-wallet-per-member rule. It is enforced twice: a
+pre-check immediately after authorization, which short-circuits the common case before further work, and
+the membership table's unique constraint as the authoritative guard inside the creation transaction. The
+membership row MUST be removed when its Circle Wallet is neither Active nor Suspended (§Lifecycle and
+Deletion), and in any case MUST cascade-delete when the wallet's connection record is deleted, freeing the
+identity to request a new wallet.
 
 ## Own Funds and Caps
 
@@ -618,21 +625,22 @@ other side is:
 A Hub MUST refuse, with `RESTRICTED`, to issue a Circle Wallet invoice with no amount or a zero amount:
 its amount is what the receive cap and the holdings ceiling count.
 
-**Holdings ceiling.** A Circle Wallet Hub's holdings are the balances of its active wallets plus the
+**Holdings ceiling.** A Circle Wallet Hub's holdings are the balances of its Active wallets plus the
 amounts of every open invoice they have issued, held payments the Hub has accepted included. A Hub MUST
 NOT let a new invoice or a credit take its holdings past its holdings ceiling. It refuses such an invoice,
 and such a payment from the same node, with `INSUFFICIENT_CAPACITY`, and fails such a payment arriving
 over Lightning. A payment within the circle only moves money inside its holdings, and is never refused for
-this ceiling.
+this ceiling. A wallet returning to Active (§Membership) may leave the holdings above the ceiling, which
+then only refuses new invoices and credits until the holdings fall below it.
 
 **Circle outbound ceiling.** A Hub MAY also bound what all its wallets together send as external traffic
 in one period of its own, `daily` to `yearly`, starting at the Hub's creation as §Budget Renewal Floor
 starts a wallet's. It then refuses, with `QUOTA_EXCEEDED`, a payment that would take that total past the
 bound, counting each payment as for a send cap.
 
-**Only active wallets receive.** A wallet that is no longer active (§Lifecycle and Deletion) can only pay
-out. A Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it stops
-being active, and MUST fail every payment to it, same-circle ones included. Its payouts still count
+**Only Active wallets receive.** A wallet in any other state (§Lifecycle and Deletion) can only pay
+out. A Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it leaves
+Active, and MUST fail every payment to it, same-circle ones included. Its payouts still count
 against its send cap and the circle's outbound ceiling.
 
 **Rate limits.** Payments that count against no cap are otherwise free to repeat without bound. A Hub MAY
@@ -847,7 +855,7 @@ Connection). Its `circle_wallet.identity` is what reaches the private transport:
 - **A batch of joins is legitimate.** One envelope MAY carry several joins — a host onboarding
   a group — and each is independently proven, so a Hub MUST evaluate them individually rather
   than accepting or rejecting the batch as a unit.
-- **Rate limiting and the one-active-wallet rule are unchanged**, and are per requester
+- **Rate limiting and the one-wallet-per-member rule are unchanged**, and are per requester
   `pubkey`, not per envelope. Batching MUST NOT be a way to bypass either: a Hub MUST apply
   both to each item as though it had arrived on its own.
 
@@ -884,36 +892,44 @@ allowlist.
 ```mermaid
 stateDiagram-v2
     [*] --> Active: created (self-service, one step)
-    Active --> Disabled: member no longer resolved (§Membership)
+    Active --> Suspended: member no longer resolved (§Membership)
+    Suspended --> Active: member resolved again within grace
     Active --> Expired: expiry reached
+    Suspended --> Expired: expiry reached
     Active --> Closing: host delete, or bulk Hub teardown
-    Disabled --> Closing: host delete, or bulk Hub teardown
-    Disabled --> Expired: expiry reached
+    Suspended --> Closing: grace period over, host delete, or bulk Hub teardown
     Expired --> Deleted: grace period over (balance swept)
     Closing --> Deleted: grace period over (balance swept)
     Active --> Deleted: member deletes it (balance swept)
-    Disabled --> Deleted: member deletes it (balance swept)
+    Suspended --> Deleted: member deletes it (balance swept)
     Expired --> Deleted: member deletes it (balance swept)
     Closing --> Deleted: member deletes it (balance swept)
     Deleted --> [*]
 ```
 
-There's no claimed/unclaimed distinction here. A Circle Wallet is active from creation until one of these
-happens:
+There's no claimed/unclaimed distinction here. A Circle Wallet is Active from creation, sending and
+receiving (§Own Funds and Caps), until one of these happens:
 
-- **Disabled.** Its pubkey is no longer resolved as a member (§Membership).
+- **Suspended.** Its pubkey is no longer resolved as a member (§Membership). It returns to Active, as the
+  same wallet, if a resolution names the member again before its grace period ends, and becomes Closing
+  when its grace period ends otherwise.
 - **Expired.** Its `expires_at` has passed. The wallet can no longer receive, and the member may join
   again.
 - **Closing.** The host has deleted it, on its own or by tearing down the whole Hub.
 
-There is no Expired → Closing edge: an expired wallet is already in its grace period.
+Nothing returns to Active from Expired or Closing, and there is no Expired → Closing or Closing → Expired
+edge: a wallet already in its grace period stays in it, and its grace period is not restarted. A Suspended
+wallet that reaches its expiry becomes Expired, and one the host deletes becomes Closing, each keeping the
+grace period that began at its suspension.
 
-A wallet in any of these states is no longer active: it can no longer receive, and can only pay out its
-balance (§Own Funds and Caps).
+A wallet in any state but Active can no longer receive, and can only pay out its balance (§Own Funds and
+Caps). Only an Active wallet counts toward the holdings ceiling; an Active or Suspended one counts for the
+one-wallet-per-member rule.
 
 **Member balances.** Before a wallet is deleted, whether by the host, at its expiry or in a bulk teardown,
 the Hub MUST give the member a grace period (e.g. 7 days) during which the wallet can only pay out its own
-received balance. For an expired wallet it starts at expiry; for a closing one, when the host deletes it.
+received balance. For a suspended wallet it starts at its suspension; for an expired one, at expiry; for a
+closing one, when the host deletes it, unless it was already in its grace period.
 Bulk teardown without that grace is forbidden. A deletion the member asks for needs none, but before
 sending it the client MUST warn the member that any remaining balance returns to the host, and SHOULD pay
 it out first.
@@ -962,7 +978,7 @@ storage, logs or retained traffic therefore yields no member's connection. It do
 powerless — the host's node holds and moves the funds — but impersonating a member over their own
 connection is not among the host's capabilities.
 
-**One active wallet per (Hub, identity)**'s two-layer enforcement (§Membership) exists because a pre-check
+**One wallet per (Hub, identity)**'s two-layer enforcement (§Membership) exists because a pre-check
 alone is a race, not a guarantee — the unique-constraint insert is what makes it authoritative.
 
 **A `fees_ppm` value in a response is never merely informational.** See §Fees for what it applies to and
@@ -999,8 +1015,8 @@ entries a set has, nor when the set was republished, which roughly dates joins a
 member who joins over the standard transport puts their pubkey in a request every co-member can read
 (above), so a hidden member SHOULD join over §Private Join. A leaked inbox key exposes every hidden
 member that key ever covered, in every past version of the set a relay still holds, not only the
-current one. And a generic NIP-51 client that republishes the set may drop tags it does not know,
-silently removing every hidden member; a host SHOULD edit a circle's set only with a client that
+current one. And a generic NIP-51 client that republishes the set may drop tags it does not know, silently
+suspending every hidden member's wallet; a host SHOULD edit a circle's set only with a client that
 preserves `hidden_p`.
 
 **Reading the terms before a private join is not itself private, but it is anonymous.** The `get_info`
