@@ -1381,6 +1381,34 @@ The **private transport** carries the bill methods, and `cash_lookup`, encrypted
 inbox rather than addressed to the bill's pubkey. It changes nothing about what they do, what they authorize, or what they
 return.
 
+One round trip, as the sections below define it:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as Relay
+    participant H as Hub
+    C->>R: subscribe to kind 23191, #p = reply_to
+    C->>R: kind 23190, p = inbox, NIP-44 envelope
+    R->>H: kind 23190
+    Note over H: E1–E6 on the envelope, then I1–I10 on each item
+    H->>R: kind 23191 chunks, p = reply_to, encrypted under reply_key
+    R->>C: kind 23191 chunks
+    Note over C: complete once all total chunks have arrived
+```
+
+What a request carries, from the outside in:
+
+```mermaid
+flowchart TB
+    E["kind 23190 event: fresh key, p = inbox"] --> X["NIP-44 ciphertext"]
+    X --> V["envelope: v, not_after, nonce, reply_to, items, pad"]
+    V --> I["item: id, target, method"]
+    I --> P["params: the method's params, with any kind 23198 claim proof, kind 35522 attestation or cash_secret"]
+    I --> Q["proof: kind 23192 item proof"]
+    I --> B["bill_proof: kind 23193 bill proof"]
+```
+
 #### It is the ONLY transport for the bill methods
 
 A Hub MUST serve `cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate` over the
@@ -1544,12 +1572,16 @@ call to one of the methods below, against one target, usually a wallet — and d
   has already served.
 - **`reply_to`** — REQUIRED, and **not a pubkey**, though it is shaped like one (32 bytes, as 64 lowercase
   hex characters, the same form as `nonce`). It is how the response is **addressed** and keyed.
-- **`pad`** — filler. A client MUST pad every envelope as follows: serialize it with `"pad": ""`, take that
-  length L in bytes, and set `pad` to (T − L) ASCII `0` characters, where T is the smallest multiple of the
-  announced `pad_bucket_bytes` that is at least L, or `max_bytes` if that multiple is larger. Since each `0`
-  adds exactly one byte, the padded envelope is exactly T bytes. A Hub pads each kind-23191 chunk the same
-  way, against its own `pad_bucket_bytes` and 65535. A Hub never reads `pad`. `max_bytes` and the 65535-byte
-  ceiling measure this padded plaintext.
+- **`pad`** — filler. A client MUST pad every envelope as follows:
+  1. serialize it with `"pad": ""`, take that length L in bytes;
+  2. set `pad` to (T − L) ASCII `0` characters, where T is the smallest multiple of the announced
+     `pad_bucket_bytes` that is at least L, or `max_bytes` if that multiple is larger.
+
+  Since each `0` adds exactly one byte, the padded envelope is exactly T bytes. For example, with
+  `pad_bucket_bytes` 2048 and `max_bytes` 16384, an envelope of 900 bytes gets 1148 `0`s and becomes 2048
+  bytes; one of 2100 bytes becomes 4096. A Hub pads each kind-23191 chunk the same way, against its own
+  `pad_bucket_bytes` and 65535. A Hub never reads `pad`. `max_bytes` and the 65535-byte ceiling measure this
+  padded plaintext.
 
 An envelope MUST carry at least one item, and item `id`s MUST be unique within it; a Hub MUST
 refuse an envelope that breaks either rule with an envelope-level `BAD_REQUEST`.
@@ -1625,13 +1657,23 @@ For example, an item proof by the pubkey
 23193 has the id `7e4908cda700cd019f244c5c4dafc43c321a23cbc023daec37c6011bfa802c53`.
 
 `ph` MUST be computed over a **canonical** form of `params`: object keys sorted, insignificant whitespace
-removed, and numbers preserved exactly as written. Keys are sorted and strings are serialized as RFC 8785
-(JCS) does: a string escapes only `"`, `\` and control characters below U+0020 (as `\b`, `\t`, `\n`, `\f`,
-`\r`, or else lowercase `\u00XX`), and every other character is written as literal UTF-8. In particular `<`,
-`>`, `&`, U+2028 and U+2029 are written unescaped, although some JSON encoders escape them by default; an
-encoder that does produces a different hash, and the Hub omits the item. Numbers are the one departure from
-RFC 8785: they are kept verbatim, never round-tripped through a float. Absent or empty `params` are hashed
-as `{}`.
+removed, and numbers preserved exactly as written.
+
+- Keys are sorted and strings are serialized as RFC 8785 (JCS) does: a string escapes only `"`, `\` and
+  control characters below U+0020 (as `\b`, `\t`, `\n`, `\f`, `\r`, or else lowercase `\u00XX`), and every
+  other character is written as literal UTF-8.
+- In particular `<`, `>`, `&`, U+2028 and U+2029 are written unescaped, although some JSON encoders escape
+  them by default; an encoder that does produces a different hash, and the Hub omits the item.
+- Numbers are the one departure from RFC 8785: they are kept verbatim, never round-tripped through a float.
+- Absent or empty `params` are hashed as `{}`.
+
+For example, the params
+
+```json
+{ "invoice": "lnbc1<x>", "amount": 5000.0 }
+```
+
+hash in the canonical form `{"amount":5000.0,"invoice":"lnbc1<x>"}`.
 
 A Hub MUST hold a proof's `created_at` to the window of §Freshness, and refuse one outside it as
 one that does not verify.
@@ -1752,6 +1794,14 @@ reply_key = HKDF-Expand(
 )
 ```
 
+```mermaid
+flowchart LR
+    A["request's fresh key and the Hub's inbox"] --> K["NIP-44 conversation key"]
+    K --> H["HKDF-Expand, info = label and reply_to text"]
+    H --> R["reply_key"]
+    R --> C["NIP-44 v2 encryption of each 23191 chunk, no ECDH"]
+```
+
 Each kind-23191 chunk is an event of this shape:
 
 ```
@@ -1828,6 +1878,17 @@ decided item outcome are independent facts, and a client MUST surface both.
 **An envelope-level error means no item ran, and a client MUST surface it for every item in the envelope.**
 Every bill method carries its own replay guard.
 **A Hub method added without such a guard MUST NOT be served over this transport.**
+
+The rules above, by what a client sees:
+
+| what the client sees | verdict |
+|---|---|
+| all `total` chunks, some items omitted | complete; each omission is final |
+| fewer than `total` chunks, or only a timeout | incomplete: ask again, keeping every decided outcome |
+| chunks disagreeing about `total`, two events with one `seq`, or a `seq` outside 1 to `total` | incomplete |
+| one item id answered twice | that item indeterminate; the others keep theirs |
+| the same event id twice | one chunk |
+| an envelope-level error | no item ran, for every item |
 
 ### Which Methods a Hub Serves
 
