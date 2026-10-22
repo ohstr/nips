@@ -11,12 +11,12 @@ Cash Pocket
 
 ## Abstract
 
-A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM, with no author, kind or amount.
+A Cash Pocket stores the cash tokens a wallet holds, and the bill-creating calls it has in flight. Each is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM, with no author, kind or amount.
 
 ## Terminology
 
 - **Pocket**: a user's Pocket Entries.
-- **Pocket Entry**: one held token, as a kind `9525` rumor.
+- **Pocket Entry**: one token the wallet holds or held, or one bill-creating call it has placed (a `pending` entry), as a kind `9525` rumor.
 - **wrap key**: the one-time key of an entry's gift wrap.
 
 ## Specification
@@ -92,7 +92,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
   - `unknown`: only the device whose `device` matches the entry MAY place the call again. It MAY place a `cash_transfer` or `cash_consolidate` again automatically, but MUST NOT place a `mint_cash` again without its user's explicit confirmation; until the user confirms, it shows the call and leaves the entry `pending`. The re-placed call always uses `request_id` = lowercase hex of sha256("retry:" ‖ the replaced entry's `request_id`), never a fresh id, and is written ahead as a new pending entry. It names the same target, with the same amounts, identities and any `secret` of the old entry, under a new deadline; a call re-placed again derives its id from the id it replaces, so re-placements chain. Then that device marks the old pending entry `done`. The Hub refuses a derived id only once a call carrying it has reached the Hub and passed authorization, which marks the id used, so the entry check and the local record below are what stop a call being placed twice. Just before placing a call again, the owner device syncs and confirms the old entry is still open. It MUST then check for an entry whose `w` is the derived id, counting every entry with that `w`, whatever its `state`, including one this wallet does not recognise; if one exists, it MUST NOT place the call again and only marks the old entry `done`. The device also keeps a local record of every derived id it places, recorded before sending the call and kept across Resync until that id's `deadline` plus the largest `max_request_age` the Hub has announced since the original call, and never places the same id twice. The `device` id and this record are kept and lost together. Any other device SHOULD show the call to the user and leaves the entry `pending`. This lookup answer is not the bill state `unknown`, which a pending entry never takes. An omitted answer is not a lookup `unknown`.
   - `expired`: the outcome can no longer be known (this lookup answer is not the bill state `expired`). The wallet MUST NOT place the call again automatically and SHOULD show the call to the user. The device whose `device` matches the entry marks it `done`; any other device leaves it open.
   - A pending entry shown to the user MAY be marked `done` on the user's decision; the wallet MUST NOT place the call again when doing so.
-- **Unusable Hubs**: every Hub serves `cash_lookup` and announces `max_request_age`. A wallet MUST NOT send a bill-creating call to a Hub that announces no `max_request_age`, or one NIP-CASH does not allow.
+- **Unusable Hubs**: NIP-CASH requires every Hub to serve `cash_lookup` and announce `max_request_age`. A wallet MUST NOT send a bill-creating call to a Hub that announces no `max_request_age`, or one NIP-CASH does not allow.
 - **Close** a pending entry by publishing it at the next `v` in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
 - **Versions**: every write for a `w` uses the highest `v` seen for that `w` plus 1.
 - **Change** an entry by publishing a new wrap with the next `v`, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
