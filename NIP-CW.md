@@ -11,13 +11,13 @@ Circle Wallet
 
 ## Abstract
 
-A **circle** is a group of people who do not run their own node; a host extends their own node to all
-of them. This document defines the **Circle Wallet**, the personal wallet a member gets, and the
+A **circle** is a group of people a host extends their own node to, so that none of them needs to run
+one. This document defines the **Circle Wallet**, the personal wallet a member gets, and the
 **Circle Wallet Hub**, the host's connection that issues one on a member's self-service request.
 
 Every member's wallet lives on the host's node, so a payment between two members settles as a fee-free
-internal transfer. A payment to anyone outside the circle goes out over ordinary Lightning. Who counts
-as a member is a host configuration choice.
+internal transfer. A payment to anyone off the node goes out over ordinary Lightning. Who counts as a
+member is a host configuration choice.
 
 ## Non-Goals
 
@@ -32,10 +32,11 @@ This document does not define:
 This document uses MUST, MUST NOT, SHOULD, and MAY as defined in RFC 2119.
 
 - **circle**: a group of people the host has decided to extend their own Lightning wallet
-  infrastructure to. It has no protocol state of its own, existing only as the set of people who can
-  successfully authenticate against a given Circle Wallet Hub.
-- **Circle Wallet**: the personal, fully-functional wallet a circle member ends up with, one per
-  member, starting at zero balance, able to send and receive like any other wallet in this system.
+  infrastructure to. It has no protocol state of its own, existing only as the set of people a given
+  Circle Wallet Hub's Circle Identity names as members.
+- **Circle Wallet**: the personal wallet a circle member ends up with, one per member, starting at zero
+  balance and spending only what it receives: while Active it sends and receives within its caps, and
+  otherwise it can only pay out.
 - **Circle Wallet Hub**: the host's own connection members send their `create_circle_wallet` request
   to. It issues Circle Wallets on its node, each holding only what its member receives.
 - **Circle Identity**: a reusable record a Circle Wallet Hub references to decide who is currently a
@@ -137,8 +138,8 @@ again in full. With `never`, the wallet's whole life is one period.
   A request without it MUST be rejected — there is no Hub-generated alternative. A member SHOULD generate a
   fresh keypair per request, so the connection key links to nothing else they use.
 - `max_amount` — REQUIRED, a JSON integer, the send cap per budget period on the wallet's external traffic,
-  in the chain's milli-unit (msats on Bitcoin, the same milli-unit for any other
-  energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling.
+  in the chain's milli-unit (msats on Bitcoin, and for any other energy-backed coin the milli-unit its
+  implementation defines), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling.
 - `max_receive` — REQUIRED, a JSON integer, the receive cap per budget period on the wallet's external
   traffic, in the same milli-unit. MUST NOT exceed the Hub's own per-wallet receive
   ceiling.
@@ -617,13 +618,13 @@ send room.
 
 A payment is treated as an internal, fee-free transfer whenever the invoice being paid was created by
 the *same underlying node* the payer's connection also runs on — regardless of which connection kind
-issued either side. A payment to anyone outside the circle is an ordinary Lightning payment, subject to
+issued either side. A payment to anyone off the node is an ordinary Lightning payment, subject to
 normal routing and fees. Fee-free is not the same as uncounted: only a payment to another Circle Wallet
 on the same node (kinds 1–2) counts against no cap.
 
 ## Fees
 
-A Circle Wallet Hub MAY apply a forwarding-fee skim to a member's payments — `fees_ppm`
+A Circle Wallet Hub MAY apply a forwarding-fee skim to a member's Lightning payments — `fees_ppm`
 (parts-per-million), a Hub-level setting reported in `create_circle_wallet`'s own response.
 
 - **When it applies.** Only to a payment that leaves the node over real Lightning routing (kind 4). An in-circle transfer, or any other payment settled between apps on the same
@@ -651,7 +652,7 @@ and MUST NOT generate, request, receive or store the secret.
 
 The host therefore cannot reconstruct a member's connection string or act as the member over it, and
 there is no way to reveal a connection again. A member who loses the secret has lost the connection, and
-nothing moves the wallet's balance without it. On a Hub that serves it, the
+only a rotation to a new key can move the wallet's balance without it. On a Hub that serves rotation, the
 member moves the wallet to a new key. On any other Hub the balance can no
 longer be reached: the host can still delete the wallet, which moves it to Closing and frees the member
 to request a new one with a new keypair, but the old wallet keeps its balance, payout-only, for good. A
