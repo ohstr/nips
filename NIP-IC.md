@@ -27,8 +27,8 @@ Splitting these apart — rather than having a single self-attested event — me
 ## Terminology
 
 - **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one — there is no central gatekeeper.
-- **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
-- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. `<platform-user-id>` MUST be the canonical form given in §Canonical Platform User IDs. The `d` tag of both event kinds in this NIP.
+- **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). Any platform can be linked through an IA (§Canonical Platform User IDs). See [NIP-AZ](./NIP-AZ.md) for the shared Web Identity/ConnectionKey terminology.
+- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. A client MUST build it from the canonical `<platform-user-id>` given in §Canonical Platform User IDs, or, for any other platform, take it from the IA's attestation as described there. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
@@ -36,7 +36,7 @@ Splitting these apart — rather than having a single self-attested event — me
 
 ### Canonical Platform User IDs
 
-Every client hashing a ConnectionKey for the same account MUST get the same hash, so `<platform-user-id>` has one canonical form per platform:
+Every client hashing a ConnectionKey for the same account MUST get the same hash, so `<platform-user-id>` has one canonical form per platform. The table lists the only platforms whose canonical form a sender can compute from what a user types, and so the only ones for which a sender MAY derive a ConnectionKey from typed input:
 
 | Platform | `<platform>` | `<platform-user-id>` |
 |---|---|---|
@@ -45,7 +45,9 @@ Every client hashing a ConnectionKey for the same account MUST get the same hash
 | Email | `email` | The whole address, trimmed and lowercased, its domain part as IDNA A-labels. |
 | DNS domain | `dns` | The domain as IDNA A-labels, lowercased, without a trailing dot. |
 
-No canonical form is defined here for other platforms.
+Any other platform works through an IA, which defines that platform's user-id format and how it verifies an account. Its ConnectionKey is the hash of the exact `<platform>:<platform-user-id>` string the IA attests (the `35522`'s `platform` tag and `evidence.user_id`), byte for byte, with no normalization. A sender MUST NOT derive such a ConnectionKey from typed input: it MUST take the key from the recipient's `35522` attestation or `nconnection`. Wherever such a key addresses value, it travels with the pubkey of the IA that attested it (`ia_pubkey`), and trust in it rests on that IA alone: two IAs may define different user ids, and so different ConnectionKeys, for one account.
+
+A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, `_` and `-`, so it never contains `:`. An IA MUST NOT issue a `35522` whose `platform` is outside this format, and a client MUST NOT build or accept a ConnectionKey for one.
 
 A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed.
 
@@ -119,7 +121,7 @@ A cleartext JSON (v1) string:
 | `version` | number | Always `1`. |
 | `platform` | string | Web Identity platform name. |
 | `auth_type` | string | How the IA verified control of the account. `"public_post"` is defined below; IAs MAY use other values (e.g. a one-time code sent to an email address). |
-| `user_id` | string | The platform account identifier, in its canonical form (§Canonical Platform User IDs). |
+| `user_id` | string | The platform account identifier: its canonical form for a platform listed in §Canonical Platform User IDs, otherwise the form the IA defines. The IA MUST set `d` to the ConnectionKey of `platform` and this value. |
 | `username` | string | The provider handle at verification time. |
 | `verified_at` | number | Unix timestamp of successful verification. |
 | `evidence_url` | string | `public_post` only: URL of the public post carrying the challenge. |
