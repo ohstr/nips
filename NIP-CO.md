@@ -278,7 +278,8 @@ At `pay_by` the Hub looks at what it has seen for the order, confirmed or not:
   it are minted the same way;
 - nothing seen: the Hub MAY delete the order at once; a payment arriving afterwards is kept by the Hub.
 
-The terms MUST NOT be read as a promise that a payment the Hub did not see before `pay_by` is minted.
+A client MUST tell its user to pay before `pay_by`, and MUST NOT present a payment the Hub did not see by
+then as one that will be minted.
 
 ### Limits
 
