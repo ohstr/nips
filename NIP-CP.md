@@ -75,7 +75,7 @@ A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline
 - `device`: a random id for the device that wrote the entry, generated on that device and not copied by backup or restore, in lowercase hex. A wallet that finds it is running from copied or restored state SHOULD generate a new `device` id; it then treats the old id's open entries as another device's.
 - `secret`: the `cash_secret` the wallet generated for a cash-mode bill the call makes, stored before the call is sent: `["secret", "<cash-secret>"]` for the bill made for `new_identity` or for `mint_cash`'s `cash` recipient, and `["secret", "<cash-secret>", "remainder"]` for the remainder of a split of a cash-mode source, which the wallet always binds to a fresh commitment of its own (NIP-CASH §Transferring and Splitting a Slice).
 
-**Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token, or on a pending entry those generated for the call, as above).
+**Optional tags**: `mint` (Minter), `source` (its `9522`; a wallet SHOULD keep it on a zap bill's entry until it moves the bill, since only that `9522` lets the bill's provenance, and so its minting Hub, be recovered: NIP-CASH §Mint Provenance), `secret` (`cash_secret` of a `cash`-mode token, or on a pending entry those generated for the call, as above).
 
 **Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published outside a seal. Relays SHOULD reject a signed `9525`.
 
