@@ -2583,6 +2583,18 @@ stored once it becomes terminal:
 | `reclaimed` | the wallet was destroyed, or the owner removed the slice, before the window passed; value returned to the Hub |
 | `written-off` | value could not be returned anywhere, because the parent Hub was gone |
 
+```mermaid
+stateDiagram-v2
+    [*] --> unclaimed
+    unclaimed --> unclaimed: in-place cash_transfer
+    unclaimed --> redeemed: cash_redeem payout
+    unclaimed --> transferred: spin-off
+    unclaimed --> consolidated: cash_consolidate
+    unclaimed --> expired: expiry sweep
+    unclaimed --> reclaimed: wallet destroyed or slice removed
+    unclaimed --> written_off: parent Hub gone
+```
+
 **Expiry.** A slice is live while now ≤ its wallet's `expires_at`, the bound inclusive as for
 `retained_until`; a wallet that never expires never reaches it. Once now is later than `expires_at`, a Hub
 MUST refuse `cash_redeem`, `cash_transfer` and `cash_consolidate` on the slice with `RESTRICTED`, and its
