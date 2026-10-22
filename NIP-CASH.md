@@ -1131,15 +1131,14 @@ Every source MUST be:
   trust check and an `attestation_event`, same as elsewhere. **This revision** does not accept a cash-mode
   source — see the `sources` field below.
 
-Authorization is per-source, not per-connection: the calling connection's own identity need not match, or
-even be among, the sources being consolidated — the calling connection is only an entry point, and each
-source's own proof is what actually authorizes moving it. A holder of any `cash_wallet` connection with
-`CASH_CONSOLIDATE_SCOPE` MAY consolidate sources it doesn't otherwise hold, as long as it can produce a
-valid proof for each one — no different in kind from how a `cash_transfer` proof, once captured, can move
-a slice regardless of who's making the call, just applied to N sources at once instead of one. This is
-deliberate, not an oversight: requiring the caller to also own one of the sources would add an arbitrary
-restriction with no security benefit, since custody (§What Can Be Consolidated Together, above) is already
-node-level, not connection-level.
+Authorization is per-source: each source's own proof is what actually authorizes moving it — no different
+in kind from how a `cash_transfer` proof, once captured, can move a slice regardless of who's making the
+call, just applied to N sources at once instead of one. The call itself names one bill: a
+`cash_consolidate` item's `target` MUST be its first source, `sources[0]`, so its bill proof is signed with
+that source's connection secret and its item proof by that source's registered identity (§The Private
+Transport). A Hub MUST refuse an item naming any other target with `BAD_REQUEST`. The first source is
+therefore also the call's lookup target (§Lost Replies), and a retry with a different first source is a
+new call with a new `request_id`.
 
 ```mermaid
 sequenceDiagram
@@ -1183,8 +1182,10 @@ sequenceDiagram
 
 - `sources` — MUST contain at least two distinct, unredeemed source slices; the same slice MUST NOT appear
   twice, and an implementation MAY cap the total count (e.g. at 100, matching
-  `mint_cash`'s recipient-batch limit). Each carries a `proof` (identity-bound), same scheme as
-  `cash_transfer`, carried as that entry's own sibling fields; a `connection_key` source additionally
+  `mint_cash`'s recipient-batch limit). Each carries a kind-23198 proof as that entry's own sibling fields,
+  whose `d` tag is that source's `wallet_pubkey`, whose `new_identity_hash` tag is computed from
+  `new_identity` exactly as for `cash_transfer`, and whose `amount_millis` tag is that source's committed
+  amount; a `connection_key` source additionally
   carries an `attestation_event`, validated identically (live IA trust, §Transferring and Splitting a
   Slice). `cash` sources are rejected: a
   cash secret has no signature and no binding to the request carrying it — presenting it just *is* the
@@ -1228,8 +1229,9 @@ to dial the wallet's connection, never to redeem it.
 
 On receiving `cash_consolidate`, the node MUST, in order:
 
-1. Locate every source. Each MUST be a `cash_wallet` this node custodies, unredeemed, and distinct. A source
-   this node did not issue, or that is already claimed, MUST refuse the whole request with `RESTRICTED`;
+1. Verify that the item's `target` is `sources[0]`'s `wallet_pubkey`, refusing with `BAD_REQUEST`
+   otherwise. Locate every source. Each MUST be a `cash_wallet` this node custodies, unredeemed, and
+   distinct. A source this node did not issue, or that is already claimed, MUST refuse the whole request with `RESTRICTED`;
    fewer than two sources or a repeated one with `BAD_REQUEST`; more sources than the Hub's cap with
    `QUOTA_EXCEEDED`.
 2. Verify all sources are children of the **same** Cash Hub. Refuse with `RESTRICTED` otherwise (this
@@ -1324,7 +1326,8 @@ committed never will.
 
 In the same atomic step that commits the call, the Hub records against its `request_id`:
 
-- the call's target: the bill its item named, or for `mint_cash` the Cash Hub connection;
+- the call's target: the bill its item named (`sources[0]` for `cash_consolidate`), or for `mint_cash` the
+  Cash Hub connection;
 - its authorizer: the signer of the slice proof (the first source's, for `cash_consolidate`), the cash
   commitment for a cash-mode source, or for `mint_cash` the Cash Hub connection's client pubkey;
 - the bills it created;
@@ -1346,9 +1349,9 @@ SHOULD look up a lost reply promptly, and well before any bill it might have cre
 ### Looking Up a Call (`cash_lookup`)
 
 `cash_lookup` is served on the private transport only (§The Private Transport). Its item names the original
-call's target — the bill a `cash_transfer` or `cash_consolidate` item named, the Cash Hub connection for
-`mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even if it has since
-destroyed that bill. Its bill proof is signed with that target's connection secret, as for any item (§Bill
+call's target — the bill a `cash_transfer` item named, a `cash_consolidate`'s first source, the Cash Hub
+connection for `mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even
+if it has since destroyed that bill. Its bill proof is signed with that target's connection secret, as for any item (§Bill
 Proofs). For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV `0`, §The
 Cash Hub Connection), and the item and bill proofs are both signed with that connection's client key. A
 client learns that Hub's identity, whose announcement carries the inbox (§The Hub Announcement), from the
