@@ -281,7 +281,7 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
   built. A request carrying `request_id` MUST also carry a NIP-47 `expiration` tag no more than the Hub's
   `max_request_age` ahead, and the Hub MUST NOT commit it after that instant, checked at commit time
   (§Lost Replies, Deadlines). A Hub MUST refuse a request carrying `idempotency_key`, the field an earlier
-  draft used for this, with `BAD_REQUEST` (step 3 below), so a caller written against that draft is refused
+  draft used for this, with `BAD_REQUEST` (step 4 below), so a caller written against that draft is refused
   rather than left unguarded.
 
 `min_transfer_millis` is deliberately NOT a request field here, and a Hub MUST refuse a request carrying it
@@ -334,39 +334,40 @@ On receiving `mint_cash`, the Hub MUST, in order:
    interfaces the implementation exposes for issuing this request. Two concurrent requests must never
    both proceed past a stale balance read. A request that can't be serialized MUST be refused with
    `RATE_LIMITED`, not queued.
-2. Validate every recipient. `amount_millis` MUST be strictly positive. The running sum of all recipients'
+2. If the request carries a `request_id`, verify that it is well formed, refusing with `BAD_REQUEST`
+   otherwise, and unused, before any other check (§Lost Replies, `request_id`). **A used `request_id` MUST
+   be refused with `REQUEST_REUSED` rather than mint again**, whatever else is wrong with the request.
+   Then verify that the request carries a NIP-47 `expiration` that has not passed and lies within
+   `max_request_age`, refusing with `BAD_REQUEST` otherwise. The reuse check must come first because a
+   validation, IA, expiry or balance check run earlier would answer the resend of a committed mint with
+   an unrelated error.
+3. Validate every recipient. `amount_millis` MUST be strictly positive. The running sum of all recipients'
    amounts MUST be computed with an explicit overflow check, refusing with `BAD_REQUEST` before an unsigned
    wraparound can occur, and MUST NOT exceed the Hub's own per-wallet funding ceiling (§Data Model), which
    is refused with `QUOTA_EXCEEDED`. If any recipient is `cash`-mode, `recipients` MUST contain exactly that
    one entry and no other — refuse the entire request with `BAD_REQUEST` otherwise (§Cash-Mode Slices,
    §Redemption Metadata).
-3. For each `connection_key`-mode recipient, verify its `ia_pubkey` is on the wallet owner's trusted
+4. For each `connection_key`-mode recipient, verify its `ia_pubkey` is on the wallet owner's trusted
    Identity Authority allowlist right now. An untrusted or unknown IA MUST refuse the entire request with
    `RESTRICTED`, not just that recipient. For each `cash`-mode recipient, verify `identity_value` is a
    well-formed commitment (§Cash-Mode Slices), refusing with `BAD_REQUEST` otherwise. A request carrying a
    `cash_secret` on any recipient, an `idempotency_key` or a `min_transfer_millis` MUST be refused whole
    with `BAD_REQUEST`, not have the field ignored: a raw secret never belongs in a request,
    `idempotency_key` is the retry field of an earlier draft, and `min_transfer_millis` is the Hub's own.
-4. Resolve `expiry`. If the Hub's own expiry ceiling is "never," an omitted/zero `expiry` here MUST produce
+5. Resolve `expiry`. If the Hub's own expiry ceiling is "never," an omitted/zero `expiry` here MUST produce
    a Cash Wallet with no expiry at all — never a zero-duration, already-expired one — and any explicit,
    positive `expiry` the caller does supply MUST be honored exactly, since there's no Hub-configured ceiling
    to check it against, subject only to the implementation's own representational bound (§Minting, `expiry`). Otherwise (the Hub's own ceiling is a real, positive value): if omitted or zero, set it to the
    Hub's own expiry ceiling; otherwise it MUST NOT exceed that ceiling, and a longer one is refused with
    `RESTRICTED`.
-5. Verify the Hub's own available balance is at least the sum of all recipients' amounts, refusing with
+6. Verify the Hub's own available balance is at least the sum of all recipients' amounts, refusing with
    `INSUFFICIENT_BALANCE` otherwise.
-6. If the request carries a `request_id`, verify it carries a NIP-47 `expiration` that has not passed and
-   lies within `max_request_age`, and that the `request_id` is well formed, refusing with `BAD_REQUEST`
-   otherwise, and unused (§Lost Replies).
-   **A used `request_id` MUST be refused with `REQUEST_REUSED` rather than mint again.** Checked here,
-   after validation and before any state is created: a request that was never going to succeed records
-   nothing, so it cannot lock out the caller's legitimate retry.
 7. Create the Cash Wallet connection, record one slice per recipient — stamping each with the Hub's
    current `min_transfer_millis` and `redeem_fee_ppm` defaults (§Data Model) and a one-way commitment of
    the secret for `cash`-mode slices, never the secret itself — and perform a single internal transfer
    from the Hub to the new connection for the full sum. This MUST be atomic: a failure at any point after
    this step MUST leave no partial state. If a `request_id` was supplied, write its record (§Lost Replies)
-   now, in the same atomic step, checking `request_id` and `expiration` again as it commits.
+   now, in the same atomic step, checking `expiration` again as it commits.
 8. Return the pairing connection string and the resolved recipient list.
 
 A request that fails any check above MUST be rejected before step 7. No partial wallet, slice, or
@@ -972,9 +973,10 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
    wallet connection(s) — one for a full-transfer spin-off, two for a partial split — see the Response
    format above and §Spinning a Slice Off Into a Dedicated Wallet.
 
-If the request carries a `request_id`, the Hub refuses a used one before step 5 or 6, and writes its record
-(§Lost Replies) in the same atomic step as step 5's reassignment or step 6's source claim. A rollback that
-restores the source claim removes the record with it.
+If the request carries a `request_id`, the Hub refuses a used one with `REQUEST_REUSED` before step 1 — a
+resend whose original committed would otherwise fail step 1 on a consumed proof or a claimed slice — and
+writes its record (§Lost Replies) in the same atomic step as step 5's reassignment or step 6's commit,
+checking the deadline again as it commits.
 
 A request that fails step 1, 2, 3, or 4 MUST be rejected before step 5 or 6. A rejected `cash_transfer`
 never leaves a slice partially transferred, partially split, or claimed.
@@ -1263,8 +1265,8 @@ On receiving `cash_consolidate`, the node MUST, in order:
    source's signer) for a `pubkey` `new_identity` (§Spinning a Slice Off), in the clear for
    `connection_key`/`cash` (see Response above).
 
-If the request carries a `request_id`, the node refuses a used one before step 7, and writes its record
-(§Lost Replies) in step 7's atomic claim. A rollback that restores the claims removes the record with it.
+If the request carries a `request_id`, the node refuses a used one with `REQUEST_REUSED` before step 1, and
+writes its record (§Lost Replies) in step 7's atomic commit, checking the deadline again as it commits.
 
 A request that fails steps 1–6 MUST be rejected before step 7. A rejected `cash_consolidate` never leaves
 any source consumed or partially merged.
@@ -1285,11 +1287,26 @@ first save it durably, with the call, its exact deadline (§Deadlines) and any c
 it (§Security Considerations for Cash-Mode Slices), so the record survives a crash between sending and the
 reply.
 
-**A repeat MUST be refused, never applied twice.** A call carrying a `request_id` already used on this node,
-by any call to any of its Cash Hubs, MUST be refused with the error code `REQUEST_REUSED`, whether or not the
-parameters match. A client receiving `REQUEST_REUSED` keeps the call pending and looks it up with
-`cash_lookup`; it never treats the call as failed. The outcome of the first call is read with `cash_lookup`,
-not by resending it.
+**A repeat MUST be refused, never applied twice.** A `request_id` is used once a call carrying it has passed
+the Hub's reuse check, whatever happens to that call afterwards. A Hub MUST refuse with `REQUEST_REUSED` a
+call carrying a `request_id` already used on this node, by any call to any of its Cash Hubs, whether or not
+the parameters match. The check and the marking of the id as used MUST be one atomic step, so two calls
+carrying the same `request_id` — whatever their methods, targets or envelopes, including two items of one
+envelope — never both pass it; whichever is second is refused. A `cash_lookup` item carries a `request_id`
+but is not a call, and never marks one used.
+
+The Hub makes this check before any other check on the call except the `request_id`'s own form, and except
+that on the private transport it verifies the item's bill proof (§Bill Proofs) first. A balance, IA,
+expiry or proof check run earlier would answer the resend of a committed call with an unrelated error.
+
+**The Hub MUST keep a used mark for good.** The mark is the `request_id` alone, kept after the full record
+(§The Record) is dropped, so a reuse is refused for the life of the node, not only while the record lasts.
+
+A `REQUEST_REUSED` refusal carries only `code` and `message`: never the original call's result or the bills
+it created. A client receiving it keeps the call pending and looks it up with `cash_lookup`; it never
+treats the call as failed. A client that resends a call with the same `request_id` MUST NOT read any
+answer to the resend other than success as the outcome of the original. The outcome of the first call is
+read with `cash_lookup`, not by resending it.
 
 ### Deadlines
 
