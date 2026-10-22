@@ -14,3 +14,28 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP lists in its hea
 | [NIP-CZ](./NIP-CZ.md) | Cash Zaps | `9522`, `10522` | `draft` |
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Web Identity Linking | `35521`, `35522` | `draft` |
 | [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
+
+## How they fit together
+
+```mermaid
+flowchart LR
+    CASH[NIP-CASH<br/>Cash Hub]
+    CW[NIP-CW<br/>Circle Wallet] --> CASH
+    CO[NIP-CO<br/>Cash Order] --> CASH
+    CP[NIP-CP<br/>Cash Pocket] --> CASH
+    CZ[NIP-CZ<br/>Cash Zaps] --> CASH
+    IC[NIP-IC<br/>Identity Connection]
+    AZ[NIP-AZ<br/>AltZap] -.-> IC
+    CZ -.-> IC
+    CW -.-> IC
+    CO -.-> IC
+    CASH -.-> IC
+    LS[NIP-LS<br/>Local Signer]
+```
+
+A solid arrow means "depends on". A dotted arrow points to NIP-IC, which defines the Web Identities these
+NIPs can name. Upstream NIPs and other "Related" links are left out.
+
+Suggested reading order for the cash NIPs: NIP-CASH, then NIP-CP (holding bills), then NIP-CZ, NIP-CW and
+NIP-CO, which each add one use of a Cash Hub. NIP-IC explains the Web Identities that bills, zaps and
+circles can name.
