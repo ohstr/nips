@@ -298,9 +298,10 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    requested `connection_pubkey`, and the `terms` tag equals the requested `max_amount`, `max_receive`,
    `expiry` and `budget_renewal`. The `id` check is not optional — without it the replay guard in step 3
    is bypassable by mutating only that field.
-3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 8). A
-   previously-consumed event ID MUST be rejected, even if otherwise valid and still within its freshness
-   window. The proof's ID is recorded as used here, before any later check.
+3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 8). A Hub MUST
+   refuse a previously-consumed event ID with `REQUEST_REUSED` (§Errors), even if the proof is otherwise
+   valid and still within its freshness window. The proof's ID is recorded as used here, before any later
+   check.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
    direct lookup, while a `follow_set`-policy Hub resolves the current version of its follow set
    (§Membership). A Hub that cannot resolve that list yet — it fetches from relays and so has a startup
@@ -348,11 +349,12 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 
 ### Errors
 
-A caller needs to tell these refusals apart to know what to do next, so a Hub MUST use these NIP-47 error
-codes for them, on either transport:
+A caller needs to tell these refusals apart to know what to do next, so a Hub MUST use these error codes
+for them, on either transport, each in NIP-47's error object, `{"code": "<code>", "message": "<text>"}`:
 
 | code | meaning | retry? |
 |---|---|---|
+| `REQUEST_REUSED` | the identity proof was already used (step 3); a copy of this join may have been made | no; look the join up (§Lost Join Reply) |
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4) | no |
 | `WALLET_EXISTS` | the requester already holds an Active or Suspended Circle Wallet under this Hub (step 5) | no, until it is neither (§Lifecycle and Deletion) |
@@ -360,11 +362,28 @@ codes for them, on either transport:
 | `RATE_LIMITED` | the requester has asked too often, or another request held the Hub (steps 7–8) | yes, later |
 | `INSUFFICIENT_CAPACITY` | the circle's holdings have reached its holdings ceiling (step 9) | yes, later |
 
-Other failures (a malformed request, a proof that does not verify) keep whatever codes the implementation
-uses; this document names only the six a caller has to distinguish.
+A Hub refuses a malformed request with `BAD_REQUEST` and a proof that does not verify (step 2) with
+`UNAUTHORIZED`, the codes NIP-CASH uses for the same failures. A wallet's own refusals, and a member
+request's, use these:
 
-A retry after any refusal MUST carry a newly signed proof. Proofs refused at step 3 or later are consumed,
-so resending one is refused as a replay.
+| code | meaning | retry? |
+|---|---|---|
+| `INSUFFICIENT_BALANCE` | the payment's full cost exceeds the wallet's balance (§Own Funds and Caps) | yes, for less |
+| `QUOTA_EXCEEDED` | the payment or invoice would pass the wallet's send or receive cap, or the circle's outbound ceiling (§Own Funds and Caps) | yes, in a later period or for less |
+| `INSUFFICIENT_CAPACITY` | the invoice or payment would take the circle's holdings past its holdings ceiling (§Own Funds and Caps) | yes, later or for less |
+| `RATE_LIMITED` | too many same-circle transfers, hold invoices or pending payments (§Own Funds and Caps) | yes, later |
+| `RESTRICTED` | an invoice with no amount, an invoice for a wallet that is not Active, a deletion while the wallet holds more than dust, or a rotation to a key in use (§Own Funds and Caps, §Deleting a Circle Wallet, §Recovering a Lost Connection) | no |
+| `ROTATION_PENDING` | the wallet already has a pending rotation (§Recovering a Lost Connection) | no, until it completes or is cancelled |
+| `FROZEN` | the wallet is frozen, so its current key is refused (§Recovering a Lost Connection) | no, until it is unfrozen or rotated |
+
+A client MUST sign a new proof for a retry after any refusal. A proof refused at step 3 or later is
+consumed, so resending it is refused with `REQUEST_REUSED`.
+
+**`REQUEST_REUSED` is not a failure.** The proof may have been consumed by the client's own earlier copy
+of the join, or by a co-member who resubmitted it first (§Security Considerations), and either may have
+made the wallet. A client that receives it for a join it sent MUST NOT read it as a failure: it keeps the
+join pending and looks it up (§Lost Join Reply). Only after the lookup answers `unknown` MAY it join again,
+with a newly signed proof and a new `connection_pubkey`.
 
 ### Lost Join Reply
 
@@ -1070,8 +1089,7 @@ Proof, check 6) closes this on both transports.
 before the Hub does — a co-member holding the shared connection who sees it on a relay — can still
 resubmit it first and consume the proof, but only unchanged: the Hub issues exactly the wallet the
 requester asked for, to their own key, with its details encrypted to them. The requester's own copy is
-then refused as a replay, and on a Hub that lists `cash_lookup` (§Lost Join Reply) their client recovers
-the reply.
+then refused with `REQUEST_REUSED`, and their client recovers the reply (§Lost Join Reply).
 
 **The private-transport inbox is trusted through `get_info`, and the reply through the Hub's key.** A
 client encrypts a private join to whatever inbox the announcement names, and trusts the announcement only
