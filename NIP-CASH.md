@@ -898,11 +898,15 @@ sequenceDiagram
   transfer; a smaller value splits off exactly that much (§Which outcome a request produces). When present,
   it MUST be strictly positive and MUST NOT exceed the slice's current committed amount.
 - `zap_target` — OPTIONAL. The zapped event's `e` id or its `a` coordinate (`<kind>:<pubkey>:<d>`), as a
-  non-empty string. The Hub does not look the event up or interpret the string; it signs its `sha256`
-  (§Mint Provenance). When present, the source slice MUST be identity-bound (`pubkey` or `connection_key`,
-  never `cash`), and `new_identity` MUST be `pubkey`: a zap is signed to a Nostr recipient, and a value sent
-  to a `connection_key` carries no `zap_target`. Like every param, it is bound by the item proof's `ph`
-  (§Item Proofs).
+  non-empty string. The Hub MUST NOT look the event up or otherwise interpret the string: it checks only
+  that it is non-empty, refusing an empty one with `BAD_REQUEST`, that the source is `pubkey`-bound and
+  that `new_identity` is a `pubkey`, and signs its `sha256` (§Mint Provenance). When present, the source
+  slice MUST be bound to a `pubkey`, never a `connection_key` or `cash`: the zap scheme's sender is always
+  a Nostr pubkey, the one a Cash Zap verifier rebuilds from the Cash Zap's signer ([NIP-CZ](./NIP-CZ.md)),
+  so a bill signed for any other sender could never be verified. `new_identity` MUST be `pubkey`: a zap is
+  signed to a Nostr recipient, and a value sent to a `connection_key` carries no `zap_target`. A holder of
+  a `connection_key`-bound bill zaps by first moving it to a pubkey. Like every param, it is bound by the
+  item proof's `ph` (§Item Proofs).
 - `remainder_commitment` — REQUIRED for a partial split of a `cash` source, and MUST NOT be present
   otherwise: a fresh commitment the caller generated (§Creating a Cash-Mode Slice), which the remainder
   wallet's cash-mode slice takes in place of the source's, so the source's secret opens nothing once the
@@ -953,8 +957,8 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
    (treating an omitted `amount_millis` as bound to "the slice's full current amount," not as unbound); for a
    `cash` current identity, verify the presented `cash_secret`. A proof or secret that fails is refused
    with `UNAUTHORIZED`. A redeemed slice has no registered identity left to act on; `cash_transfer` on a
-   redeemed or claimed slice MUST be refused with `RESTRICTED`. A request carrying `zap_target` on a `cash`
-   source MUST be refused with `RESTRICTED`.
+   redeemed or claimed slice MUST be refused with `RESTRICTED`. A request carrying `zap_target` on a source
+   not bound to a `pubkey` MUST be refused with `RESTRICTED`.
 2. Validate `new_identity`: for `pubkey`/`connection_key`, the same rules `mint_cash` applies to
    a recipient entry (§Processing Algorithm) — identity shape, and, for `connection_key` mode, that
    `ia_pubkey` is on the wallet owner's trusted Identity Authority allowlist right now. For `cash`,
@@ -2512,8 +2516,7 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   `<hrp>` is the token's HRP, `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
   committed amount (TLV `6`) in decimal. Every integer in a payload is unsigned decimal ASCII with no leading
-  zeros (`0` for zero); every hex value is lowercase; `<ia_pubkey_hex>` is the 32-byte x-only key. The
-  scheme labels `satscash-mint:v2`, `satscash-zap:v1` and the legacy `lokicash-mint:v1` are fixed ASCII
+  zeros (`0` for zero); every hex value is lowercase. The scheme labels `satscash-mint:v2`, `satscash-zap:v1` and the legacy `lokicash-mint:v1` are fixed ASCII
   constants, the same for every HRP: the token's own HRP appears only as `<hrp>`, and a signer or verifier
   MUST NOT substitute it into the label.
 
@@ -2544,9 +2547,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   `zap_target`); every other bill is signed under scheme `1`. Its extra fields:
   - `<recipient>` — the bill's registered identity, the transfer's `new_identity`, always a pubkey and
     written `pubkey/<hex>`;
-  - `<sender>` — the source slice's registered identity, whose proof authorized the transfer, written
-    `pubkey/<hex>` or `connection_key/<hex>/<ia_pubkey_hex>`. NIP-CZ counts only zaps whose sender is a
-    `pubkey`;
+  - `<sender>` — the source slice's registered pubkey, whose proof authorized the transfer, written
+    `pubkey/<hex>`;
   - `<target_hash>` — the lowercase hex `sha256` of the UTF-8 `zap_target` string, hashed exactly as sent,
     so the colons of an `a` coordinate cannot make the payload ambiguous. NIP-CZ requires `zap_target` to
     equal the Cash Zap's target tag byte for byte;
@@ -2557,7 +2559,10 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   The Hub keeps a zap bill's `issued_at` for the bill's life, so the payload can be rebuilt. A token does
   not carry the scheme-`2` extra fields. A verifier rebuilds them from the Cash Zap that carries the token,
   as [NIP-CZ](./NIP-CZ.md) specifies, and a holder with only the token finds that Cash Zap by its
-  `w` tag. Until it does, the bill has no verifiable provenance.
+  `w` tag. Until it does, the bill has no verifiable provenance, and so no route to its Hub (§The Hub
+  Announcement). A wallet that verified a zap bill SHOULD keep the Cash Zap's fields with the token for as
+  long as it holds the bill; a split or consolidate reissues the value as a scheme-`1` bill that needs
+  them no longer.
 
   Legacy tokens carry no type `8` and were signed over the scheme above without a relay hash. A verifier
   checks them as before; an encoder MUST NOT produce one.
@@ -3161,6 +3166,9 @@ recipients to stay unlinkable from each other, not just from third parties, SHOU
 connection through channels that don't also reveal who else received it.
 
 A zap transfer tells the minting Hub which event is being zapped. The Cash Zap makes that public anyway.
+A zap bill's token is public in its Cash Zap, and its TLV `8` marks it as one, so anyone the token later
+reaches can find that zap by its `w` tag. An in-place transfer keeps the same token. A holder who wants to
+pass the value on unlinked SHOULD split or consolidate it, which issues a fresh scheme-`1` bill.
 
 A `request_id` links a call to the bills it created, but only for the Hub, which knows that link already.
 On the private transport a relay sees neither the call nor its lookup in the clear.
