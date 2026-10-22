@@ -6,8 +6,8 @@ Cash Hub
 
 `draft` `optional` `nwc`
 
-**Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect)
-**Related**: [NIP-CW](./NIP-CW.md) (Circle Wallet), [NIP-CZ](./NIP-CZ.md) (Cash Zaps), [NIP-IC](./NIP-IC.md) (Identity Connection)
+**Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect); for proof of work, [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) (Relay Information Document), [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) (Proof of Work) and [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp)
+**Related**: [NIP-CO](./NIP-CO.md) (Cash Order), [NIP-CW](./NIP-CW.md) (Circle Wallet), [NIP-CZ](./NIP-CZ.md) (Cash Zaps), [NIP-IC](./NIP-IC.md) (Identity Connection)
 
 ## Abstract
 
@@ -1436,7 +1436,7 @@ A private request is a **kind-23190 event carrying one NIP-44 ciphertext**:
 ```
 kind        23190
 pubkey      a FRESH ephemeral key, used once and discarded
-tags         [["p", "<the announced inbox>"]]
+tags         [["p", "<the announced inbox>"]], plus "nonce" and "expiration" under proof of work
 created_at  randomised into the past (see below)
 content     NIP-44( envelope JSON ) under the conversation key
             between that ephemeral key and the announced inbox
@@ -1447,6 +1447,29 @@ anything else. Authorization travels per item.
 
 A request's `created_at` is randomised up to two days into the past, as in NIP-59; freshness lives inside
 the ciphertext, in `not_after` below.
+
+### Proof of Work
+
+A Hub MAY require [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) proof of work on
+kind-23190 events. The relays it reads its inbox from enforce it:
+
+- each advertises its minimum difficulty for kind 23190 as `limitation.min_pow_difficulty` in its
+  [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) document, and rejects an event below it
+  with an `OK` false message beginning `pow:`, for example `pow: difficulty 20 required`. The minimum MAY
+  change with load;
+- each rejects a kind-23190 event that carries no NIP-40 `expiration` tag, one already past, or one more than
+  86400 seconds ahead, and drops any event whose id it has already accepted, until that event's expiration.
+
+A Hub that requires proof of work MUST read its inbox only on relays that enforce it, and MUST list them in
+its announcement's `relays`.
+
+A client sending to such a Hub reads the relay's minimum before sending, and puts on the request event a
+`nonce` tag as NIP-13 defines it and an `expiration` tag equal to the envelope's `not_after`. On a `pow:`
+rejection it mines the event to the difficulty stated and publishes it again, with the same envelope, so that
+a request the Hub already ran is not run twice. A Hub ignores both tags; the envelope's `not_after` still
+decides freshness.
+
+The proof of work protects every item this transport carries, whatever its method.
 
 ### Envelopes
 
