@@ -125,7 +125,8 @@ A Circle Wallet Hub MUST maintain, for itself:
   balance it may keep from a wallet it deletes (§Lifecycle and Deletion);
 - a holdings ceiling: the most its Active wallets may hold together (§Own Funds and Caps);
 - optionally, a ceiling on what its wallets together may send as external traffic in one period of its
-  own (§Own Funds and Caps).
+  own (§Own Funds and Caps);
+- optionally, a rotation delay (§Recovering a Lost Connection).
 
 A Circle Wallet spends only what it has received: it starts at zero balance, and the Hub never funds any
 part of a payment (§Own Funds and Caps). A member's `max_amount` and `max_receive` are caps on the
@@ -145,8 +146,8 @@ A Hub that serves §Lost Join Reply also keeps, for each Circle Wallet, the `enc
 (§Lost Join Reply).
 
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has
-already consumed for `create_circle_wallet` (§Identity Proof, §Security Considerations), since this
-proof has no invoice to bind it to a single use.
+already consumed for `create_circle_wallet` or a member request (§Identity Proof, §Recovering a Lost
+Connection, §Security Considerations), since this proof has no invoice to bind it to a single use.
 
 ### Budget Renewal Floor
 
@@ -238,6 +239,7 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
   "expires_at": 1720000000,
   "fees_ppm": 0,
   "dust_threshold_millis": 1000,
+  "rotation_delay_secs": 432000,
   "budget_renewal": "monthly"
 }
 ```
@@ -257,7 +259,8 @@ request.
 `expires_at` is the wallet's expiry in unix seconds, or `0` when the wallet never expires.
 
 `dust_threshold_millis` is the Hub's dust threshold when the wallet was created, fixed for the wallet's
-life like `fees_ppm` (§Lifecycle and Deletion).
+life like `fees_ppm` (§Lifecycle and Deletion). `rotation_delay_secs` is present only on a Hub that serves
+§Recovering a Lost Connection: the wallet's rotation delay, likewise fixed when it was created.
 
 `max_amount` and `max_receive` are the send and receive caps as the Hub resolved them, in the same
 milli-unit as the request. A Hub that adjusts a requested value, for example by rounding it down to a unit
@@ -429,8 +432,10 @@ There's only one identity mode here, since a Circle Wallet member is always a ra
 Verification MUST establish all of the following, and a failure of any one MUST be rejected. This is the
 one list of checks; every other section that verifies a kind-23199 proof refers to it.
 
-1. **The event's `kind` is 23199.** Another kind signed by the same key — a NIP-CASH proof, say — is not
-   an identity proof for this Hub, however well its other fields match.
+1. **The event's `kind` is 23199, and it carries no `action` tag.** Another kind signed by the same key —
+   a NIP-CASH proof, say — is not an identity proof for this Hub, however well its other fields match.
+   An `action` tag marks a member request about an existing wallet (§Recovering a Lost Connection), never
+   a join.
 2. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
    compare. This is load-bearing rather than a formality: a verifier that checks the signature against a
    recomputed id but keys the replay guard on the supplied `id` can be fooled by changing only that field —
@@ -710,9 +715,83 @@ traffic contains it, and no response to the member carries it. The owner still c
 funds — the wallet runs on the host's node — but cannot act as the member over the member's connection.
 
 It follows that there is no "reveal connection again" capability, for the host or anyone else. A member
-who loses the secret has lost the connection: the member (or the host) deletes the wallet, which sweeps its
-balance back to the Hub and frees the member to request a new one with a new keypair. A deletion by the
-host passes through the grace period first (§Lifecycle and Deletion).
+who loses the secret has lost the connection, and nothing moves the wallet's balance without it
+(§Lifecycle and Deletion). On a Hub that serves it, the member moves the wallet to a new key
+(§Recovering a Lost Connection). On any other Hub the balance can no longer be reached: the host can
+still delete the wallet, which moves it to Closing and frees the member to request a new one with a new
+keypair, but the old wallet keeps its balance, payout-only, for good. A client joining a Hub whose
+`get_info` reports no `rotation_delay_secs` MUST warn the member, before the join, that losing the
+connection secret makes the wallet's balance unreachable, and SHOULD offer to back the secret up.
+
+### Recovering a Lost Connection
+
+A Hub MAY let a member move a wallet to a new connection key. A Hub that does reports
+`circle_wallet.rotation_delay_secs` in `get_info` (§The Circle Wallet Hub Connection), and one that does
+not MUST omit it. The delay is the Hub's choice; a Hub SHOULD use 432000 seconds (5 days) unless it has
+reason to choose otherwise. Each wallet's delay is the one in force when it was created, reported in its
+details (§Response) and fixed for its life. A wallet whose details carry none cannot be rotated.
+
+**The host submits, the member authorizes.** A member who has lost the secret cannot reach the wallet,
+so the request reaches the Hub through the host's own administration of it, which this document does
+not define. It MUST carry a member request, a kind-23199 event the member signed, and a Hub MUST NOT
+rotate, freeze or unfreeze a wallet on the host's word alone:
+
+```jsonc
+{
+  "kind": 23199,
+  "pubkey": "<member pubkey — the pubkey of the join that created the wallet>",
+  "created_at": 1720000000, // freshness window: up to 24 hours in the past, up to 1 minute in the future
+  "tags": [
+    ["d", "<Circle Wallet Hub's own pubkey>"],  // as for a join (§Identity Proof, check 5)
+    ["action", "rotate"],                         // "rotate" | "freeze" | "unfreeze"
+    ["wallet", "<wallet_pubkey>"],                // the wallet it acts on
+    ["connection", "<new connection_pubkey>"]     // rotate only: the key the wallet moves to
+  ],
+  "content": "",
+  "sig": "<schnorr signature by `pubkey`>"
+}
+```
+
+A Hub MUST verify a member request with §Identity Proof's checks 2, 5 and 8 unchanged, and further that
+its `kind` is 23199, its signature verifies against its `pubkey`, which is the `pubkey` of the join that
+created the named wallet, its `created_at` is inside the window above, and it carries exactly one `action`
+tag, whose value is `rotate`, `freeze` or `unfreeze`, exactly one `wallet` tag, exactly one `connection`
+tag on a `rotate` and none otherwise, and no `terms` tag. The Hub MUST keep its id in the single-use
+record (§Data Model) for at least 24 hours and 1 minute after its `created_at`. A request failing a check
+is refused with `UNAUTHORIZED`, one whose id was used before with `REQUEST_REUSED`, and one naming a
+wallet the Hub does not hold with `NOT_FOUND`. A Hub that does not serve rotation refuses every member
+request with `NOT_IMPLEMENTED`.
+
+**Rotation.** A `rotate` request is allowed in every state but Deleted. A Hub MUST refuse it with
+`RESTRICTED` unless its `connection` names a valid x-only key that no connection on the node uses or has
+pending, and with `ROTATION_PENDING` while the wallet already has a pending rotation. Once accepted, the
+rotation is pending from `requested_at`, the moment the Hub accepted it on its own clock, and completes at
+the first moment now is at or after `requested_at` plus the wallet's `rotation_delay_secs`. Until then:
+
+- the old key keeps working, and the Hub MUST notify it at once with a NIP-47 `rotation_pending`
+  notification;
+- any request validly signed by the old key, unless the wallet is frozen, cancels the rotation and is
+  then served as usual, and the Hub MUST notify the old key with `rotation_cancelled`. A payment arriving
+  at the wallet cancels nothing: only the key holder can.
+
+On completion the Hub authorizes the new key in place of the old one, which stops working, and MUST
+notify the new key with `rotation_completed`. It is the same wallet: the same `wallet_pubkey`, balance,
+caps, periods, fees, dust threshold and state. The notifications carry:
+
+```jsonc
+{"notification_type": "rotation_pending", "notification": {"connection_pubkey": "<new>", "completes_at": 1720432000}}
+{"notification_type": "rotation_cancelled", "notification": {"connection_pubkey": "<new>"}}
+{"notification_type": "rotation_completed", "notification": {"connection_pubkey": "<new>"}}
+```
+
+`completes_at` is `requested_at` plus the delay, here 1720000000 plus 432000.
+
+**Freezing.** The delay protects a member whose Nostr key, not their wallet key, was taken: the wallet key
+cancels the rotation. A member who believes someone else holds the wallet key freezes the wallet with a
+`freeze` request, which takes effect at once. While a wallet is frozen the Hub MUST refuse every request
+signed by its current key with `FROZEN`, and such a request cancels nothing. An `unfreeze` request lifts it
+at once, and a completed rotation ends it, since the frozen key is gone. Freezing changes nothing else: a
+frozen Active wallet still receives, and a pending rotation stays pending.
 
 ## The Circle Wallet Hub Connection (`circlehub1...`)
 
@@ -733,6 +812,7 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
   "dust_threshold_millis": 1000, // a balance at or below it is dust (§Lifecycle and Deletion)
   "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
   "identity": "<hex x-only>",  // OPTIONAL: present iff the Hub offers §Private Join
+  "rotation_delay_secs": 432000, // OPTIONAL: present iff the Hub serves §Recovering a Lost Connection
   "per_wallet_max_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_amount (§Data Model)
   "per_wallet_max_receive_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_receive
   "min_budget_renewal": "monthly"  // OPTIONAL: the Hub's renewal floor (§Budget Renewal Floor)
@@ -1005,6 +1085,13 @@ payments the sender would collect.
 storage, logs or retained traffic therefore yields no member's connection. It does not make the host
 powerless — the host's node holds and moves the funds — but impersonating a member over their own
 connection is not among the host's capabilities.
+
+**Rotation rests on the member's Nostr key** (§Recovering a Lost Connection). The host submits a member
+request but cannot sign one, so the host alone can never move a wallet to a key of its choosing, and the
+delay lets whoever holds the wallet key cancel a rotation it did not ask for. Someone who holds the
+member's Nostr key and has the host's help can freeze the wallet and then move it. The host already
+custodies the funds, so this gives it nothing over the money it lacked before; it does mean a member whose
+Nostr key is taken should pay out of every wallet on a Hub that serves rotation.
 
 **One wallet per (Hub, identity)**'s two-layer enforcement (§Membership) exists because a pre-check
 alone is a race, not a guarantee — the unique-constraint insert is what makes it authoritative.
