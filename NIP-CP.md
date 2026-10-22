@@ -68,13 +68,14 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
 - `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status`, or a `9522` whose zap signature verifies (NIP-CZ rule 7), never from any other `9522`, whose `expires_at` the sender chose. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
-A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device` (§Writing), and the call's `amount` and `chain`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
+A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device` (§Writing), the call's `chain`, as `amount` the amount the call sends (`amount_millis` for a split, the source's amount for a full transfer, the sum of the sources for `cash_consolidate`, the sum of the recipients for `mint_cash`), and a `secret` for each cash-mode bill the call makes. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 - `request_id`: the call's NIP-CASH `request_id`.
 - `deadline`: the call's deadline as sent (the envelope's `not_after`, or `mint_cash`'s NIP-47 `expiration`).
 - `target`: the `w` of the bill the call named (the first source for `cash_consolidate`), or for `mint_cash` the Cash Hub connection's wallet pubkey (its TLV `0`).
 - `device`: a random id for the device that wrote the entry, generated on that device and not copied by backup or restore, in lowercase hex. A wallet that finds it is running from copied or restored state SHOULD generate a new `device` id; it then treats the old id's open entries as another device's.
+- `secret`: the `cash_secret` the wallet generated for a cash-mode bill the call makes, stored before the call is sent: `["secret", "<cash-secret>"]` for the bill made for `new_identity` or for `mint_cash`'s `cash` recipient, and `["secret", "<cash-secret>", "remainder"]` for the remainder of a split of a cash-mode source, which the wallet always binds to a fresh commitment of its own (NIP-CASH §Transferring and Splitting a Slice).
 
-**Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token).
+**Optional tags**: `mint` (Minter), `source` (its `9522`), `secret` (`cash_secret` of a `cash`-mode token, or on a pending entry those generated for the call, as above).
 
 **Published**: only inside a seal and gift wrap. A `9525` MUST NOT be signed or published outside a seal. Relays SHOULD reject a signed `9525`.
 
