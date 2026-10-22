@@ -149,7 +149,7 @@ Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent act
 ```
 
 - `chain`: one per accepted chain; none means any chain.
-- `mint`: `["mint", "<minter-node-pubkey>", "<chain>"]`, a minter the recipient trusts on that chain. Senders SHOULD send cash from a listed minter. Cash from an unlisted minter is accepted as untrusted: the recipient's wallet does not contact that minter until the recipient approves it (§Receiving). A `mint` for an unaccepted chain is ignored.
+- `mint`: `["mint", "<minter-node-pubkey>", "<chain>"]`, a minter the recipient trusts on that chain. Senders SHOULD send cash from a listed minter. Cash from an unlisted minter is accepted as untrusted: the recipient's wallet does not contact that minter until the recipient approves it (§Receiving). A `mint` for an unaccepted chain, or without a chain, is ignored.
 - `relay`: where the recipient's wallet reads Cash Zaps, for all chains.
 
 The example accepts two chains, with two trusted minters on Bitcoin and one on the other. A recipient with no `10522`, including every ConnectionKey, accepts any chain and trusts no minter.
