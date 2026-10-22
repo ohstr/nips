@@ -725,8 +725,8 @@ This gives three outcomes where there were two:
   deterministically from it (§The Pairing Connection).
 - A request naming a pubkey the Hub never served, or one past its retention window, MUST still be met with
   silence.
-- Only `cash_status` answers this way. `cash_redeem`, `cash_transfer` and `cash_consolidate` naming a
-  destroyed bill MUST remain silent: a status read is a question about existence, where those are attempts
+- Only `cash_status` answers this way, apart from `cash_lookup`'s own answer (§Looking Up a Call).
+  `cash_redeem`, `cash_transfer` and `cash_consolidate` naming a destroyed bill MUST remain silent: a status read is a question about existence, where those are attempts
   to move value, and answering them would widen what a past holder of a spent secret can confirm.
 
 **A client MUST NOT report a bill as spent or expired on the strength of a timeout alone**, whether or not
@@ -1343,31 +1343,40 @@ call's target — the bill a `cash_transfer` or `cash_consolidate` item named, t
 `mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even if it has since
 destroyed that bill. Its bill proof is signed with that target's connection secret, as for any item (§Bill
 Proofs). For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV `0`, §The
-Cash Hub Connection), and the item and bill proofs are both signed with that connection's client key.
+Cash Hub Connection), and the item and bill proofs are both signed with that connection's client key. A
+client learns that Hub's identity, whose announcement carries the inbox (§The Hub Announcement), from the
+`pubkey` that `get_info` returns on the Cash Hub connection — the node identity that signs the Hub's bills
+and its announcement, compared in its x-only form — and fetches the announcement from that connection's
+relays. A Hub MUST return that identity there.
 
 ```jsonc
 {"request_id": "<hex>", "deadline": 1720000060}
 ```
 
 - `request_id` — the original call's. REQUIRED unless the lookup carries NIP-CW's `connection_pubkey`
-  (§Lost Join Reply in NIP-CW); exactly one of the two MUST be present, and a lookup with both or neither
-  MUST be omitted.
+  (§Lost Join Reply in NIP-CW); exactly one of the two MUST be present, and a Hub MUST refuse a lookup with
+  both or neither with `BAD_REQUEST`.
 - `deadline` — REQUIRED. The original call's deadline as the client sent it (§Deadlines): `mint_cash`'s
   NIP-47 `expiration`, the envelope's `not_after` for a private item, or, for a NIP-CW join, its kind-23199
   proof's `created_at` plus the freshness window.
 
-When the Hub holds a record, the item proof MUST be signed by the recorded authorizer. When the authorizer is
-a cash commitment, the item omits `proof` and carries the matching `cash_secret` in `params`, as a bearer item
-does (§Bearer Items). Anything else — another signer, another target, a secret that does not match — MUST be
-omitted.
+A lookup item whose bill proof does not verify is omitted, as any item is (§Responses). Once it verifies,
+the item is always answered, with a status or an error, never omitted (§Bill Proofs).
+
+When the Hub holds a record for the item's `request_id`, the item proof MUST be signed by the recorded
+authorizer. When the authorizer is a cash commitment, the item omits `proof` and carries the matching
+`cash_secret` in `params`, as a bearer item does (§Bearer Items). Anything else — another signer, another
+target, a secret that does not match — MUST be refused with `UNAUTHORIZED`.
 
 When the Hub holds no record, there is nothing to check the signer against. The item proof (or the bearer
-`cash_secret`) and the bill proof are still REQUIRED and MUST verify, with their usual bindings, and a bill
-proof that does not verify is still omitted. A verifying item is then answered `pending`, `unknown` or
-`expired`, never omitted: the rightful caller of a call that has not arrived yet gets an answer.
+`cash_secret`) is still REQUIRED and MUST verify, with its usual bindings; with no record, a bearer
+`cash_secret` verifies if it matches the commitment the Hub holds for the target's slice, and if the Hub
+holds none it is answered by `deadline` alone. A verifying item is then answered `pending`, `unknown` or
+`expired`: the rightful caller of a call that has not arrived yet gets an answer.
 
-For a join lookup, a record is matched on (signer, `connection_pubkey`) (§Lost Join Reply in NIP-CW); with
-no match the answer is by `deadline` as below, with 6 minutes in place of `H`, not an omission.
+For a join lookup, a record is matched on (signer, `connection_pubkey`) (§Lost Join Reply in NIP-CW): a
+record under another signer is no match, and with no match the answer is by `deadline` as below, with 6
+minutes in place of `H`.
 
 The answer is one of:
 
@@ -1387,9 +1396,10 @@ The Hub decides the status on its own clock, and `deadline` has passed when now 
   `new_wallet_token` or `remainder_wallet_token`), never as a token; its `*_wallet_pubkey` stays, and
   `pairing_uri` is omitted. Past that bill's `retained_until`, while the record is still held, the object
   carries `status` and `reason` only.
-- **`pending`** — the call may still commit. Either the Hub holds it and has not finished it, or it has no
-  record and `deadline` has not passed. `retry_after` is the deadline plus 1, in absolute unix seconds: the
-  recorded deadline, or the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a
+- **`pending`** — the call may still commit: the Hub has no record, and `deadline` has not passed. A
+  committed call is never `pending`, because its record is written in the commit itself (§Spinning a Slice
+  Off Into a Dedicated Wallet, Atomicity). `retry_after` is the deadline plus 1, in absolute unix seconds:
+  the lookup's `deadline`, which the Hub treats as at most `H` from now — or, for a
   join lookup by `connection_pubkey`, at most 6 minutes from now (the 5-minute kind-23199 freshness window
   plus its 1-minute future allowance; §Lost Join Reply in NIP-CW).
 - **`unknown`** — the call was not applied and never will be: the Hub has no record, `deadline` has passed,
@@ -1401,8 +1411,9 @@ The Hub decides the status on its own clock, and `deadline` has passed when now 
   call left may have been dropped. This lookup status is not the slice state `expired` (§Lifecycle and
   Deletion).
 
-A lookup MUST NOT write state, so `cash_lookup` moves nothing and is always safe to retry. A client that
-misstates `deadline` only misleads itself.
+A Hub serving a lookup MUST NOT change any record, slice, balance or `request_id` state, so `cash_lookup`
+moves nothing and is always safe to retry; logs and rate-limit counters are not state for this rule. A
+client that misstates `deadline` only misleads itself.
 
 **Finality.** `done`, `unknown` and `expired` are final for that `request_id`. A client MUST NOT resend the
 original after any of them. Only the client that placed the call MAY place it again (NIP-CP binds this to
@@ -1412,12 +1423,19 @@ never a fresh one: the lowercase hex of `sha256("retry:" ‖ <replaced request_i
 the same `request_id`; the Hub refuses the second only once it has committed the first, so a client also
 relies on the rule below and on its own record of the ids it has placed (NIP-CP §Writing). A client MUST NOT
 place a call again if it has already placed that call's derived id, or holds a written-ahead record of it
-(NIP-CP §Writing); it only closes the older call. After `expired` a client MUST NOT place the call again
-automatically, and surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as
-`unknown`.
+(NIP-CP §Writing); it only closes the older call. A client MUST NOT place a `mint_cash` call again without
+its user's explicit confirmation: unlike a transfer, whose source the first call already claimed, a
+re-placed mint whose original did commit mints again. A `cash_transfer` or `cash_consolidate` is re-placed
+automatically by the device that placed it. A client SHOULD bound how many times it re-places one call,
+and surface the call to its user once that bound is reached. After `expired` a client MUST NOT place the
+call again automatically, and surfaces it to its user instead. A client MUST NOT read an omitted
+`cash_lookup` as `unknown`.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
-authorized the call, and a token is not a spending credential (§The Cash Token).
+authorized the call, and a token is not a spending credential (§The Cash Token). A cash-authorized call
+is the one case where that party is whoever holds the secret, so a split of a cash-mode source binds its
+remainder to a fresh commitment (§Cash-Mode Slices), and a client SHOULD keep every `request_id` as
+private as the call it names.
 
 ### Support
 
@@ -2778,9 +2796,11 @@ operator can still account for value that passed through the Hub. If it does:
 
 - The archive MUST NOT be reachable from the NWC surface in any way. A request naming an archived
   wallet's pubkey MUST be met with silence, identical to one naming a pubkey the Hub never served — with
-  exactly one exception, the `cash_status` tombstone described in §Answering About a Destroyed Bill, which
+  exactly two exceptions: the `cash_status` tombstone described in §Answering About a Destroyed Bill, which
   is answered only to a caller proving it holds that bill's own connection and only inside the Hub's
-  retention window. Nothing else about an archived bill is readable over NWC, at any time, by anyone.
+  retention window; and `cash_lookup` (§Looking Up a Call), which answers only an item whose bill proof
+  verifies against the archived bill, and only with that call's own lookup answer. Nothing else about an
+  archived bill is readable over NWC, at any time, by anyone.
 - A Hub MUST NOT mint a fresh connection token for a deleted wallet. A pairing key that remains
   deterministically derivable from the wallet's identifier is not licence to issue one, and a token
   produced after the fact would not even match what the holder has: the string embeds the relay hints in
