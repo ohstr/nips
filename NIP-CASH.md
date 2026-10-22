@@ -311,12 +311,12 @@ decode to an identical wallet pubkey, secret, and relay set. Either string alone
 connection credential; a recipient only ever needs one of them, not both.
 
 **A Hub MUST NOT return an empty `cash_token`.** Token encoding can fail where URI construction cannot —
-the mint signature is best-effort and the TLV stream has length limits a long relay URL can exceed — and the
+the mint signature may be unobtainable, and the TLV stream has length limits a long relay URL can exceed — and the
 tempting response is to emit `""` and rely on `pairing_uri` still being valid. That is not safe: a client
 that prefers the token, or that treats the field's presence as meaning it is usable, receives something that
 looks like a credential and is not, with nothing indicating which of the two failed. A Hub that cannot
-produce the token MUST fail the mint, and SHOULD build the token before committing any funds so that the
-failure costs the caller nothing.
+produce the token MUST fail the mint with `INTERNAL`, and MUST build the token, mint signature included,
+before committing any funds, so that the failure costs the caller nothing (§Mint Provenance).
 
 For the single-`cash`-recipient request shape above, the response's `recipients` entry echoes the caller's
 commitment. It never carries a secret: the caller generated it and already holds it (§Creating a Cash-Mode
@@ -807,20 +807,17 @@ sequenceDiagram
     Wallet->>Wallet: verify proof against current registered identity
     Wallet->>Wallet: validate new identity
     alt zap transfer (zap_target set)
-        Wallet->>Wallet: claim the source slice terminal, atomically
-        Wallet->>Wallet: create + fund the zap bill for new_identity (+ remainder wallet if partial)
+        Wallet->>Wallet: in one atomic commit: claim the source slice terminal,<br/>create + fund the zap bill for new_identity (+ remainder wallet if partial)
         Wallet-->>Caller: {new_wallet_token, issued_at, expires_at, remainder if partial}
     else full transfer to pubkey/connection_key, or cash mode on a lifetime-solo wallet
         Wallet->>Wallet: reassign identity in place, atomically
         Wallet-->>Caller: {amount (unchanged), new registered identity}
     else full transfer to cash mode on a multi-recipient-history wallet
-        Wallet->>Wallet: claim the source slice, atomically
-        Wallet->>Wallet: create + fund one new dedicated wallet for new_identity
+        Wallet->>Wallet: in one atomic commit: claim the source slice,<br/>create + fund one new dedicated wallet for new_identity
         Wallet-->>Caller: {amount, new_wallet_pubkey, new_wallet_token}
     else partial split
         Wallet->>Wallet: verify split amount and remainder both clear min_transfer_millis (no dust)
-        Wallet->>Wallet: claim the source slice terminal, atomically
-        Wallet->>Wallet: create + fund two new dedicated wallets (carved + remainder)
+        Wallet->>Wallet: in one atomic commit: claim the source slice terminal,<br/>create + fund two new dedicated wallets (carved + remainder)
         Wallet-->>Caller: {new_wallet_token, remainder_wallet_token, remaining_amount_millis}
     end
 ```
@@ -879,8 +876,8 @@ sequenceDiagram
   - for `connection_key` mode only, a `connection_key` tag and an `e` tag referencing the accompanying
     `attestation_event`, same as elsewhere.
   The wallet consumes every successfully-verified proof exactly once (tracked by event ID, independent of
-  `new_identity`/`amount_millis`) — a proof that failed verification, or whose subsequent operation failed
-  and rolled back, is never consumed, so a legitimate caller can always retry with the identical proof.
+  `new_identity`/`amount_millis`) — a proof that failed verification, or whose operation failed before its
+  commit, is never consumed, so a legitimate caller can always retry with the identical proof.
 - `cash_secret` — REQUIRED in place of `proof`, if and only if the slice's current identity is
   `cash`. A cash-mode slice has no identity capable of signing a proof; presenting its secret is the
   entire proof, exactly as it is for `cash_redeem` (§Redeeming a Slice → §Cash-Mode Slices).
@@ -966,9 +963,11 @@ On receiving `cash_transfer` for a given slice, the wallet MUST, in order:
    slice is claimed **terminal** (exactly like a redemption — its committed amount is never rewritten to a
    smaller value), and its value re-emerges as new dedicated wallets: one wallet of `amount_millis` for a
    full transfer to `cash` or a full zap transfer; two wallets (carved `amount_millis` + remainder) for a
-   partial split. For a zap transfer, the Hub sets `issued_at` from its clock and signs the bill for
-   `new_identity` under the zap scheme (§Mint Provenance), with the source slice's registered identity as
-   `<sender>`; it signs a remainder wallet under the ordinary scheme.
+   partial split. The claim and every new wallet are one atomic commit (§Spinning a Slice Off Into a
+   Dedicated Wallet, Atomicity). For a zap transfer, the Hub sets `issued_at` from its clock and signs the
+   bill for `new_identity` under the zap scheme (§Mint Provenance), with the source slice's registered
+   identity as `<sender>`; it signs a remainder wallet under the ordinary scheme. Every signature is made
+   before the commit.
 7. Return the slice's resulting amount together with its new registered identity (in-place), or the new
    wallet connection(s) — one for a full-transfer spin-off, two for a partial split — see the Response
    format above and §Spinning a Slice Off Into a Dedicated Wallet.
@@ -1002,9 +1001,8 @@ sequenceDiagram
 
     Caller->>Old: cash_transfer {proof, new_identity, amount_millis?}
     Old->>Old: verify proof, determine split applies
-    Old->>Old: atomically claim the source slice TERMINAL
-    Old->>New: create + fund via internal transfer(s):<br/>one wallet (full-to-cash), or two (partial split)
-    New-->>Old: satscash1... token(s) for the new wallet(s)
+    Old->>Old: build the satscash1... token(s) for the new wallet(s), mint signature included
+    Old->>New: in ONE atomic commit: claim the source slice TERMINAL,<br/>create + fund one wallet (full-to-cash), or two (partial split)
     Old->>Old: NIP-44 encrypt each token to the caller's own pubkey,<br/>keyed to that new wallet's own keypair
     Old-->>Caller: {carved + (for a split) remainder wallet_pubkey (clear), wallet_token (encrypted)}
 ```
@@ -1038,30 +1036,18 @@ Hub→Wallet funding transfer (§Processing Algorithm), just with the old Cash W
 funding source instead of the Hub. A partial split performs two such transfers (carved + remainder), which
 together drain the source slice's whole amount.
 
-### Atomicity — a Compensating Saga, Not Unconditional Two-Phase Commit
+### Atomicity — One Commit
 
-The source slice MUST be claimed
-terminal as a single atomic step **before** any new wallet is created or funded — this is the operation's
-commit point. From this instant the old identity can no longer redeem or transfer this slice; its whole
-amount is now committed to the new wallet(s). If a LATER step fails after an EARLIER wallet already funded
-(e.g., the carved piece succeeded but the remainder failed), the implementation MUST attempt to reverse the
-earlier transfer(s) and, once reversal is confirmed, restore the claim so the caller can safely retry — for
-a partial split this makes the common case all-or-nothing across BOTH new wallets: the caller normally
-never ends up with the carved piece but not the remainder, or vice versa.
+The source claim, the creation and funding of every new wallet, and the call's `request_id` record
+(§Lost Replies) MUST be one atomic commit. The Hub MUST produce every new wallet's token, mint signature
+included (§Mint Provenance), before that commit. A failure at any point before it leaves no state at all —
+no claim, no wallet, no transfer, no record, no consumed proof — so nothing is stranded and nothing needs
+an operator. From the commit on, the old identity can no longer redeem or transfer this slice, and every
+new wallet holds its value: a partial split never yields the carved piece without the remainder, or the
+reverse, and a lookup never sees a partly applied call (§Looking Up a Call).
 
-The one case this does NOT cover: if the reversal itself fails (a second, independent transfer failure
-during rollback — rare, and not caller-controllable), the implementation MUST NOT restore the claim,
-because doing so would let the caller believe they hold the slice's full original amount when the wallet
-backing it is actually short by whatever didn't come back. Instead, the already-funded wallet from the
-earlier, un-reversed step MUST be left intact and undeleted (never silently discarded — it is the only
-record of where those funds are) and the source claim MUST stay claimed, terminal, with no usable
-replacement, pending operator reconciliation. This is a narrow, explicitly-acknowledged exception to the
-"MUST roll back" rule above, not a silent gap: an implementation SHOULD record which wallet holds the
-stranded funds durably enough for an operator to find and resolve it without reading logs.
-
-Once every new wallet has been successfully created and funded (the ordinary case), the claim MUST NOT be
-rolled back — an implementation MAY record which new wallet(s) the value moved to, for its own bookkeeping
-(§Data Model), but this is informational only.
+Once committed, the claim MUST NOT be rolled back. An implementation MAY record which new wallet(s) the
+value moved to, for its own bookkeeping (§Data Model), but this is informational only.
 
 ### Delivery — Nested Encryption, Not a New Channel
 
@@ -1160,9 +1146,8 @@ sequenceDiagram
     Node->>Node: validate new_identity, including live IA trust if connection_key
     Node->>Node: sum amounts (overflow-checked), check sum does not exceed hub's per-wallet ceiling
     Node->>Node: resolve merged terms - earliest expiry, reject if min_transfer/redeem_fee disagree
-    Node->>Node: atomically claim EVERY source slice terminal
-    Node->>New: create one wallet for new_identity, fund via internal transfers summing sources
-    New-->>Node: satscash1... token for the consolidated wallet
+    Node->>Node: build the satscash1... token for the consolidated wallet, mint signature included
+    Node->>New: in ONE atomic commit: claim EVERY source slice terminal,<br/>create one wallet for new_identity, fund via internal transfers summing sources
     Node-->>Caller: {new_wallet_pubkey (clear), new_wallet_token (encrypted iff pubkey target), amount_millis}
 ```
 
@@ -1256,11 +1241,11 @@ On receiving `cash_consolidate`, the node MUST, in order:
    only shorten, never extend, an entitlement, §Security Considerations); `min_transfer_millis` and
    `redeem_fee_ppm` MUST be identical across all sources — refuse with `RESTRICTED` on any disagreement
    (this revision).
-7. Atomically: claim **every** source slice terminal, create one new `cash_wallet` for `new_identity` as a
-   child of the shared Hub, and fund it via internal transfers summing the sources — the same
-   compensating-saga mechanism as §Spinning a Slice Off's own Atomicity discussion, generalized from up to
-   two new wallets to exactly one new wallet funded from as many sources as were named (§Security
-   Considerations).
+7. In one atomic commit: claim **every** source slice terminal, create one new `cash_wallet` for
+   `new_identity` as a child of the shared Hub, and fund it via internal transfers summing the sources —
+   the same single commit as §Spinning a Slice Off's own Atomicity discussion, with the token built before
+   it, generalized from up to two new wallets to exactly one new wallet funded from as many sources as were
+   named. A failure before the commit leaves every source unclaimed.
 8. Deliver the consolidated wallet's connection: nested-encrypted to the caller's proof pubkey (the first
    source's signer) for a `pubkey` `new_identity` (§Spinning a Slice Off), in the clear for
    `connection_key`/`cash` (see Response above).
@@ -2983,13 +2968,11 @@ connection either, since nothing stops that same connection from also being shar
 many-source operation that accepts a cash-mode source from a *different* wallet than the calling connection's
 own inherits the identical leak and MUST reject it for the same reason.
 
-**A compensating-saga rollback whose own reversal fails MUST NOT restore the source claim.** The correct
-response is the opposite of the instinctive one: restoring the claim anyway would let the caller believe
-their source balance is whole when it's actually short by whatever didn't come back — an over-entitlement,
-not a safe retry state. This is a narrow, deliberate exception to the "MUST roll back" atomicity rules
-`cash_transfer` splits and `cash_consolidate` both follow, not a gap in them — see §Spinning a Slice Off
-Into a Dedicated Wallet's own Atomicity discussion for the full mechanism (§Consolidating Tokens' step 7
-follows the same rule).
+**A spin-off or consolidate MUST commit whole or not at all.** The source claims, every new wallet's
+creation and funding, and the `request_id` record are one atomic commit, with every token built before it
+(§Spinning a Slice Off Into a Dedicated Wallet, Atomicity). A sequence of separate transfers that is undone
+on failure is not a substitute: an undo can itself fail, and leave value funded in a wallet no reply
+delivered.
 
 **A destroyed bill's tombstone MUST be gated on the requester holding that bill's connection, not merely on
 the request decrypting.** Under NIP-47 anyone may encrypt a request to a wallet pubkey using a freshly
