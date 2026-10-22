@@ -27,7 +27,7 @@ AltZap solves all three by adding a mandatory `chain` tag (replay-safety across 
 
 - **LNURL server**: The recipient's LNURL-pay server (NIP-57's "lnurl server"; LUD-06's "LN SERVICE"). It receives `9520`/`9523` requests at its callback, issues the invoices and publishes the resulting `9521` receipts.
 - **Web Identity**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** a Web Identity.
-- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. `<platform-user-id>` MUST be in its canonical form ([NIP-IC](./NIP-IC.md) §Canonical Platform User IDs), and a ConnectionKey MUST NOT be built for a platform with no canonical form there. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
+- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. A client builds it from `<platform-user-id>` in its canonical form ([NIP-IC](./NIP-IC.md) §Canonical Platform User IDs); for a platform without a canonical form there, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
 - **Proxy Agent**: A bot or service that signs a `9523` event on behalf of a platform user it does not hold private keys for.
 - **Chain**: The Lightning-routable settlement network, e.g. `flokicoin` or `bitcoin`.
 
@@ -82,7 +82,7 @@ All `p` (recipient) and `P` (sender) tags use:
 ["p/P", "<hex-pubkey-or-ConnectionKey>", "<platform>"]
 ```
 
-- `[1]` is a 64-character hex Nostr pubkey **or** a ConnectionKey.
+- `[1]` is a 64-character lowercase hex Nostr pubkey **or** a ConnectionKey. A receiver MUST reject any other value, uppercase hex included, and never lowercases it.
 - `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey.
 
 `9521` receipts additionally allow a 4th element, `["p/P", "<hex-or-ConnectionKey>", "<platform>", "<handle>"]` — a stable, human-readable provider handle (e.g. a Discord username). It is informational only and MUST NOT be used for identity resolution.
@@ -198,7 +198,7 @@ Signature verification MUST happen before any tag content is trusted; the remain
 | # | Rule | LNURL server | Relay |
 |---|------|--------------|-------|
 | 1 | `id`/`sig` verify against `pubkey` per NIP-01. | MUST | MUST |
-| 2 | Exactly one `p` tag. | MUST | MUST |
+| 2 | Exactly one `p` tag, whose `[1]` is 64-character lowercase hex. | MUST | MUST |
 | 3 | `9520` has no `P` tag; `9523` has exactly one. | MUST | MUST |
 | 4 | `chain` is present, non-empty, and one of the chains the endpoint advertises. | MUST | SHOULD (presence only) |
 | 5 | `amount` is a positive integer and equals the callback's `amount` parameter. | MUST | SHOULD (positive integer only) |

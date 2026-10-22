@@ -35,7 +35,7 @@ The client connects to the socket and writes requests; the signer writes one res
 - Each message is one UTF-8 JSON object followed by `\n`.
 - A request is NIP-46's request object: `{"id": "<string>", "method": "<string>", "params": ["<string>", ...]}`.
 - A response is NIP-46's response object: `{"id": "<request id>", "result": "<string>"}` or `{"id": "<request id>", "error": "<string>"}`.
-- A message, newline excluded, MUST NOT exceed 1 MiB. A signer MAY close a connection that sends a longer one.
+- A client or signer MUST NOT send a message that exceeds 1 MiB, newline excluded. A signer that receives a longer line MUST either close the connection or answer it with an empty `id` and an `invalid: ` error.
 - Blank lines are ignored. A line that is not a JSON object gets a response with an empty `id` and an `invalid: ` error.
 - A connection carries any number of requests. Clients that pipeline requests MUST match responses by `id`; a signer MAY answer requests on one connection strictly in order.
 
