@@ -13,17 +13,11 @@ Cash Zaps
 
 A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoice. The sender transfers a bill they hold to the recipient's identity, a Nostr pubkey or a web account, and publishes the token in a kind `9522` event tagging the zapped note. The recipient redeems it to any Lightning invoice. A recipient lists the chains, minters and relays they accept in a kind `10522` event.
 
-## Motivation
-
-1. **Zapping without Lightning**: a user holding cash zaps a note without paying an invoice.
-2. **Per-note tracking**: one public event per zap, counted beside `9521` receipts.
-3. **Recipients without a Nostr key**: a token bound to a ConnectionKey waits, until it expires, for its recipient to sign in and claim it.
-
 ## Terminology
 
 - **Cash Zap**: a kind `9522` event carrying a cash token issued to its `p`.
 - **cash token**: a NIP-CASH token, `satscash1...` for Bitcoin (NIP-CASH §The Cash Token).
-- **Minter**: the Lightning node that signed the token (NIP-CASH §Mint Provenance), as a 33-byte compressed pubkey in hex. It is the minting Hub's owner.
+- **Minter**: the Lightning node that signed the token (NIP-CASH §Mint Provenance), as a 33-byte compressed pubkey written as 66 lowercase hex characters. It is the minting Hub's owner. A verifier compares a Minter with any other key, whether another Minter such as a `10522` `mint` tag or a Hub's x-only key (the author of its announcement, or its `get_info` `identity`), by its x-only part only: the last 32 bytes, as 64 lowercase hex, never the prefix byte (NIP-CASH §Mint Provenance).
 - **Zap signature**: the signature over a `satscash-zap:v1` payload (TLV `8` = `2`) that a Hub puts on the bill it issues for a `cash_transfer` with `zap_target` (NIP-CASH §Mint Provenance, §Transferring and Splitting a Slice).
 - **ConnectionKey**: lowercase `hex(SHA256("<platform>:<platform-user-id>"))`, standing in for someone with no Nostr keypair yet: built from the platform user ID in its canonical form for a platform [NIP-IC](./NIP-IC.md) lists (§Canonical Platform User IDs), and for any other platform taken from the recipient's `35522` attestation or `nconnection` (§Sending). A client MUST NOT hash a Nostr identity into one.
 - **Proxy Agent**: a bot or service that signs a Cash Zap for a platform user whose keys it does not hold.
@@ -40,11 +34,11 @@ A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoi
 
 ### Chains
 
-| Token prefix (HRP) | Chain | Signing prefix |
+| Token prefix (HRP) | Chain | Signed-message prefix |
 |---|---|---|
 | `satscash` | `bitcoin` | `Lightning Signed Message:` |
 
-This table lists only `satscash`. For any other energy-backed coin, that coin's implementation defines its token prefix, chain name, signing prefix and milli-unit (NIP-CASH §Mint Provenance). A token whose prefix has no row the verifier knows carries no valid signature (rule 6).
+For any other energy-backed coin, that coin's implementation defines its token prefix, chain name, signed-message prefix and milli-unit (NIP-CASH §Mint Provenance). A token whose prefix has no row the verifier knows carries no valid signature (rule 6).
 
 ### Identity Tags
 
@@ -63,9 +57,9 @@ This table lists only `satscash`. For any other energy-backed coin, that coin's 
    - pubkey `p`: `{"identity_type": "pubkey", "identity_value": "<p>"}`
    - ConnectionKey `p`: `{"identity_type": "connection_key", "identity_value": "<p>", "ia_pubkey": "<ia>"}`, with `<ia>` an Identity Authority the minting Hub trusts, also put in the `ia` tag.
 
-   For a pubkey `p` and a zap on an event, the sender SHOULD set `zap_target` (required for the zap to be counted) to the target's `a` coordinate, or else its `e` id, from a bill bound to the pubkey that will sign the `9522`. A Hub refuses `zap_target` on a bill not bound to a pubkey (NIP-CASH §Transferring and Splitting a Slice), so a sender holding a bill bound to a ConnectionKey first moves it to the pubkey that will sign the `9522`, with a full `cash_transfer`, and zaps from that bill. If the `9522` carries an `a` tag, `zap_target` MUST equal that tag's value byte for byte; otherwise it MUST equal the `e` tag's value. A sender whose bill was signed over an `e` id MUST NOT add an `a` tag. The Hub then issues a new bill with a zap signature, even for a full transfer; its `issued_at` and `expires_at` go in the `9522`. A transfer reply without `issued_at` comes from a Hub that ignored `zap_target`; the bill carries no zap signature and the zap will not be counted. `zap_target` requires a pubkey `p`: a ConnectionKey zap carries none. A zap on no event (e.g. on a profile) carries neither `e` nor `a` and no `zap_target`; it is valid, but never counted (§Counting). For a ConnectionKey `p`, the sender MAY derive the key from a user ID it is given only for a platform with a canonical form in NIP-IC (§Canonical Platform User IDs). For any other platform the sender MUST take the key from the recipient's `35522` attestation or `nconnection`, byte for byte, MUST NOT derive it from typed input, and MUST name in `ia` the IA that attested it, since only that IA's user-id format yields that key.
+   For a pubkey `p` and a zap on an event, the sender SHOULD set `zap_target` (required for the zap to be counted) to the target's `a` coordinate, or else its `e` id, from a bill bound to the pubkey that will sign the `9522`. A Hub refuses `zap_target` on a bill not bound to a pubkey (NIP-CASH §Transferring and Splitting a Slice), so a sender holding a bill bound to a ConnectionKey first moves it to the pubkey that will sign the `9522`, with a full `cash_transfer`, and zaps from that bill. If the `9522` carries an `a` tag, `zap_target` MUST equal that tag's value byte for byte; otherwise it MUST equal the `e` tag's value. A sender whose bill was signed over an `e` id MUST NOT add an `a` tag. The Hub then issues a new bill with a zap signature, even for a full transfer; its `issued_at` and `expires_at` go in the `9522`. A transfer reply without `issued_at` comes from a Hub that ignored `zap_target`; the bill carries no zap signature and the zap will not be counted. `zap_target` requires a pubkey `p`: a ConnectionKey zap carries none. A zap on no event (e.g. on a profile) carries neither `e` nor `a` and no `zap_target`; it is valid, but never counted (§Counting). For a ConnectionKey `p`, the sender MAY derive the key from a user ID it is given only for a platform with a canonical form in NIP-IC (§Canonical Platform User IDs). For any other platform the sender MUST take the key from the recipient's `35522` attestation or `nconnection`, byte for byte, MUST NOT derive it from typed input, and MUST name in `ia` the IA that attested it.
 
-   A Hub owner zaps the same way: they mint a bill to themselves (NIP-CASH §Minting Cash), then transfer it. The sender MUST NOT set `new_identity` to `cash`: its secret is not in the token, so only the sender could redeem it. The sender SHOULD send a `request_id`, so a retry is never applied twice and a lost reply can be recovered with `cash_lookup`, which every Hub serves (NIP-CASH §Lost Replies). A bill keeps its expiry when transferred, so the sender SHOULD pick one with a long remaining life, above all for a ConnectionKey `p`.
+   As NIP-CASH requires (§Claim Proofs), the call carries a kind-23198 claim proof (`identity_event`) signed by the pubkey the bill is bound to, with `["m", "cash_transfer"]`, and its kind-23192 item proof is signed by that same key. A Hub owner zaps the same way: they mint a bill to themselves (NIP-CASH §Minting Cash), then transfer it. The sender MUST NOT set `new_identity` to `cash`: its secret is not in the token, so only the sender could redeem it. The sender MUST send a `request_id`, as NIP-CASH requires on every call that creates a bill, and recovers a lost reply with `cash_lookup` (NIP-CASH §Lost Replies). A bill keeps its expiry when transferred, so the sender SHOULD pick one with a long remaining life, above all for a ConnectionKey `p`.
 3. Publish to the recipient's `10522` relays (else their [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) read relays) and to the sender's write relays. For a ConnectionKey `p`, also publish to its NIP-IC identity connection's relays if known; the sender MAY also notify the recipient on their platform, in fixed client text with no sender-supplied link (e.g. "open any Nostr wallet").
 
 ### Kind 9522 — Cash Zap
@@ -102,7 +96,7 @@ This table lists only `satscash`. For any other energy-backed coin, that coin's 
 
 **Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires). On a token without TLV `8` = `2`, or whose zap signature does not verify (rule 7), both are informational: the sender chose them, so a wallet takes `expires_at` from `cash_status` instead.
 
-A `9522` MUST NOT carry a NIP-40 `expiration` tag: relays could drop it before the recipient sees it.
+A `9522` MUST NOT carry a NIP-40 `expiration` tag.
 
 Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent acting for `P`, and `P` MUST be a ConnectionKey: a Nostr user signs their own zaps. The bill is transferred from the Proxy Agent's own key; `P` is display only, e.g. "via @bot for discord:carol". Nothing proves `P`, so a client SHOULD credit `P` only if it trusts the signer, and otherwise show the zap as sent via the signer.
 
@@ -149,10 +143,10 @@ Without `P`, the signer is the sender. With `P`, the signer is a Proxy Agent act
 ```
 
 - `chain`: one per accepted chain; none means any chain.
-- `mint`: `["mint", "<minter-node-pubkey>", "<chain>"]`, a minter the recipient trusts on that chain. Senders SHOULD send cash from a listed minter. Cash from an unlisted minter is accepted as untrusted: the recipient's wallet does not contact that minter until the recipient approves it (§Receiving). A `mint` for an unaccepted chain, or without a chain, is ignored.
+- `mint`: `["mint", "<minter-node-pubkey>", "<chain>"]`, a minter the recipient trusts on that chain, written as in §Terminology (Minter): 66 lowercase hex characters. Senders SHOULD send cash from a listed minter. Cash from an unlisted minter is accepted as untrusted: the recipient's wallet does not contact that minter until the recipient approves it (§Receiving). A `mint` for an unaccepted chain, or without a chain, is ignored.
 - `relay`: where the recipient's wallet reads Cash Zaps, for all chains.
 
-The example accepts two chains, with two trusted minters on Bitcoin and one on the other. A recipient with no `10522`, including every ConnectionKey, accepts any chain and trusts no minter.
+A recipient with no `10522`, including every ConnectionKey, accepts any chain and trusts no minter.
 
 A wallet trusts a minter's key for one network only. Neither the token nor its signature names the network, so approving an unknown minter SHOULD warn that its network cannot be verified.
 
@@ -182,15 +176,15 @@ For rules 6 and 7, a verifier rebuilds the `satscash-zap:v1` payload (NIP-CASH �
 satscash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount>:<relay_hash>:pubkey/<p>:pubkey/<pubkey>:<sha256(target)>:<issued_at>:<expires_at>
 ```
 
-`<hrp>` and `<wallet_pubkey_hex>` come from the token, `<relay_hash>` from its relay hints and connection secret, `<amount>`, `<p>`, `<issued_at>` and `<expires_at>` from the tags, and `<pubkey>` is the signer of the `9522`. `target` is the `a` coordinate if the event has an `a` tag, else the `e` id. The signed recipient is therefore `p`, and the signed sender is the `9522` signer.
+`<hrp>` and `<wallet_pubkey_hex>` come from the token, `<relay_hash>` from its relay hints and connection secret, `<amount>`, `<p>`, `<issued_at>` and `<expires_at>` from the tags, and `<pubkey>` is the signer of the `9522`. `target` is the `a` coordinate if the event has an `a` tag, else the `e` id.
 
-Rules 1–8 show that a trusted Hub issued the amount to `p`, from the signer, for this target. They do not show the bill is still there: the minting Hub's owner can revoke it, and it can expire or be claimed. Only rule 9 proves the cash is the recipient's: a wallet's funding equals the sum of its slices, so a matching amount means nobody else shares it. TLV `3` is not signed, so rule 5 only catches mistakes. Clients MUST NOT present a `9522` as value received.
+Rules 1–8 show that a trusted Hub issued the amount to `p`, from the signer, for this target, not that the bill is still there (it can be revoked, expire or be claimed). Only rule 9 proves the cash is the recipient's: a wallet's funding equals the sum of its slices, so a matching amount means nobody else shares it. TLV `3` is not signed, so rule 5 only catches mistakes. Clients MUST NOT present a `9522` as value received.
 
 ## Receiving
 
 - Incoming: `{"kinds": [9522], "#p": ["<recipient-pubkey>", "<connection-key>", ...]}` on the `10522` relays, including every ConnectionKey linked through NIP-IC. When linking a ConnectionKey, also query its identity connection's relays.
 - Sent: `{"kinds": [9522], "authors": ["<user-pubkey>"]}` and `{"kinds": [9522], "#P": ["<connection-key>", ...]}`, with every ConnectionKey linked to the user through NIP-IC, never a Nostr pubkey.
-- A wallet MUST NOT contact a Minter missing from the recipient's `mint` tags without their approval, since contacting it reveals their identity and IP to that minter.
+- A wallet MUST NOT contact a Minter missing from the recipient's `mint` tags without their approval.
 - A wallet uses only copies of a token whose signature verifies (rule 6). With TLV `8`, the signature covers the relay hints and the connection secret through the relay hash, so a copy carrying other ones fails, and a wallet MUST NOT contact its relays. A token without TLV `8` has unsigned relay hints, so a wallet SHOULD prefer the relays in the minting Hub's announcement (NIP-CASH §The Hub Announcement).
 - A token's state comes from `cash_status` only (NIP-CASH §Answering About a Destroyed Bill). A timeout MUST NOT be reported as spent.
 - A wallet SHOULD keep the tokens it holds in a [NIP-CP](./NIP-CP.md) Cash Pocket, and SHOULD keep a zap bill's `9522` with it (NIP-CP `source`) until it moves the bill: the bill's provenance, and so its minting Hub, can be recovered only with that `9522` (rules 6 and 7).
@@ -212,22 +206,16 @@ A client MAY mark a Cash Zap past `expires_at` as possibly expired. A sender's N
 
 ## Security Considerations
 
-- **Fake value**: any node can make a valid zap signature, including one the sender runs, which can issue a zap and revoke it before it is claimed. Counting only Minters the reader or the recipient trusts limits this to Hubs they trust, as NIP-57 does with `nostrPubkey`.
+- **Fake value**: any node, the sender's own included, can make a valid zap signature and revoke the bill before it is claimed; counting only Minters the reader or the recipient trusts (rule 8) limits this to trusted Hubs.
 - **Revocation**: until claimed, the minting Hub's owner can delete the bill, remove the slice, or untrust a ConnectionKey's IA (NIP-CASH §Lifecycle and Deletion, §Removing a Recipient). A sender who transferred the bill has no power over it. A zap revoked after it was issued still counts.
 - **Identity Authorities**: a ConnectionKey zap is claimable by whoever its IA attests. The IA is chosen and vouched for by the minting Hub, so trusting the Hub includes trusting its IAs. Claim screens SHOULD show the IA.
 - **Copies**: a copied token cannot be redeemed. The zap signature commits to the recipient, sender and target, so a copy re-tagged to another note, recipient or sender fails rule 7, and a copy of a token with TLV `8` carrying other relay hints or another connection secret fails rule 6.
 - **Split bills**: TLV `6` attests the whole wallet. A zap signature is made only for a new bill issued to the recipient alone, but a bill without one could give the recipient one sat and others the rest. Only rule 9 catches it.
 - **Proxy trust**: anyone can sign a `P` naming any platform account. `P` is display only, never a Nostr pubkey, and never the signed sender.
+- **Inflated totals**: a transfer costs no fee, so two colluding users can zap one bill back and forth, and every pass is a fresh zap bill that counts. A client SHOULD NOT present Cash Zap totals as an economic signal, and MAY collapse repeated zaps between the same sender and recipient.
 
 ## Privacy Considerations
 
 A Cash Zap shows its amount, chain, recipient and Minter; for a self-hosted Hub, the Minter is the sender's own node. The minting Hub learns the zapped event from `zap_target`, which the `9522` makes public anyway.
 
 Anyone holding the public token can poll `get_balance` and `cash_status` and learn when the value left, via the tombstone's `retained_until`, and how, via its `reason`: redeemed, transferred, consolidated, reclaimed or expired (NIP-CASH §Answering About a Destroyed Bill). A sender who wants this hidden SHOULD send the token privately instead.
-
-## Future Work
-
-Optional NIP-CASH upgrades, needing no change to these events:
-
-- irrevocable bills, so a counted zap could no longer be revoked;
-- an attestation parameter on `cash_status`, so a ConnectionKey recipient can check rule 9 without a transfer.
