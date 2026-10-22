@@ -12,10 +12,6 @@ Local Signer: NIP-46 over a Unix Socket
 
 A signer process holds a key and answers the NIP-46 method set for other processes on the same host, over a unix socket. Requests and responses are NIP-46's JSON objects, one per line, with no relay, no encryption and no wrapping event. The socket's file permissions decide who may connect; the signer's own policy decides what it signs.
 
-## Motivation
-
-NIP-46 moves the key out of the client, but it routes every call through a relay and encrypts it, because client and signer are assumed to be on different machines. When they share a machine or a pod — an AI agent and a sidecar holding its key, a CI job and a signing daemon — the relay is a needless dependency and a round trip of hundreds of milliseconds, and NIP-44 adds nothing the kernel doesn't already give. A process that can't read the key file can still sign, but only what the signer's policy allows.
-
 ## Addressing
 
 A signer is addressed by a URI:
@@ -34,8 +30,8 @@ The client connects to the socket and writes requests; the signer writes one res
 
 - Each message is one UTF-8 JSON object followed by `\n`.
 - A request is NIP-46's request object: `{"id": "<string>", "method": "<string>", "params": ["<string>", ...]}`.
-- A response is NIP-46's response object: `{"id": "<request id>", "result": "<string>"}` or `{"id": "<request id>", "error": "<string>"}`.
-- A client or signer MUST NOT send a message that exceeds 1 MiB, newline excluded. A signer that receives a longer line MUST either close the connection or answer it with an empty `id` and an `invalid: ` error.
+- A response is NIP-46's response object: `{"id": "<request id>", "result": "<string>"}` or `{"id": "<request id>", "error": "<string>"}`. `result` is always a JSON string, as in NIP-46, even when it holds JSON text.
+- A client or signer MUST NOT send a message that exceeds 1 MiB, newline excluded. A signer whose result would exceed it answers that request with an `error` instead. A signer that receives a longer line MUST either close the connection or answer it with an empty `id` and an `invalid: ` error; it MUST NOT buffer more than 1 MiB of the line, and when it answers, it discards the rest of the line through its `\n`.
 - Blank lines are ignored. A line that is not a JSON object gets a response with an empty `id` and an `invalid: ` error.
 - A connection carries any number of requests. Clients that pipeline requests MUST match responses by `id`; a signer MAY answer requests on one connection strictly in order.
 
@@ -50,8 +46,8 @@ The NIP-46 method set, with these differences:
 | `ping` | Returns `pong`. |
 | `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt` | As NIP-46: `params` are `[counterpart-pubkey, text]`. |
 | `connect`, `logout` | Accepted and answered `ack`. There is no session: the socket's permissions are the session. |
-| `get_relays` | Returns `{}`. |
-| `switch_relays` | Returns `null`. |
+| `get_relays` | Returns the string `{}`: the response is `{"id": "<request id>", "result": "{}"}`. |
+| `switch_relays` | Returns the string `null`: the response is `{"id": "<request id>", "result": "null"}`. |
 
 A signer MAY implement further methods, named so they don't collide with NIP-46's (e.g. `signer_status`).
 
@@ -68,7 +64,7 @@ The text after the prefix is a human-readable reason. Any other error string is 
 
 ## Attestations
 
-A policy may require a third party's signed approval before signing — for example, a maintainer's kind-1 note reading `approve <event id>`. The client passes such events as a JSON array in `sign_event`'s `params[1]`. The event they approve is identified by the `id` the signer computes for `params[0]` after setting its own pubkey, which the client can compute in advance. What makes an attestation valid is the signer's policy, not this NIP.
+A policy may require a third party's signed approval before signing (e.g. a kind-1 note reading `approve <event id>`). The client passes such events as a JSON array in `sign_event`'s `params[1]`. The event they approve is identified by the `id` the signer computes for `params[0]` after setting its own pubkey, which the client can compute in advance. What makes an attestation valid is the signer's policy, not this NIP.
 
 ## Signer requirements
 
@@ -86,4 +82,4 @@ A policy may require a third party's signed approval before signing — for exam
 
 - There is no authentication beyond the socket's file permissions and optional peer-credential checks. Anyone who can connect can ask; the policy decides what they get.
 - The protocol carries no encryption. It MUST NOT be exposed over a network transport.
-- A policy that consumes one-time state (attestations, quotas) must make "check, spend, sign" atomic, or two concurrent requests can spend the same approval.
+- A signer whose policy consumes one-time state (attestations, quotas) MUST make "check, spend, sign" atomic, or two concurrent requests can spend the same approval.
