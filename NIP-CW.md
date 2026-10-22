@@ -313,7 +313,8 @@ transport, with params
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
   request that named this `connection_pubkey`. The record is matched on (signer, `connection_pubkey`): a
   record held under another signer is no match, and a lookup with no match is answered by its `deadline`
-  as below, not omitted. Only a lookup whose item proof or bill proof does not verify is omitted.
+  as below, not omitted. Only a lookup whose bill proof does not verify is omitted; one whose item proof
+  does not verify is refused with `UNAUTHORIZED`.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
   would have checked the reply. A lookup naming the key a rotation moved the wallet to is
   answered as §Recovering a Lost Connection says.
@@ -422,7 +423,9 @@ A `follow_set` Hub MUST apply these rules:
   pubkey and whose `d` tag equals the configured identifier. Of those, the one with the highest
   `created_at` wins; on a tie, the lowest `id` (NIP-01's rule for addressable events). An event from
   any other author MUST be ignored, whatever it claims. A Hub MUST ignore a version whose `created_at` is
-  more than 15 minutes in the future, and its relays SHOULD reject one.
+  more than 15 minutes in the future, and its relays SHOULD reject one. A Hub MUST NOT adopt a version
+  whose `created_at` is older than that of its last successful resolution; such a fetch counts as a
+  failed refresh.
 - **Which members.** Exactly the pubkeys in that event's public `p` tags, plus any `hidden_p` entries
   the Hub can decrypt. NIP-51's private items in the encrypted `content` MUST NOT be
   counted.
@@ -1032,6 +1035,8 @@ what it can first.
   NIP-51 client that republishes the set may drop tags it does not know, silently suspending every
   hidden member's wallet; a host SHOULD edit a circle's set only with a client that preserves
   `hidden_p`.
+- **`available_millis` is shared.** It tells every member how much room the whole circle has left under
+  its holdings ceiling, not only their own.
 - **Reading the terms is anonymous, not private.** The `get_info` call that yields `identity` travels on
   the standard transport, so a relay observer learns that someone looked at the circle and when, but not
   who: it is authored by the shared client key.
