@@ -142,8 +142,9 @@ implementation MUST be able to determine that fact. §Membership's one-wallet-pe
 against it. That fact MUST stop being true once the member's wallet is neither Active nor Suspended
 (§Lifecycle and Deletion), freeing them to request a new one.
 
-A Hub that serves §Lost Join Reply also keeps, for each Circle Wallet, the `encrypted_details` it returned
-(§Lost Join Reply).
+A Hub also keeps, for each Circle Wallet, a join record written in step 9's transaction: the Circle Hub
+connection as its target, the join's `pubkey` as its authorizer, its `connection_pubkey`, its proof's
+`created_at`, and the `encrypted_details` it returns (§Lost Join Reply).
 
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has
 already consumed for `create_circle_wallet` or a member request (§Identity Proof, §Recovering a Lost
@@ -327,13 +328,13 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 9. Inside one transaction, verify that the circle's holdings (§Own Funds and Caps) are below its holdings
    ceiling: a new wallet holds nothing, but a circle that can take in no more money has no room for a
    member who would receive any. Then create the Circle Wallet connection, authorizing `connection_pubkey`
-   as its client key, and insert its membership row. The membership row's uniqueness constraint is the
-   authoritative guard for step 5, so a conflict here, a `connection_pubkey` already authorized for
-   another connection on this node, or a failing holdings check, MUST roll back the entire transaction,
-   including the just-created connection and permission rows. A failing holdings check is refused with
-   `INSUFFICIENT_CAPACITY` (§Errors). The transaction MUST NOT commit once the proof is past its freshness
-   window (§Identity Proof), checked at commit (§Lost Join Reply). On any rollback, the step-3 replay
-   record is not rolled back.
+   as its client key, insert its membership row, and write its join record (§Data Model). The membership
+   row's uniqueness constraint is the authoritative guard for step 5, so a conflict here, a
+   `connection_pubkey` already authorized for another connection on this node, or a failing holdings
+   check, MUST roll back the entire transaction, including the just-created connection and permission
+   rows. A failing holdings check is refused with `INSUFFICIENT_CAPACITY` (§Errors). The transaction MUST
+   NOT commit once the proof is past its freshness window (§Identity Proof), checked at commit (§Lost Join
+   Reply). On any rollback, the step-3 replay record is not rolled back.
 
    Step 8's guard is not sufficient on its own: it is process-local, so two Hub processes sharing one
    database could still both pass a holdings check that only one of them should, here or when crediting a
@@ -343,9 +344,9 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    otherwise unenforced. A transaction-scoped advisory lock is sufficient where the datastore supports
    one.
 10. After the transaction commits, never before, publish the new connection's relay subscription.
-11. Return a single `encrypted_details` ciphertext containing `wallet_pubkey`, `connection_pubkey`,
-    `relays` and every resolved wallet parameter, and no secret. Nothing describing the wallet may travel
-    outside it (§Response).
+11. Return the `encrypted_details` recorded in step 9: a single ciphertext containing `wallet_pubkey`,
+    `connection_pubkey`, `relays` and every resolved wallet parameter, and no secret. Nothing describing
+    the wallet may travel outside it (§Response).
 
 ### Errors
 
@@ -397,8 +398,8 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   operation).
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
   request that named this `connection_pubkey`. The record is matched on (signer, `connection_pubkey`): a
-  lookup whose signer has no record for that `connection_pubkey` is answered by its `deadline` as below,
-  not omitted.
+  record held under another signer is no match, and a lookup with no match is answered by its `deadline`
+  as below, not omitted. Only a lookup whose item proof or bill proof does not verify is omitted.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
   would have checked the reply (§Response).
 - **`deadline` is the join's deadline, as the client sent it.** A join's deadline is its kind-23199
@@ -413,14 +414,15 @@ NIP-CASH's `cash_lookup` on the private transport (§The Private Transport in NI
   - `unknown` while now is at most `deadline` plus 6 minutes: the join was not made and never will be;
   - `expired` after that: the outcome can no longer be known. A client MUST NOT join again automatically
     with that `connection_pubkey`, and SHOULD show the join to the member.
-- **The record outlives the lookup window.** The Hub keeps a join's record at least until its `deadline`
-  plus 6 minutes, even if the wallet is deleted sooner. It may drop the record once the wallet is deleted
-  and that window has passed; a later lookup then answers `expired` (§The Record in NIP-CASH).
+- **The record outlives the lookup window.** The Hub keeps a join's record while now is no later than its
+  `deadline` plus 6 minutes, even if the wallet is deleted sooner. It may drop the record only once the
+  wallet is deleted and now is later than that; a later lookup then answers `expired` (§The Record in
+  NIP-CASH).
 
-A Hub that serves it lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
-(§Scope Surface in NIP-CASH), and MUST keep each join's record, with its `encrypted_details`, while the
-wallet exists and for at least the window above. This works whichever transport carried the join, but
-only on a Hub that lists `cash_lookup`; offering §Private Join is necessary for that, not sufficient.
+Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it (§Finding the
+Private Transport), and lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
+(§Scope Surface in NIP-CASH). It MUST keep each join's record, with its `encrypted_details`, while the
+wallet exists and for at least the window above. This works whichever transport carried the join.
 
 ## Identity Proof (kind 23199)
 
@@ -576,13 +578,12 @@ value only the provider and the Hub can read:
 ```
 
 - **Encryption.** The payload is NIP-44 version 2, encrypting the member's pubkey as 64-character
-  lowercase hex, under the conversation key between the provider and the Hub's **inbox** pubkey, the
-  one in its kind-11190 announcement (§The Hub Announcement in NIP-CASH). It MUST NOT be encrypted to
-  the Hub's connection pubkey: that connection's secret is shared with every member, so every member
-  could read every hidden entry. A Hub that publishes no announcement cannot have hidden members.
-  A Hub with hidden members SHOULD offer §Private Join and so report `circle_wallet.identity`
-  (§Finding the Private Transport): a hidden member who joins over the standard transport puts their
-  pubkey on the shared connection, where every co-member can read it.
+  lowercase hex, under the conversation key between the provider and the Hub's **inbox** pubkey, the one
+  in its kind-11190 announcement (§The Hub Announcement in NIP-CASH). It MUST NOT be encrypted to the
+  Hub's connection pubkey: that connection's secret is shared with every member, so every member could
+  read every hidden entry. A Hub with hidden members SHOULD offer §Private Join (§Finding the Private
+  Transport): a hidden member who joins over the standard transport puts their pubkey on the shared
+  connection, where every co-member can read it.
 - **A separate tag, not a marked `p`.** Relays index single-letter tags and clients read a `p` value
   as a pubkey, so ciphertext in a `p` tag would be indexed, rendered and possibly notified as if it
   were one.
@@ -830,7 +831,7 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
   "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
   "dust_threshold_millis": 1000, // a balance at or below it is dust (§Lifecycle and Deletion)
   "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
-  "identity": "<hex x-only>",  // OPTIONAL: present iff the Hub offers §Private Join
+  "identity": "<hex x-only>",  // the Hub's node identity, which signs its announcement
   "rotation_delay_secs": 432000, // OPTIONAL: present iff the Hub serves §Recovering a Lost Connection
   "per_wallet_max_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_amount (§Data Model)
   "per_wallet_max_receive_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_receive
@@ -853,9 +854,9 @@ a deliberate disclosure, and §Privacy Considerations states what it costs.
 
 `identity` is the pubkey that signs the Hub's kind-11190 announcement (§The Hub Announcement in NIP-CASH):
 its node identity, the same key a cash bill's mint signature recovers to, so every Hub on one node shares
-one announcement. A Hub that offers §Private Join MUST report it, and one that does not MUST omit it. It is
-the only way a prospective member learns it: the field travels in a response signed by the Hub's own key,
-which the connection string already pins, so it needs nothing added to `circlehub1...`.
+one announcement. Every Hub MUST report it, since every Hub serves the private transport for §Lost Join
+Reply. It is the only way a prospective member learns it: the field travels in a response signed by the
+Hub's own key, which the connection string already pins, so it needs nothing added to `circlehub1...`.
 
 `circlehub1...` packages the same pairing data as an ordinary `nostr+walletconnect://` string, wrapped in
 a NIP-19-style bech32 identifier — the same technique NIP-CASH uses for its own cash token, applied here to
@@ -909,8 +910,10 @@ name.
 
 A Hub MAY therefore accept `create_circle_wallet` over NIP-CASH's **private transport** (§The
 Private Transport in NIP-CASH), which is defined once there and reused here unchanged: same
-kinds, same envelope, same item proofs, same announcement. This section states only what is
-specific to joining.
+kinds, same envelope, same item proofs, same announcement. Every Hub serves that transport for
+§Lost Join Reply; one that also accepts joins there lists `create_circle_wallet` in its `get_info`
+`private_methods` (§Scope Surface in NIP-CASH). This section states only what is specific to
+joining.
 
 A Hub that offers it MUST continue accepting the standard transport, since a prospective
 member may hold nothing but the Hub connection string and a client that does not implement the
@@ -919,10 +922,11 @@ private transport.
 ### Finding the Private Transport
 
 A prospective member already calls `get_info` to read the Hub's terms (§The Circle Wallet Hub
-Connection). Its `circle_wallet.identity` is what reaches the private transport:
+Connection). Its `circle_wallet.identity` is what reaches the private transport, for a join or for a
+lookup (§Lost Join Reply):
 
-1. If `identity` is absent, the Hub does not offer Private Join; the client joins over the standard
-   transport.
+1. If `private_methods` does not list `create_circle_wallet`, the Hub does not offer Private Join; the
+   client joins over the standard transport, and needs the steps below only for a lookup.
 2. Otherwise the client fetches the Hub's kind-11190 announcement and verifies it against `identity`,
    under NIP-CASH's rules unchanged: reject one signed by anyone else, adopt only the newest, never move
    backwards (§The Hub Announcement in NIP-CASH). A client MUST NOT take the identity from anywhere else
@@ -1158,9 +1162,9 @@ relay observer learns that someone looked at the circle and when. It is authored
 client key, which every prospective member shares, so it does not say who. The join that follows, which
 carries the requester's own pubkey, goes over the private transport.
 
-**Reporting `identity` reveals the host's node.** `identity` is the Hub's node identity (§The Circle
-Wallet Hub Connection), so reporting it shows everyone who holds the connection string the host's
-Lightning node, and every other Hub on that node.
+**Reporting `identity` reveals the host's node.** `identity` is the Hub's node identity, which every Hub
+reports (§The Circle Wallet Hub Connection), so reporting it shows everyone who holds the connection
+string the host's Lightning node, and every other Hub on that node.
 
 **`get_info` discloses which mechanism a Hub uses.** Any holder of the shared Hub connection string — which
 is broadcast to everyone who might join, so in practice anyone who has been told about the circle — can read
