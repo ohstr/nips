@@ -51,6 +51,19 @@ A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, 
 
 A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed. A client MUST refuse a value that is not in its canonical form after trimming, and never repairs one (e.g. by removing a leading zero); a refused value has no ConnectionKey.
 
+After trimming and ASCII lowercasing, a client MUST refuse, never map, a domain that UTS #46 non-transitional mapping or NFC normalization would change (e.g. non-ASCII uppercase such as `Ü`, full-width forms, or a decomposed `ü`), and one that contains a deviation character (`ß`, `ς`, U+200C or U+200D), which UTS #46 processing modes convert differently. It converts an accepted domain to A-labels with UTS #46 ToASCII, non-transitional, with CheckHyphens, CheckBidi, CheckJoiners, UseSTD3ASCIIRules and VerifyDnsLength set, and MUST refuse a domain ToASCII rejects. The local part of an `email` gets no IDNA processing; a client MUST refuse one that NFC normalization would change.
+
+Test vectors:
+
+| Input | Result |
+|---|---|
+| `discord` account `80351110224678912` | ConnectionKey `22ced17fc7b3a6f7262d2dbe00b42d302948595468e025f4392b0a5022b8319d` (SHA256 of `discord:80351110224678912`) |
+| `discord` account `080351110224678912` | refused (leading zero) |
+| `dns` input `bücher.example` | `xn--bcher-kva.example` |
+| `dns` input `BüCHER.example` | `xn--bcher-kva.example` (only ASCII letters are lowercased) |
+| `dns` input `BÜCHER.example` | refused (non-ASCII uppercase) |
+| `dns` input `faß.de` | refused (deviation character) |
+
 No value carries a leading `@`. A handle can be changed, then taken by someone else; an account ID cannot, so a ConnectionKey built from it keeps naming the same account.
 
 ### Event Kinds
