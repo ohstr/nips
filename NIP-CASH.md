@@ -1280,9 +1280,10 @@ the call does not help: a transfer's source is already claimed, and a resent min
 
 `mint_cash`, `cash_transfer` and `cash_consolidate` take an OPTIONAL `request_id`: an even number of
 lowercase hex characters, 32 to 64 inclusive (16 to 32 bytes), from a CSPRNG, fresh for every call. A Hub
-MUST refuse a `request_id` of any other length or form with `BAD_REQUEST`. A caller that sends one SHOULD first save it
-durably, with the call and any cash secret it generated for it (§Security Considerations for Cash-Mode
-Slices), so the record survives a crash between sending and the reply.
+MUST refuse a `request_id` of any other length or form with `BAD_REQUEST`. A caller that sends one SHOULD
+first save it durably, with the call, its exact deadline (§Deadlines) and any cash secret it generated for
+it (§Security Considerations for Cash-Mode Slices), so the record survives a crash between sending and the
+reply.
 
 **A repeat MUST be refused, never applied twice.** A call carrying a `request_id` already used on this node,
 by any call to any of its Cash Hubs, MUST be refused with the error code `REQUEST_REUSED`, whether or not the
@@ -1294,9 +1295,17 @@ not by resending it.
 
 Every call carrying a `request_id` has a **deadline**: the envelope's `not_after` on the private transport
 (§Envelopes), or the NIP-47 `expiration` that `mint_cash` then requires (§Minting Cash). A Hub announces a
-horizon `H`, `max_request_age` in seconds, among its announcement's `limits` (§The Hub Announcement). It
-MUST reject a call whose deadline lies more than `H` past the moment it arrives, and a caller MUST NOT set
-a deadline more than `H` past the moment it sends.
+horizon `H`, `max_request_age` in seconds, among its announcement's `limits` (§The Hub Announcement). `H` is
+the Hub's own setting: a Hub MUST announce an integer of at least 60, SHOULD keep it at most 86400, and is
+RECOMMENDED to default to 300. A Hub MUST NOT announce a smaller `H` than it has announced before, so its
+current `H` is also the largest it has ever announced, and every rule in this section uses that one value.
+
+A Hub MUST refuse with `BAD_REQUEST` a call whose deadline has already passed, or lies more than its current
+`H` past the moment it arrives; a deadline exactly `H` ahead is accepted. A caller MUST NOT set a deadline
+more than the `H` it last read past the moment it sends. A caller SHOULD set its deadline well inside `H`,
+leaving room for clock skew between itself and the Hub and for relay delay, and SHOULD NOT send a call
+whose deadline is too close for the Hub to reach in time: such a call is refused or never commits, and
+costs a lookup.
 
 **A Hub MUST NOT commit a call after its deadline.** This is checked when the call commits, not only when it
 arrives. It is what makes a lookup's answer final: once the deadline has passed, a call that has not
@@ -1317,12 +1326,13 @@ Connection secrets are re-derived (§The Pairing Connection), so the Hub stores 
 the signature bytes. A signer using deterministic nonces (RFC 6979) reproduces them; a Hub whose signer does
 not MUST store them.
 
-**Retention.** Here `H` is the largest `max_request_age` the Hub has announced since the call. The Hub MUST
-NOT drop a `request_id` record before the call's deadline plus `H`, so a repeat is refused for as long as it
-could still commit, and a lookup until then gets a definite answer. It keeps the full record while any bill
-the call created is live, plus that bill's tombstone window (§Answering About a Destroyed Bill). After both,
-it MAY drop the record, and a lookup is then answered `expired` (§Looking Up a Call). A client SHOULD look up
-a lost reply promptly, and well before any bill it might have created could expire.
+**Retention.** The Hub MUST keep a `request_id` record while now is no later than the call's deadline plus
+`H`, and MAY drop it only once now is later than that, so a lookup that finds no record inside that window
+can truthfully answer `unknown`. An implementation that evaluates this boundary in more than one place MUST
+make those places agree with the `unknown` rule (§Looking Up a Call). The Hub keeps the full record while
+any bill the call created is live, plus that bill's tombstone window (§Answering About a Destroyed Bill).
+After both, it MAY drop the record, and a lookup is then answered `expired` (§Looking Up a Call). A client
+SHOULD look up a lost reply promptly, and well before any bill it might have created could expire.
 
 ### Looking Up a Call (`cash_lookup`)
 
@@ -1409,14 +1419,13 @@ authorized the call, and a token is not a spending credential (§The Cash Token)
 
 ### Support
 
-Every Hub that accepts `request_id` MUST record it and refuse a repeat as above, and MUST announce
-`max_request_age` (§The Hub Announcement). A client MUST treat `request_id` as unhonoured by a Hub that does
-not announce `max_request_age`, and MUST NOT resend a bill-creating call to it whose reply was lost.
+Every Hub MUST record `request_id` and refuse a repeat as above, MUST announce `max_request_age` (§The Hub
+Announcement), and MUST serve `cash_lookup` and list it in `private_methods` (§Scope Surface). None of it is
+optional, so every lost reply is recoverable and no Hub can apply a resend twice.
 
-Only `cash_lookup` is OPTIONAL: a Hub that serves it lists it in `private_methods` (§Scope Surface). A
-client SHOULD send a `request_id` on every call that creates a bill. On a Hub that announces
-`max_request_age`, the refused repeat alone keeps a retry from applying the call twice, whether or not the
-Hub serves `cash_lookup`. From a Hub that does not serve `cash_lookup`, a lost reply needs the Hub operator.
+A client SHOULD send a `request_id` on every call that creates a bill. A client MUST NOT send a
+bill-creating call to a Hub whose announcement carries no `max_request_age`, or one below 60: such a Hub
+does not conform, and a deadline cannot be set against it.
 
 ## Cash-Mode Slices
 
@@ -1524,7 +1533,7 @@ relay learns.
 A Hub MUST serve `cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate` over the
 private transport, and MUST NOT serve them over kind 23194. A request for one of them on the
 standard transport MUST be refused with `NOT_IMPLEMENTED`. The same holds for `cash_lookup`
-(§Lost Replies), for a Hub that serves it.
+(§Lost Replies).
 
 Kind 23194 is not going away — it carries the whole NWC surface. What is removed from it is
 those methods:
@@ -1594,7 +1603,7 @@ needed.
   the announcement carries the inbox explicitly and a client MUST use whatever it says.
 - **`limits`** — the envelope limits a Hub will actually accept: `max_bytes`, `max_items`,
   `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`, and `max_request_age`
-  (§Lost Replies, Deadlines), which every Hub that accepts `request_id` MUST announce.
+  (§Lost Replies, Deadlines), which every Hub MUST announce.
 - **`relays`** — OPTIONAL. Where the Hub reads its inbox. A bill's own token already carries relay
   hints (§The Cash Token), but those were fixed when the bill was minted and a Hub may have moved
   since; a bill minted years earlier is exactly the case this field exists for. When present a
@@ -1721,9 +1730,11 @@ links them disappears.
 - **`not_after`** — REQUIRED. The request event's `created_at` is randomised up to two days
   into the past (§The Request Event), precisely so it leaks nothing, which means it cannot
   also serve as a freshness signal.
-  Replay protection therefore has to live inside the ciphertext. A Hub MUST reject an envelope
-  whose `not_after` has passed, and MUST reject one claiming to be valid further ahead than it
-  is willing to remember nonces for.
+  Replay protection therefore has to live inside the ciphertext. A Hub MUST NOT run an envelope
+  whose `not_after` has passed (now > `not_after`). It MUST accept a `not_after` up to its
+  current `max_request_age` ahead, inclusive (§Lost Replies, Deadlines), MUST refuse one
+  further ahead with an envelope-level `BAD_REQUEST`, and MUST remember each nonce it has served
+  until that envelope's `not_after` has passed.
 - **`nonce`** — REQUIRED, and the only per-envelope replay state a Hub keeps; `request_id`
   records (§Lost Replies) are separate. A Hub MUST reject a nonce it has already served.
   Because items bind to it (below), a Hub needs no per-item state to stop an item being
@@ -2186,9 +2197,9 @@ response comes back, and MUST NOT treat a successful response as the moment the 
 
 The destination's token is carried only in the response. A caller SHOULD therefore persist the secret
 together with the call's `request_id` (§Lost Replies): with both, a lost reply is recovered by `cash_lookup`,
-which returns the token the secret opens. Without a `request_id`, or from a Hub that does not serve
-`cash_lookup`, the written-ahead secret alone is **not** a complete recovery path, and an implementation
-MUST NOT present it as one: learning which wallet it opens then needs the Hub operator. Either way, an
+which returns the token the secret opens. Without a `request_id`, the written-ahead secret alone is **not**
+a complete recovery path, and an implementation MUST NOT present it as one: learning which wallet it opens
+then needs the Hub operator. Either way, an
 implementation SHOULD surface any unreconciled secret to its user rather than leaving it where only the
 implementation can see it — a secret stored where nobody will look protects nothing.
 
@@ -2674,11 +2685,9 @@ this particular bill does not have. The two lists MUST NOT overlap.
 transport, and a client MUST NOT read a method's presence here as permission to call it.
 
 `cash_lookup` (§Lost Replies) has no scope: it is authorized by the original call's authorizer, and returns
-only what that call's reply carried. A Hub that serves it MUST list it in `private_methods` on every Cash
-Wallet connection and on its Cash Hub connection, and on a Circle Hub connection whose join lookups it
-serves (NIP-CW). This listing is how a client learns it can recover a lost reply. A client that does not
-find it still sends `request_id`, which guards against a repeat on a Hub that announces `max_request_age`
-(§Lost Replies, Support), but a lost reply then needs the Hub operator.
+only what that call's reply carried. Every Hub MUST list it in `private_methods` on every Cash Wallet
+connection and on its Cash Hub connection, and on a Circle Hub connection whose join lookups it serves
+(NIP-CW), since every Hub serves it (§Lost Replies, Support).
 
 Note this concerns advertising only. The scopes above still GRANT these methods — an implementation that
 dropped the scopes instead would refuse every real call while appearing to satisfy this rule.
