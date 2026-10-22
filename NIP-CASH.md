@@ -1061,16 +1061,16 @@ together drain the source slice's whole amount.
 
 ### Atomicity — One Commit
 
-The source claim, the creation and funding of every new wallet, and the call's `request_id` record
-(§Lost Replies) MUST be one atomic commit. The Hub MUST produce every new wallet's token, mint signature
-included (§Mint Provenance), before that commit. A failure at any point before it leaves no state at all —
-no claim, no wallet, no transfer, no record, no consumed proof — so nothing is stranded and nothing needs
-an operator. From the commit on, the old identity can no longer redeem or transfer this slice, and every
+The Hub MUST make the source claim, the creation and funding of every new wallet, and the call's
+`request_id` record (§Lost Replies) one atomic commit, and MUST produce every new wallet's token, mint
+signature included (§Mint Provenance), before that commit. A failure at any point before it leaves no state at
+all — no claim, no wallet, no transfer, no record, no consumed proof — so nothing is stranded and nothing
+needs an operator. From the commit on, the old identity can no longer redeem or transfer this slice, and every
 new wallet holds its value: a partial split never yields the carved piece without the remainder, or the
 reverse, and a lookup never sees a partly applied call (§Looking Up a Call).
 
-Once committed, the claim MUST NOT be rolled back. An implementation MAY record which new wallet(s) the
-value moved to, for its own bookkeeping (§Data Model), but this is informational only.
+Once it has committed, the Hub MUST NOT roll the claim back. An implementation MAY record which new wallet(s)
+the value moved to, for its own bookkeeping (§Data Model), but this is informational only.
 
 ### Delivery — Nested Encryption, Not a New Channel
 
@@ -1300,9 +1300,9 @@ reply.
 **A repeat MUST be refused, never applied twice.** A `request_id` is used once a call carrying it has passed
 the Hub's reuse check, whatever happens to that call afterwards. A Hub MUST refuse with `REQUEST_REUSED` a
 call carrying a `request_id` already used on this node, by any call to any of its Cash Hubs, whether or not
-the parameters match. The check and the marking of the id as used MUST be one atomic step, so two calls
-carrying the same `request_id` — whatever their methods, targets or envelopes, including two items of one
-envelope — never both pass it; whichever is second is refused. A `cash_lookup` item carries a `request_id`
+the parameters match. The Hub MUST make the check and the marking of the id as used one atomic step, so two
+calls carrying the same `request_id` — whatever their methods, targets or envelopes, including two items of
+one envelope — never both pass it; whichever is second is refused. A `cash_lookup` item carries a `request_id`
 but is not a call, and never marks one used.
 
 The Hub makes this check before any other check on the call except the `request_id`'s own form, and except
@@ -1449,15 +1449,14 @@ one device), and only after `unknown`. A re-placed call always uses the derived 
 never a fresh one: the lowercase hex of `sha256("retry:" ‖ <replaced request_id>)`, over the ASCII bytes of
 `retry:` followed by the replaced call's `request_id` as sent. Two attempts to re-place the same call send
 the same `request_id`; the Hub refuses the second once the first has passed its reuse check, so a client
-also relies on the rule below and on its own record of the ids it has placed (NIP-CP §Writing). A client MUST NOT
-place a call again if it has already placed that call's derived id, or holds a written-ahead record of it
-(NIP-CP §Writing); it only closes the older call. A client MUST NOT place a `mint_cash` call again without
-its user's explicit confirmation: unlike a transfer, whose source the first call already claimed, a
-re-placed mint whose original did commit mints again. A `cash_transfer` or `cash_consolidate` is re-placed
-automatically by the device that placed it. A client SHOULD bound how many times it re-places one call,
-and surface the call to its user once that bound is reached. After `expired` a client MUST NOT place the
-call again automatically, and surfaces it to its user instead. A client MUST NOT read an omitted
-`cash_lookup` as `unknown`.
+also relies on the rule below and on its own record of the ids it has placed (NIP-CP §Writing). A client MUST
+NOT place a call again if it has already placed that call's derived id, or holds a written-ahead record of it
+(NIP-CP §Writing); it only closes the older call. A client MUST NOT place a `mint_cash` call again without its
+user's explicit confirmation: unlike a transfer, whose source the first call already claimed, a re-placed mint
+whose original did commit mints again. A `cash_transfer` or `cash_consolidate` is re-placed automatically by
+the device that placed it. A client SHOULD bound how many times it re-places one call, and surface the call to
+its user once that bound is reached. After `expired` a client MUST NOT place the call again automatically, and
+surfaces it to its user instead. A client MUST NOT read an omitted `cash_lookup` as `unknown`.
 
 The answer reveals nothing new. The lookup returns what the original reply would have, to the party that
 authorized the call, and a token is not a spending credential (§The Cash Token). A cash-authorized call
@@ -3083,7 +3082,7 @@ connection either, since nothing stops that same connection from also being shar
 many-source operation that accepts a cash-mode source from a *different* wallet than the calling connection's
 own inherits the identical leak and MUST reject it for the same reason.
 
-**A spin-off or consolidate MUST commit whole or not at all.** The source claims, every new wallet's
+**A Hub MUST commit a spin-off or consolidate whole or not at all.** The source claims, every new wallet's
 creation and funding, and the `request_id` record are one atomic commit, with every token built before it
 (§Spinning a Slice Off Into a Dedicated Wallet, Atomicity). A sequence of separate transfers that is undone
 on failure is not a substitute: an undo can itself fail, and leave value funded in a wallet no reply
