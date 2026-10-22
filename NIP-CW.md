@@ -19,6 +19,12 @@ Every member's wallet lives on the host's node, so a payment between two members
 internal transfer. A payment to anyone off the node goes out over ordinary Lightning. Who counts as a
 member is a host configuration choice.
 
+**Contents:** [Data Model](#data-model) · [Creating a Circle Wallet](#creating-a-circle-wallet) ·
+[Identity Proof](#identity-proof-kind-23199) · [Membership](#membership) ·
+[Own Funds and Caps](#own-funds-and-caps) · [Fees](#fees) · [Pairing Connection](#pairing-connection) ·
+[The Hub Connection](#the-circle-wallet-hub-connection-circlehub1) · [Private Join](#private-join) ·
+[Lifecycle and Deletion](#lifecycle-and-deletion)
+
 ## Non-Goals
 
 This document does not define:
@@ -105,17 +111,42 @@ yearly, never), a Hub MUST refuse a request with `LIMIT_EXCEEDED` when its reque
 than the Hub's floor. For example, a `monthly` floor allows `monthly`/`yearly`/`never` and rejects
 `daily`/`weekly`.
 
-A budget period starts when the wallet is created, in UTC. Daily and weekly periods start at the
-creation instant plus k×86400 or k×604800 seconds. Monthly periods stay anchored to the creation day,
-clamped to the month's last day; yearly periods likewise (Feb 29 → Feb 28). A monthly or yearly period
-starts at the creation's UTC time of day on that date. Each start is counted from the creation day, never
-from the previous period's start: a wallet created at 2024-01-31T10:00Z starts monthly periods at
-2024-02-29, 2024-03-31 and 2024-04-30, each at 10:00Z, and one created on 2024-02-29 starts yearly periods
-on 2025-02-28, 2026-02-28, 2027-02-28 and 2028-02-29. A period runs from its start, inclusive, to the next
-period's start, exclusive. At the start of each period the wallet's send and receive caps are available
-again in full. With `never`, the wallet's whole life is one period.
+A budget period starts when the wallet is created, in UTC.
+
+| renewal | when each period starts |
+|---|---|
+| `daily`, `weekly` | Daily and weekly periods start at the creation instant plus k×86400 or k×604800 seconds. |
+| `monthly`, `yearly` | Monthly periods stay anchored to the creation day, clamped to the month's last day; yearly periods likewise (Feb 29 → Feb 28). A monthly or yearly period starts at the creation's UTC time of day on that date. |
+| `never` | With `never`, the wallet's whole life is one period. |
+
+Each start is counted from the creation day, never from the previous period's start:
+
+| a wallet created | starts | periods on |
+|---|---|---|
+| at 2024-01-31T10:00Z | monthly periods | 2024-02-29, 2024-03-31 and 2024-04-30, each at 10:00Z |
+| on 2024-02-29 | yearly periods | 2025-02-28, 2026-02-28, 2027-02-28 and 2028-02-29 |
+
+A period runs from its start, inclusive, to the next period's start, exclusive. At the start of each period
+the wallet's send and receive caps are available again in full.
 
 ## Creating a Circle Wallet
+
+```mermaid
+sequenceDiagram
+    participant M as Member's client
+    participant H as Circle Wallet Hub
+    M->>H: get_info
+    H-->>M: circle_wallet terms and identity
+    Note over M: generates the connection keypair, signs a kind-23199 proof
+    M->>H: create_circle_wallet
+    Note over H: Processing Algorithm, steps 1-11
+    H-->>M: encrypted_details
+    Note over M: builds its own connection string
+    opt the reply is lost
+        M->>H: cash_lookup on the private transport
+        H-->>M: the same encrypted_details
+    end
+```
 
 ### Request
 
@@ -207,12 +238,15 @@ response whose `encrypted_details` does not decrypt under it.
 
 On receiving `create_circle_wallet`, the Hub MUST, in order:
 
-1. Validate the params: `pubkey` and `connection_pubkey` are well-formed 64-character lowercase-hex
-   strings, `connection_pubkey` is a valid x-only secp256k1 pubkey, and the two differ; `max_amount`,
-   `max_receive` and, when present, `expiry` are JSON integers from 0 to 2^63−1; `budget_renewal`, when
-   present, is one of the values §Request lists; and `identity_event` is a string that parses to a JSON
-   object. A request failing any of these is refused with `BAD_REQUEST`, and nothing is recorded: its
-   proof is not consumed, since step 3 is never reached.
+1. Validate the params:
+   - `pubkey` and `connection_pubkey` are well-formed 64-character lowercase-hex strings,
+     `connection_pubkey` is a valid x-only secp256k1 pubkey, and the two differ;
+   - `max_amount`, `max_receive` and, when present, `expiry` are JSON integers from 0 to 2^63−1;
+   - `budget_renewal`, when present, is one of the values §Request lists;
+   - and `identity_event` is a string that parses to a JSON object.
+
+   A request failing any of these is refused with `BAD_REQUEST`, and nothing is recorded: its proof is not
+   consumed, since step 3 is never reached.
 2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–7: the kind is 23199, the event's
    own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
    `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, the `connection` tag equals the
@@ -242,14 +276,18 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 9. Inside one transaction, verify that the circle's holdings are below its holdings
    ceiling. Then create the Circle Wallet connection, authorizing `connection_pubkey` as its client key,
    insert its membership row, and write its join record. The membership row's uniqueness
-   constraint is the authoritative guard for step 5, so a conflict here, a `connection_pubkey` already
-   authorized for another connection on this node or pending in any rotation on it, or a failing holdings check, MUST roll back the entire transaction, including the
-   just-created connection and permission rows. A uniqueness conflict is refused with `WALLET_EXISTS`, a
-   `connection_pubkey` in use or pending with `RESTRICTED`, and a failing holdings check with
-   `INSUFFICIENT_CAPACITY`. The Hub MUST NOT commit the transaction once the proof is past its
-   freshness window, checked at commit, and refuses such a join with
-   `BAD_REQUEST`, since nothing was made and the outcome is final. On any rollback, the step-3 replay
-   record is not rolled back.
+   constraint is the authoritative guard for step 5, so each of these MUST roll back the entire
+   transaction, including the just-created connection and permission rows:
+
+   | rollback cause | refused with |
+   |---|---|
+   | a conflict here (a uniqueness conflict) | `WALLET_EXISTS` |
+   | a `connection_pubkey` already authorized for another connection on this node or pending in any rotation on it (a `connection_pubkey` in use or pending) | `RESTRICTED` |
+   | a failing holdings check | `INSUFFICIENT_CAPACITY` |
+
+   The Hub MUST NOT commit the transaction once the proof is past its freshness window, checked at commit,
+   and refuses such a join with `BAD_REQUEST`, since nothing was made and the outcome is final. On any
+   rollback, the step-3 replay record is not rolled back.
 
    Step 8's guard is process-local. Each holdings check, here or when crediting a payment, and the change it guards need a database-level lock scoped to the Hub, so an
    implementation whose datastore cannot provide one MUST NOT be run as multiple concurrent processes
@@ -341,22 +379,28 @@ wallet exists and for at least the window above. This works whichever transport 
 
 Kind 23199 is defined by this document. It is neither NIP-CASH's kind 23198 nor NIP-IC's kind 35521.
 
-```jsonc
+```json
 {
   "kind": 23199,
-  "pubkey": "<requester pubkey — MUST equal `pubkey` in the request>",
-  "created_at": 1720000000, // freshness window: up to 5 minutes in the past, up to 1 minute in the future
+  "pubkey": "<requester pubkey>",
+  "created_at": 1720000000,
   "tags": [
-    ["d", "<Circle Wallet Hub's own pubkey>"], // binds proof to THIS Hub; no invoice to bind it to
-                                              // — see below: this is the pubkey from the Hub's
-                                              // PAIRING URI, not any key derived from its secret
-    ["connection", "<connection_pubkey from the request>"], // binds proof to the key the wallet is issued to
-    ["terms", "<max_amount>:<max_receive>:<expiry>:<budget_renewal>"] // binds proof to the requested terms
+    ["d", "<Circle Wallet Hub's own pubkey>"],
+    ["connection", "<connection_pubkey from the request>"],
+    ["terms", "<max_amount>:<max_receive>:<expiry>:<budget_renewal>"]
   ],
   "content": "",
   "sig": "<schnorr signature by `pubkey`>"
 }
 ```
+
+| field | binds |
+|---|---|
+| `pubkey` | the requester pubkey — MUST equal `pubkey` in the request |
+| `created_at` | freshness window: up to 5 minutes in the past, up to 1 minute in the future |
+| `d` | binds proof to THIS Hub; no invoice to bind it to. See below: this is the pubkey from the Hub's PAIRING URI, not any key derived from its secret |
+| `connection` | binds proof to the key the wallet is issued to |
+| `terms` | binds proof to the requested terms |
 
 A Circle Wallet member is always a raw Nostr pubkey.
 
@@ -535,6 +579,15 @@ other side is:
 4. **Lightning**: anyone off the node. External traffic, and the only kind a routing fee and `fees_ppm`
    apply to.
 
+In short, with the caps and the holdings ceiling as below:
+
+| kind | other side | routing fee and `fees_ppm` | send and receive caps | holdings ceiling on a credit |
+|---|---|---|---|---|
+| 1 | the same circle | no | no | no between two Active wallets; yes from a wallet that is not Active |
+| 2 | another circle on the node | no | no | yes, the receiving circle's |
+| 3 | any other connection on the node | no | yes | yes |
+| 4 | Lightning | yes | yes | yes |
+
 **Caps.** Each wallet has two caps on its external traffic (kinds 3 and 4), both per budget period.
 Payments of kinds 1 and 2 never count against them.
 
@@ -544,28 +597,39 @@ Payments of kinds 1 and 2 never count against them.
   cost, its routing-fee reserve included; once it resolves, at what it cost, or not at all if it failed.
 - **Receive cap, `max_receive`.** A wallet's receive room is `max_receive` less its external receipts in
   the current period and less the amounts of its open invoices, held payments the Hub has accepted
-  included. Every open invoice counts, whoever pays it in the end, since the Hub cannot know the payer when it issues the invoice; an invoice another Circle Wallet on the
-  node pays (kinds 1–2) is no receipt, so its room comes back once it is paid, as it does when an invoice
-  expires or is cancelled. A Hub MUST
-  refuse, with `QUOTA_EXCEEDED`, to issue an invoice for more than the wallet's receive room, and MUST
-  fail, never credit, an incoming external payment that names none of the wallet's open invoices — a
-  keysend, say — and is larger than that room. A payment of one of the wallet's own open invoices uses
-  the room that invoice already holds. A held payment counts from the moment the Hub accepts it until it
-  settles, and stops counting if it is cancelled.
+  included:
+
+  ```
+  receive room = max_receive − external receipts this period − open invoices (held payments included)
+  ```
+
+  - Every open invoice counts, whoever pays it in the end, since the Hub cannot know the payer when it
+    issues the invoice; an invoice another Circle Wallet on the node pays (kinds 1–2) is no receipt, so
+    its room comes back once it is paid, as it does when an invoice expires or is cancelled.
+  - A Hub MUST refuse, with `QUOTA_EXCEEDED`, to issue an invoice for more than the wallet's receive room,
+    and MUST fail, never credit, an incoming external payment that names none of the wallet's open
+    invoices — a keysend, say — and is larger than that room.
+  - A payment of one of the wallet's own open invoices uses the room that invoice already holds.
+  - A held payment counts from the moment the Hub accepts it until it settles, and stops counting if it
+    is cancelled.
 
 A Hub MUST refuse, with `RESTRICTED`, to issue a Circle Wallet invoice with no amount or a zero amount.
 
 **Holdings ceiling.** A Circle Wallet Hub's holdings are the balances of its Active wallets plus the
 amounts of every open invoice they have issued, held payments the Hub has accepted included. An open
-invoice counts whoever pays it in the end. A Hub
-MUST NOT let a new invoice or a credit take its holdings past its holdings ceiling. It refuses such an
-invoice, and such a payment from the same node, with `INSUFFICIENT_CAPACITY`, and fails such a payment
-arriving over Lightning. A payment between two Active wallets of the circle only moves money inside its
-holdings, and is never refused for this ceiling. A payment into an Active wallet from one of the circle's
-wallets that is not Active does raise the holdings, so the Hub checks it against the ceiling like a
-payment from another circle on the node. A wallet returning to
-Active may leave the holdings above the ceiling, which then only refuses new invoices and
-credits until the holdings fall below it.
+invoice counts whoever pays it in the end. A Hub MUST NOT let a new invoice or a credit take its holdings
+past its holdings ceiling:
+
+| what would pass the ceiling | outcome |
+|---|---|
+| such an invoice | refused with `INSUFFICIENT_CAPACITY` |
+| such a payment from the same node | refused with `INSUFFICIENT_CAPACITY` |
+| such a payment arriving over Lightning | the Hub fails it |
+| a payment between two Active wallets of the circle | it only moves money inside its holdings, and is never refused for this ceiling |
+| a payment into an Active wallet from one of the circle's wallets that is not Active | it does raise the holdings, so the Hub checks it against the ceiling like a payment from another circle on the node |
+
+A wallet returning to Active may leave the holdings above the ceiling, which then only refuses new
+invoices and credits until the holdings fall below it.
 
 **Circle outbound ceiling.** A Hub MAY also bound what all its wallets together send as external traffic
 in one period of its own, `daily` to `yearly`, starting at the Hub's creation as §Budget Renewal Floor
@@ -601,16 +665,25 @@ method outside this list, or one the wallet's state does not serve, with `RESTRI
 `get_budget` reports the wallet's two caps for the current period, the send cap in NIP-47's own fields
 and the receive cap beside them, all in the chain's milli-unit:
 
-```jsonc
+```json
 {
-  "total_budget": 20000000,          // max_amount
-  "used_budget": 15000000,           // external sends this period, those in flight at the most they may cost
-  "renews_at": 1709200800,           // when the current period ends and the next begins; absent with never
+  "total_budget": 20000000,
+  "used_budget": 15000000,
+  "renews_at": 1709200800,
   "renewal_period": "monthly",
-  "total_receive_budget": 50000000,  // max_receive
-  "used_receive_budget": 45000000    // receipts this period plus open invoices and held payments
+  "total_receive_budget": 50000000,
+  "used_receive_budget": 45000000
 }
 ```
+
+| field | meaning |
+|---|---|
+| `total_budget` | max_amount |
+| `used_budget` | external sends this period, those in flight at the most they may cost |
+| `renews_at` | when the current period ends and the next begins; absent with never |
+| `renewal_period` | as in NIP-47 |
+| `total_receive_budget` | max_receive |
+| `used_receive_budget` | receipts this period plus open invoices and held payments |
 
 The remaining send room is `total_budget` minus `used_budget`, and the remaining receive room
 `total_receive_budget` minus `used_receive_budget`; a Hub MUST report them so that neither is below zero.
@@ -655,11 +728,14 @@ and MUST NOT generate, request, receive or store the secret.
 
 The host therefore cannot reconstruct a member's connection string or act as the member over it, and
 there is no way to reveal a connection again. A member who loses the secret has lost the connection, and
-only a rotation to a new key can move the wallet's balance without it. On a Hub that serves rotation, the
-member moves the wallet to a new key. On any other Hub the balance can no
-longer be reached: the host can still delete the wallet, which moves it to Closing and frees the member
-to request a new one with a new keypair, but the old wallet keeps its balance, payout-only, for good. A
-client joining a Hub whose `get_info` reports no `rotation_delay_secs` MUST warn the member, before the
+only a rotation to a new key can move the wallet's balance without it:
+
+- On a Hub that serves rotation, the member moves the wallet to a new key.
+- On any other Hub the balance can no longer be reached: the host can still delete the wallet, which moves
+  it to Closing and frees the member to request a new one with a new keypair, but the old wallet keeps its
+  balance, payout-only, for good.
+
+A client joining a Hub whose `get_info` reports no `rotation_delay_secs` MUST warn the member, before the
 join, that losing the connection secret makes the wallet's balance unreachable, and SHOULD offer to back
 the secret up.
 
@@ -677,32 +753,44 @@ administration of it, which this document does not define. The host's submission
 request, a kind-23199 event the member signed, and a Hub MUST NOT rotate, freeze or unfreeze a wallet on
 the host's word alone:
 
-```jsonc
+```json
 {
   "kind": 23199,
   "pubkey": "<member pubkey — the pubkey of the join that created the wallet>",
-  "created_at": 1720000000, // freshness window: up to 24 hours in the past, up to 1 minute in the future
+  "created_at": 1720000000,
   "tags": [
-    ["d", "<Circle Wallet Hub's own pubkey>"],  // as for a join (§Identity Proof, check 5)
-    ["action", "rotate"],                         // "rotate" | "freeze" | "unfreeze"
-    ["wallet", "<wallet_pubkey>"],                // the wallet it acts on
-    ["connection", "<new connection_pubkey>"]     // rotate only: the key the wallet moves to
+    ["d", "<Circle Wallet Hub's own pubkey>"],
+    ["action", "rotate"],
+    ["wallet", "<wallet_pubkey>"],
+    ["connection", "<new connection_pubkey>"]
   ],
   "content": "",
   "sig": "<schnorr signature by `pubkey`>"
 }
 ```
 
+| field | meaning |
+|---|---|
+| `created_at` | freshness window: up to 24 hours in the past, up to 1 minute in the future |
+| `d` | as for a join (§Identity Proof, check 5) |
+| `action` | "rotate" \| "freeze" \| "unfreeze" |
+| `wallet` | the wallet it acts on |
+| `connection` | rotate only: the key the wallet moves to |
+
 A Hub MUST check a member request in this order, and refuse it at the first step it fails:
 
 1. **Rotation served.** A Hub that does not serve rotation refuses every member request with
    `NOT_IMPLEMENTED`.
-2. **The request itself.** It passes §Identity Proof's checks 2 and 5 unchanged; its `kind` is 23199; its
-   signature verifies against its `pubkey`; its `created_at` is inside the window above, from now − 86,400
-   to now + 60 seconds on the Hub's clock, both bounds inclusive; and it carries exactly one `action` tag,
-   whose value is `rotate`, `freeze` or `unfreeze`, exactly one `wallet` tag, exactly one `connection` tag
-   on a `rotate` and none otherwise, and no `terms` tag. A failure is refused with `UNAUTHORIZED`, and
-   nothing is recorded.
+2. **The request itself.**
+   - It passes §Identity Proof's checks 2 and 5 unchanged;
+   - its `kind` is 23199;
+   - its signature verifies against its `pubkey`;
+   - its `created_at` is inside the window above, from now − 86,400 to now + 60 seconds on the Hub's
+     clock, both bounds inclusive;
+   - and it carries exactly one `action` tag, whose value is `rotate`, `freeze` or `unfreeze`, exactly one
+     `wallet` tag, exactly one `connection` tag on a `rotate` and none otherwise, and no `terms` tag.
+
+   A failure is refused with `UNAUTHORIZED`, and nothing is recorded.
 3. **Single use.** Its id is checked against the single-use record (check 8), and one
    used before is refused with `REQUEST_REUSED`. Otherwise the Hub records the id here, and MUST keep it
    for at least 24 hours and 1 minute after its `created_at`; a request refused at a later step stays
@@ -728,6 +816,22 @@ and completes at the first moment now is at or after `requested_at` plus the wal
 - any request validly signed by the old key, unless the wallet is frozen, cancels the rotation and is
   then served as usual, and the Hub MUST notify the old key with `rotation_cancelled`. A payment arriving
   at the wallet cancels nothing.
+
+```mermaid
+sequenceDiagram
+    participant O as Old key
+    participant H as Hub
+    participant N as New key
+    Note over H: rotate accepted at requested_at
+    H-->>O: rotation_pending, with completes_at
+    alt the old key signs a request before completes_at (wallet not frozen)
+        O->>H: any request
+        H-->>O: rotation_cancelled
+    else completes_at is reached
+        Note over H: the new key replaces the old one
+        H-->>N: rotation_completed
+    end
+```
 
 On completion the Hub authorizes the new key in place of the old one, which stops working, and MUST
 notify the new key with `rotation_completed`. It is the same wallet: the same `wallet_pubkey`, balance,
@@ -767,21 +871,37 @@ ordinary NWC pairing.
 A Circle Wallet Hub MUST answer `get_info` with a `circle_wallet` block, and a connection that is
 not a Hub MUST omit it — its presence is what identifies a Hub at all:
 
-```jsonc
-"circle_wallet": {
-  "available_millis": 1000000, // what the circle can still take in: holdings ceiling minus holdings, at least 0
-  "max_exp_secs": 2592000,     // the Hub's expiry ceiling; 0 means "never"
-  "fees_ppm": 0,               // the skim a member's outgoing payments will carry (§Fees)
-  "fee_reserve": {"ppm": 5000, "min_millis": 10000}, // the most routing fee a payment pays (§Own Funds and Caps)
-  "dust_threshold_millis": 1000, // a balance at or below it is dust (§Lifecycle and Deletion)
-  "circle_policy": "allowlist", // "allowlist" | "follow_set" (§Membership)
-  "identity": "<hex x-only>",  // the Hub's node identity, which signs its announcement
-  "rotation_delay_secs": 432000, // OPTIONAL: present iff the Hub serves §Recovering a Lost Connection
-  "per_wallet_max_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_amount (§Data Model)
-  "per_wallet_max_receive_millis": 500000, // OPTIONAL: the Hub's per-wallet ceiling on max_receive
-  "min_budget_renewal": "monthly"  // OPTIONAL: the Hub's renewal floor (§Budget Renewal Floor)
+```json
+{
+  "circle_wallet": {
+    "available_millis": 1000000,
+    "max_exp_secs": 2592000,
+    "fees_ppm": 0,
+    "fee_reserve": {"ppm": 5000, "min_millis": 10000},
+    "dust_threshold_millis": 1000,
+    "circle_policy": "allowlist",
+    "identity": "<hex x-only>",
+    "rotation_delay_secs": 432000,
+    "per_wallet_max_millis": 500000,
+    "per_wallet_max_receive_millis": 500000,
+    "min_budget_renewal": "monthly"
+  }
 }
 ```
+
+| field | present | meaning |
+|---|---|---|
+| `available_millis` | always | what the circle can still take in: holdings ceiling minus holdings, at least 0 |
+| `max_exp_secs` | always | the Hub's expiry ceiling; 0 means "never" |
+| `fees_ppm` | always | the skim a member's outgoing payments will carry (§Fees) |
+| `fee_reserve` | always | the most routing fee a payment pays (§Own Funds and Caps) |
+| `dust_threshold_millis` | always | a balance at or below it is dust (§Lifecycle and Deletion) |
+| `circle_policy` | always | "allowlist" \| "follow_set" (§Membership) |
+| `identity` | always | the Hub's node identity, which signs its announcement |
+| `rotation_delay_secs` | OPTIONAL | present iff the Hub serves §Recovering a Lost Connection |
+| `per_wallet_max_millis` | OPTIONAL | the Hub's per-wallet ceiling on max_amount (§Data Model) |
+| `per_wallet_max_receive_millis` | OPTIONAL | the Hub's per-wallet ceiling on max_receive |
+| `min_budget_renewal` | OPTIONAL | the Hub's renewal floor (§Budget Renewal Floor) |
 
 The first five are the Hub's **terms**. A Hub MUST report `available_millis` as 0, never as a negative
 number, while its holdings are at or above its holdings ceiling. `fee_reserve`
@@ -948,6 +1068,13 @@ grace period that began at its suspension.
 A wallet in any state but Active can no longer receive, and can only pay out its balance. Only an Active wallet counts toward the holdings ceiling; an Active or Suspended one counts for the
 one-wallet-per-member rule.
 
+| state | receives | counts toward the holdings ceiling | counts for the one-wallet-per-member rule | grace period starts |
+|---|---|---|---|---|
+| Active | yes | yes | yes | — |
+| Suspended | no, pays out only | no | yes | at its suspension |
+| Expired | no, pays out only | no | no | at expiry, unless it was already in its grace period |
+| Closing | no, pays out only | no | no | when the host deletes it, unless it was already in its grace period |
+
 **Member balances are never swept.** A Hub MUST NOT delete a wallet that holds more than dust, or one
 with a payment to or from it in flight, an accepted held payment included, whoever asks, and MUST NOT move
 a member's money anywhere the member did not pay it. A balance is dust when it is
@@ -1002,13 +1129,15 @@ what it can first.
   decrypts only under the Hub's own connection key.
 - **No connection secret on the Hub**. A compromise of the Hub's storage, logs or
   retained traffic yields no member's connection. The host's node still holds and moves the funds.
-- **Rotation rests on the member's Nostr key**. The host cannot sign a
-  member request, so it alone can never move a wallet to a key of its choosing, and the delay lets the
-  wallet key cancel a rotation it did not ask for. Someone holding the member's Nostr key, with the
-  host's help, can freeze the wallet and then move it; a frozen wallet's key can pay nothing out. A
-  member whose Nostr key is taken should pay out of every wallet on a Hub that serves rotation before a
-  freeze lands, which `wallet_frozen` or `rotation_pending` announces to the wallet key. Once a wallet is frozen,
-  its balance moves again only after an `unfreeze`, or with the key a completed rotation installs.
+- **Rotation rests on the member's Nostr key**.
+  - The host cannot sign a member request, so it alone can never move a wallet to a key of its choosing,
+    and the delay lets the wallet key cancel a rotation it did not ask for.
+  - Someone holding the member's Nostr key, with the host's help, can freeze the wallet and then move it;
+    a frozen wallet's key can pay nothing out.
+  - A member whose Nostr key is taken should pay out of every wallet on a Hub that serves rotation before
+    a freeze lands, which `wallet_frozen` or `rotation_pending` announces to the wallet key.
+  - Once a wallet is frozen, its balance moves again only after an `unfreeze`, or with the key a
+    completed rotation installs.
 - **One wallet per (Hub, identity).** The step-5 pre-check alone is a race; the uniqueness constraint at
   step 9 is the authoritative guard.
 - **Publish-after-commit ordering.** A new member's relay subscription MUST be published only after its
@@ -1028,13 +1157,14 @@ what it can first.
   or the `allowlist` mechanism instead; NIP-51's own private items do not help, since
   the Hub cannot count them.
 - **What `hidden_p` hides.** It hides who a hidden member is from everyone except the provider and the
-  Hub. It does not hide how many hidden entries a set has, nor when the set was republished. A hidden
-  member who joins over the standard transport puts their pubkey in a request every co-member can read
-  (above), so a hidden member SHOULD join over §Private Join. A leaked inbox key exposes every hidden
-  member that key ever covered, in every past version of the set a relay still holds. And a generic
-  NIP-51 client that republishes the set may drop tags it does not know, silently suspending every
-  hidden member's wallet; a host SHOULD edit a circle's set only with a client that preserves
-  `hidden_p`.
+  Hub. It does not hide how many hidden entries a set has, nor when the set was republished.
+  - A hidden member who joins over the standard transport puts their pubkey in a request every co-member
+    can read (above), so a hidden member SHOULD join over §Private Join.
+  - A leaked inbox key exposes every hidden member that key ever covered, in every past version of the
+    set a relay still holds.
+  - And a generic NIP-51 client that republishes the set may drop tags it does not know, silently
+    suspending every hidden member's wallet; a host SHOULD edit a circle's set only with a client that
+    preserves `hidden_p`.
 - **`available_millis` is shared.** It tells every member how much room the whole circle has left under
   its holdings ceiling, not only their own.
 - **Reading the terms is anonymous, not private.** The `get_info` call that yields `identity` travels on
