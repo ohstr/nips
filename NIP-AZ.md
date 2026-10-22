@@ -16,10 +16,10 @@ AltZap extends NIP-57's zap request/receipt/LNURL flow with three kinds (`9520`,
 ## Terminology
 
 - **LNURL server**: The recipient's LNURL-pay server (NIP-57's "lnurl server"; LUD-06's "LN SERVICE"). It receives `9520`/`9523` requests at its callback, issues the invoices and publishes the resulting `9521` receipts.
-- **Web Identity**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** a Web Identity.
-- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. A client builds it from `<platform-user-id>` in the canonical form NIP-IC gives; for a platform NIP-IC gives no canonical form, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
-- **Proxy Agent**: A bot or service that signs a `9523` event on behalf of a platform user it does not hold private keys for.
-- **Chain**: The Lightning-routable settlement network, e.g. `bitcoin`. Examples use `examplecoin` for any Lightning-routable chain other than Bitcoin.
+- **Web Identity**: An account on a non-Nostr platform (e.g. a Discord or X account, or an email address), as NIP-IC defines it. Nostr itself is **not** a Web Identity.
+- **ConnectionKey**: NIP-IC's identifier of a Web Identity, `hex(SHA256("<platform>:<platform-user-id>"))` in lowercase hex, used in place of a Nostr pubkey only for a recipient or sender who has no keypair yet. A client builds it from `<platform-user-id>` in the canonical form NIP-IC gives; for a platform NIP-IC gives no canonical form, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead, and a request addressed to it names the IA that attested it in its `ia` tag. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
+- **Proxy Agent**: A bot or service that signs a `9523` event on behalf of a platform user whose keys it does not hold.
+- **Chain**: The energy-backed coin, routable over the Lightning Network, that a zap settles on, named by the `chain` tag, e.g. `bitcoin`. Examples use `examplecoin` for any Lightning-routable chain other than Bitcoin.
 
 ## Specification
 
