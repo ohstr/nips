@@ -64,9 +64,9 @@ A Cash Pocket stores the cash tokens a wallet holds. Each token is a kind `9525`
 - `amount`: milli-units (`msats` for `bitcoin`).
 - `chain`: e.g. `bitcoin`; any energy-backed coin works the same.
 - `identity`: who can claim it — `pubkey <pubkey>`, `connection_key <ConnectionKey> <ia-pubkey>` or `cash`.
-- `state`: `live`, `pending`, `spent`, `expired`, `reclaimed`, `done` or `unknown`, plus the last check time.
+- `state`: `live`, `pending`, `spent`, `expired`, `reclaimed`, `done` or `unknown`, plus the last check time in unix seconds.
 - `wrap_key`: secret key of this entry's gift wrap, in hex.
-- `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status` or the `9522`. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
+- `expires_at`: when the bill returns to its minting Hub, in unix seconds; required for a bill that expires, taken from the Hub's reply, `cash_status`, or a `9522` whose zap signature verifies (NIP-CZ rule 7), never from any other `9522`, whose `expires_at` the sender chose. A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
 A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device` (§Writing), and the call's `amount` and `chain`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 - `request_id`: the call's NIP-CASH `request_id`.
