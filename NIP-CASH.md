@@ -215,15 +215,16 @@ it by its recomputed event id, independent of the call's parameters, and MUST ke
 until its `created_at` plus 360 seconds. A proof that failed verification, or whose call was refused or
 never committed, is not consumed, so a legitimate caller can retry with the identical proof.
 
-For example, the `cash_redeem` claim proof by the pubkey
-`79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`, with `created_at` `1720000000`, `content`
-empty and the tags `["d", <64 1s>]`, `["m", "cash_redeem"]` and `["bolt11_hash", <64 4s>]` in that order, has
-the NIP-01 event id `ad995b77237f369c79c5df82729d465eb9b5b4ddafb815995dee99db8d6b07c8`. The `cash_transfer`
-claim proof by the same key at the same time, with the tags `["d", <64 1s>]`, `["m", "cash_transfer"]`,
-`["new_identity_hash", "90aad9efdfc1980322c6248a266df6bca9d766bb360654f5e2bfecccc941bed0"]` (a `pubkey`
-`new_identity` of that same key) and `["amount_millis", "5000"]`, has the id
-`c466018a22842f8b79c7447cebf3a023add78ff7d053d8b715205343ae4ad8df`. A consolidate of the two sources <64 1s>
-and <64 2s>, in that order, has `s` `ca9034371c79ec26ec0496b53420a1117d4f765800dfdce138138b139d591f13`.
+For example, claim proofs by the pubkey `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`,
+with `created_at` `1720000000` and `content` empty, the tags in the order listed:
+
+| proof | tags | NIP-01 event id |
+|---|---|---|
+| the `cash_redeem` claim proof | `["d", <64 1s>]`, `["m", "cash_redeem"]` and `["bolt11_hash", <64 4s>]` | `ad995b77237f369c79c5df82729d465eb9b5b4ddafb815995dee99db8d6b07c8` |
+| the `cash_transfer` claim proof by the same key at the same time | `["d", <64 1s>]`, `["m", "cash_transfer"]`, `["new_identity_hash", "90aad9efdfc1980322c6248a266df6bca9d766bb360654f5e2bfecccc941bed0"]` (a `pubkey` `new_identity` of that same key) and `["amount_millis", "5000"]` | `c466018a22842f8b79c7447cebf3a023add78ff7d053d8b715205343ae4ad8df` |
+
+A consolidate of the two sources <64 1s> and <64 2s>, in that order, has `s`
+`ca9034371c79ec26ec0496b53420a1117d4f765800dfdce138138b139d591f13`.
 
 ## Data Model
 
@@ -2170,6 +2171,20 @@ or malformed TLV data MUST also be rejected rather than read out of bounds.
 A decoder MUST treat a wrong-length, duplicated or unpaired `5`/`6`, or a malformed `8`, as **no valid
 provenance** and decode the rest normally, exactly as §Mint Provenance requires.
 
+What a decoder does with each fault, by the rules above:
+
+| fault | decoder |
+|---|---|
+| `0` or `2` missing | rejects the token |
+| a wrong-length value in a fixed-length field other than `5`, `6`, `7`, `8` | rejects the token |
+| a repeated field the table allows at most once, other than those | rejects the token |
+| truncated or malformed TLV data | rejects the token |
+| `5`/`6` wrong-length, duplicated or unpaired | no valid provenance; decodes the rest |
+| `8` wrong-length, repeated or unknown-valued | no valid provenance; decodes the rest |
+| `8` absent | a legacy token |
+| `7` wrong-length or repeated | drops it; the token stays intact |
+| an unrecognized type | ignores the entry |
+
 ### Relay Hints Are Mandatory
 
 **Every credential this document defines MUST carry at least one non-empty relay hint, and an encoder MUST
@@ -2350,6 +2365,14 @@ do so before committing any funds. No request parameter opts in or out.
   trusts. A type-`5`/`6` pair that doesn't recover to a valid pubkey over its own payload
   MUST be treated as carrying no valid provenance — never as a hard decode failure.
 
+  The same verification, step by step:
+
+  1. rebuild the payload for scheme `8` from the HRP, `0`, `6`, `1` and `2`, plus a zap bill's Cash Zap tags;
+  2. prepend the HRP's signed-message prefix;
+  3. hash the result twice with SHA-256;
+  4. recover the signer from TLV `5`, its header read as above;
+  5. compare the recovered key's x-only part with the minter the holder expects or trusts.
+
   The recovered minter is a 33-byte compressed key. Wherever a verifier compares it with a Nostr pubkey —
   an announcement's author, the `pubkey` that `get_info` returns, or any other
   x-only key — it MUST compare the recovered key's x-only part, the 32 bytes after its prefix byte, as 64
@@ -2371,15 +2394,19 @@ and use it to determine which base asset backs the wallet.
 
 ### Token Test Vectors
 
-A complete scheme-`1` token, so an encoder and a decoder can check themselves end to end. Its inputs: the
-wallet pubkey `c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5` (the x-only pubkey of the
-private key 2), the relay hints `wss://relay.example.com` and `wss://backup.example.net` in that order, the
-connection secret `000102…1f`, identity required `1`, the amount 21000 millis, and the hub group `ed79e8ff`
-(the first four bytes of the `sha256` of the 64-character hex text of
-`f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the x-only pubkey of the private key 3).
-The minter's private key is 32 bytes of `0x01`, whose compressed pubkey is
-`031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f`. The signed payload is the scheme-`1`
-example above with this wallet pubkey, its signed-message digest is
+A complete scheme-`1` token, so an encoder and a decoder can check themselves end to end. Its inputs:
+
+| input | value |
+|---|---|
+| wallet pubkey | `c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5` (the x-only pubkey of the private key 2) |
+| relay hints | `wss://relay.example.com` and `wss://backup.example.net`, in that order |
+| connection secret | `000102…1f` |
+| identity required | `1` |
+| amount | 21000 millis |
+| hub group | `ed79e8ff`: the first four bytes of the `sha256` of the 64-character hex text of `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the x-only pubkey of the private key 3 |
+| minter's private key | 32 bytes of `0x01`, whose compressed pubkey is `031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f` |
+
+The signed payload is the scheme-`1` example above with this wallet pubkey, its signed-message digest is
 `f602d18ce44b4f229a202eb93b3e21978b2b98ffe3354fa56e2740195a38ca25`, and a signer using RFC 6979 nonces and a
 low S produces recid 1, so the TLV `5` header is 32. The TLV stream, in ascending type order, and the token:
 
@@ -2405,11 +2432,20 @@ The token is one 348-character string, broken here only to fit the page. A verif
 compressed key above from it; a signer whose nonces differ produces a different, equally valid TLV `5`, and
 so a different token, which still verifies.
 
-A scheme-`2` payload for a zap of an `a` coordinate: with the same wallet pubkey and relay hash, 5000 millis,
-`<recipient>` the x-only pubkey of the private key 5, `<sender>` that of the private key 6, `zap_target`
-`30023:e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13:my-article` (its `sha256`,
-`<target_hash>`, is `79c69fd2170904248edc898066fce02a7fefa36235f4fb863f4329c99f891b8f`), `<issued_at>`
-1720000000 and a bill that never expires, the signed payload is:
+A scheme-`2` payload for a zap of an `a` coordinate:
+
+| input | value |
+|---|---|
+| wallet pubkey, relay hash | the same as above |
+| amount | 5000 millis |
+| `<recipient>` | the x-only pubkey of the private key 5 |
+| `<sender>` | that of the private key 6 |
+| `zap_target` | `30023:e493dbf1c10d80f3581e4904930b1404cc6c13900ee0758474fa94abe8c4cd13:my-article` |
+| `<target_hash>` | its `sha256`, `79c69fd2170904248edc898066fce02a7fefa36235f4fb863f4329c99f891b8f` |
+| `<issued_at>` | 1720000000 |
+| expiry | a bill that never expires |
+
+With these, the signed payload is:
 
 ```
 satscash-zap:v1:satscash:c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5:5000:
