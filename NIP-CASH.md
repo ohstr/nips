@@ -469,7 +469,9 @@ On receiving `cash_redeem`, the wallet MUST, in order:
 4. Pay `invoice` and mark the slice redeemed, atomically — the claim MUST be first-wins, so a slice a
    concurrent `cash_transfer`/`cash_consolidate`, an expiry sweep, an owner delete or a removal already
    claimed is refused here with `RESTRICTED` rather than paid twice. A failure
-   after payment begins MUST NOT leave the slice redeemable a second time. A payment that fails before it
+   after payment begins MUST NOT leave the slice redeemable a second time while the payment may still
+   settle. Once the Hub knows that payment definitely failed, the slice is claimable again, and the Hub MAY
+   refuse further redemptions of it with `RATE_LIMITED` for a while. A payment that fails before it
    can have settled is refused with `PAYMENT_FAILED` and leaves the slice claimable. That includes a
    same-node payment the receiving wallet refuses, for example a Circle Wallet whose own caps, holdings
    ceiling or state refuse the credit ([NIP-CW](./NIP-CW.md)). A Hub MUST bound the routing fee it pays for
@@ -2345,6 +2347,9 @@ MAY delete a Cash Wallet in any redemption state, and any remaining balance MUST
 Hub before the connection record is removed. A Hub MUST NOT delete a wallet holding an unclaimed ordered
 slice: only its holder ends it.
 
+**Hub teardown.** A Cash Hub MUST NOT be deleted while any bill it minted is live, or while any of its
+`request_id` records is still within retention.
+
 A SLICE is never partially spent. Its state is one of the following, derived while the slice is live and
 stored once it becomes terminal:
 
@@ -2467,7 +2472,8 @@ covers cash mode.
   trusts.
 - **A kind-35522 attestation's `expiration` tag is mandatory here**, unlike in NIP-IC, since this document
   defines no per-attestation revocation: an implementation MUST reject an attestation carrying no
-  `expiration` tag, or one that has already passed. A conformant attestation MUST also carry `platform` and
+  `expiration` tag, or one that has already passed. That `expiration` is the only bound on an attestation's
+  age. A conformant attestation MUST also carry `platform` and
   `evidence` tags per NIP-IC's own shape, even though this document's own verification only checks their
   presence, not their content.
 - **Recipient-sum overflow MUST be guarded explicitly**, with a per-recipient upper bound plus an
