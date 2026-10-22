@@ -11,13 +11,13 @@ AltZap: Cross-Chain Lightning Zaps
 
 ## Abstract
 
-AltZap extends NIP-57's zap request/receipt/LNURL flow with three kinds (`9520`, `9521`, `9523`): settlement on any energy-backed coin routable over the Lightning Network, named by a mandatory `chain` tag; senders and recipients identified by their Nostr pubkey or, for someone with no Nostr keypair yet, by a **ConnectionKey** (NIP-IC); and an on-behalf request (`9523`) whose signer is not the sender. AltZap is not wire-compatible with NIP-57 (§Backwards Compatibility).
+AltZap extends NIP-57's zap request/receipt/LNURL flow with three kinds (`9520`, `9521`, `9523`): settlement on any energy-backed coin routable over the Lightning Network, named by a mandatory `chain` tag; senders and recipients identified by their Nostr pubkey or, for someone with no Nostr keypair yet, by a **ConnectionKey** (NIP-IC); and an on-behalf request (`9523`) whose signer is not the sender. AltZap is not wire-compatible with NIP-57.
 
 ## Terminology
 
 - **LNURL server**: The recipient's LNURL-pay server (NIP-57's "lnurl server"; LUD-06's "LN SERVICE"). It receives `9520`/`9523` requests at its callback, issues the invoices and publishes the resulting `9521` receipts.
 - **Web Identity**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** a Web Identity.
-- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. A client builds it from `<platform-user-id>` in its canonical form ([NIP-IC](./NIP-IC.md) §Canonical Platform User IDs); for a platform without a canonical form there, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
+- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. A client builds it from `<platform-user-id>` in its canonical form; for a platform without a canonical form there, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
 - **Proxy Agent**: A bot or service that signs a `9523` event on behalf of a platform user it does not hold private keys for.
 - **Chain**: The Lightning-routable settlement network, e.g. `bitcoin`. Examples use `examplecoin` for any Lightning-routable chain other than Bitcoin.
 
@@ -72,13 +72,13 @@ All `p` (recipient) and `P` (sender) tags use:
 ```
 
 - `[1]` is a 64-character lowercase hex Nostr pubkey **or** a ConnectionKey. A receiver MUST reject any other value, uppercase hex included, and never lowercases it.
-- `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey. A sender MUST write any other value in NIP-IC's platform-name format ([NIP-IC](./NIP-IC.md) §Canonical Platform User IDs: one or more of `a`–`z`, `0`–`9`, `.`, `_` and `-`), and a receiver MUST reject a tag whose `[2]` does not, and never lowercases or otherwise repairs it.
+- `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey. A sender MUST write any other value in NIP-IC's platform-name format (`0`–`9`, `.`, `_` and `-`), and a receiver MUST reject a tag whose `[2]` does not, and never lowercases or otherwise repairs it.
 
 `9521` receipts additionally allow a 4th element, `["p/P", "<hex-or-ConnectionKey>", "<platform>", "<handle>"]` — a stable, human-readable provider handle (e.g. a Discord username). It is informational only and MUST NOT be used for identity resolution.
 
 ### The `ia` Tag
 
-A ConnectionKey on a platform outside NIP-IC's canonical table (NIP-IC §Canonical Platform User IDs) is defined by the Identity Authority (IA) that attested it, and only that IA's attestations resolve it to an account. A request addressed to such a key names that IA:
+A ConnectionKey on a platform outside NIP-IC's canonical table is defined by the Identity Authority (IA) that attested it, and only that IA's attestations resolve it to an account. A request addressed to such a key names that IA:
 
 ```
 ["ia", "<ia-pubkey>"]
@@ -87,7 +87,7 @@ A ConnectionKey on a platform outside NIP-IC's canonical table (NIP-IC §Canonic
 - `[1]` is the IA's pubkey, 64-character lowercase hex.
 - A sender MUST add exactly one `ia` tag to a `9520`/`9523` whose `p` is a ConnectionKey on a platform outside NIP-IC's canonical table, naming the IA whose `35522` attestation or `nconnection` it took the key from. It MAY add one when `p` is a ConnectionKey on a platform in that table. It MUST NOT add one when `p` is a Nostr pubkey.
 - `ia` names the IA of `p` only. `P` addresses no value, and no tag names its IA.
-- An LNURL server MUST reject a request whose `ia` names an IA it does not trust. It resolves a `p` that carries `ia` only through that IA's attestations ([NIP-IC](./NIP-IC.md) §Verification Model), and a `p` without `ia` through any IA it trusts.
+- An LNURL server MUST reject a request whose `ia` names an IA it does not trust. It resolves a `p` that carries `ia` only through that IA's attestations, and a `p` without `ia` through any IA it trusts.
 - The LNURL server copies the request's `ia` tag unchanged into the `9521` receipt.
 
 ### Kind 9520 — AltZap Request
@@ -116,7 +116,7 @@ A ConnectionKey on a platform outside NIP-IC's canonical table (NIP-IC §Canonic
 
 Signed by the sender's own key; the sender is always the event signer for `9520`.
 
-**Required tags**: `p` (exactly one), `ia` (exactly one when `p` is a ConnectionKey on a platform outside NIP-IC's canonical table; §The `ia` Tag), `amount` (positive integer, milli-units — `msats` for `bitcoin`, that chain's milli-unit otherwise), `chain`, `lnurl` (bech32 LNURL, see Verification Algorithm), `relays` (one or more `wss://`/`ws://` URLs).
+**Required tags**: `p` (exactly one), `ia` (exactly one when `p` is a ConnectionKey on a platform outside NIP-IC's canonical table), `amount` (positive integer, milli-units — `msats` for `bitcoin`, that chain's milli-unit otherwise), `chain`, `lnurl` (bech32 LNURL, see Verification Algorithm), `relays` (one or more `wss://`/`ws://` URLs).
 **Optional tags**: `e` (at most one, 32-byte lowercase hex — the specific note being zapped), `a` (at most one, a `<kind>:<pubkey>:<d-tag>` coordinate, for zapping a parameterized replaceable event), `ia` (at most one, when `p` is a ConnectionKey on a platform in NIP-IC's canonical table), `k` (stringified kind number of the target event). A `9520` MUST NOT carry a `P` tag: the signer is the sender.
 
 **Description-hash binding.** Once validated, the LNURL server issues a BOLT11 invoice whose `description_hash` equals the SHA256 of the event JSON exactly as received in the `nostr` parameter (after URL-decoding). The LNURL server MUST NOT re-serialize the event before hashing, and the receipt's `description` tag carries that same string verbatim.
@@ -235,7 +235,7 @@ A client MUST apply receipt rule 10 before it displays a receipt as a payment: a
 
 ## Custodial Settlement
 
-An LNURL server MAY act as a temporary custodian when the resolved recipient has no reachable wallet at settlement time — either because `p` is a ConnectionKey with no linked identity yet, or because a linked Nostr wallet is unresponsive. In both cases the LNURL server publishes the `9521` receipt as normal and holds the settled value internally against the recipient's ConnectionKey or pubkey until they authenticate and connect a wallet, at which point the LNURL server sweeps the balance to them. For a `p` that carries `ia`, the LNURL server MUST hold the value against that ConnectionKey and IA together, and sweep it only to the pubkey that IA's current attestation for the key names (NIP-IC §Verification Model); a `p` without `ia` is swept to the pubkey a trusted IA's attestation names. Custody is otherwise an operational behavior of the LNURL server, with no event of its own.
+An LNURL server MAY act as a temporary custodian when the resolved recipient has no reachable wallet at settlement time — either because `p` is a ConnectionKey with no linked identity yet, or because a linked Nostr wallet is unresponsive. In both cases the LNURL server publishes the `9521` receipt as normal and holds the settled value internally against the recipient's ConnectionKey or pubkey until they authenticate and connect a wallet, at which point the LNURL server sweeps the balance to them. For a `p` that carries `ia`, the LNURL server MUST hold the value against that ConnectionKey and IA together, and sweep it only to the pubkey that IA's current attestation for the key names; a `p` without `ia` is swept to the pubkey a trusted IA's attestation names. Custody is otherwise an operational behavior of the LNURL server, with no event of its own.
 
 ## Backwards Compatibility
 
@@ -243,7 +243,7 @@ AltZap is **not** wire-compatible with NIP-57: a client that only understands `9
 
 ## Security Considerations
 
-- **Cross-chain replay**: a request is settled only on the chain its `chain` tag names; an LNURL server rejects a mismatch (§LNURL Callback) and never substitutes another chain.
+- **Cross-chain replay**: a request is settled only on the chain its `chain` tag names; an LNURL server rejects a mismatch and never substitutes another chain.
 - **Proxy trust boundary**: `9523`'s signing `pubkey` is the Proxy Agent, not the sender. Clients and LNURL servers MUST read `P`, not `pubkey`, when displaying or attributing the sender.
 - **ConnectionKey collisions**: a ConnectionKey is a one-way hash of `"<platform>:<platform-user-id>"`. Implementations MUST NOT accept a claimed reverse mapping without independent verification (e.g. a signed identity-connection event) — the receipt alone is not proof of ownership.
 - **`r`/`R` disclosure**: resolving a ConnectionKey to a real pubkey in a receipt is a deliberate, visible linkage of a Web Identity to a Nostr identity. An LNURL server SHOULD only populate `r`/`R` when it has verified authorization to make that link public.

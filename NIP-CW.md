@@ -17,14 +17,14 @@ of them. This document defines the **Circle Wallet**, the personal wallet a memb
 
 Every member's wallet lives on the host's node, so a payment between two members settles as a fee-free
 internal transfer. A payment to anyone outside the circle goes out over ordinary Lightning. Who counts
-as a member is a host configuration choice (§Membership).
+as a member is a host configuration choice.
 
 ## Non-Goals
 
 This document does not define:
 
 - pre-funded, owner-initiated payouts to named recipients who are not members;
-- a "followers" policy, one that checks the *requester's own* published lists (§Membership);
+- a "followers" policy, one that checks the *requester's own* published lists;
 - circles denominated in anything other than sats.
 
 ## Terminology
@@ -47,7 +47,7 @@ This document uses MUST, MUST NOT, SHOULD, and MAY as defined in RFC 2119.
 | Method | Caller | Scope | Purpose |
 |---|---|---|---|
 | `create_circle_wallet` | a member, over the Circle Wallet Hub connection | `circle_wallet` | Self-service request for the caller's own Circle Wallet |
-| `delete_circle_wallet` | a member, over their own Circle Wallet connection | none: every Circle Wallet connection | Delete the caller's own Circle Wallet once it holds at most dust (§Deleting a Circle Wallet) |
+| `delete_circle_wallet` | a member, over their own Circle Wallet connection | none: every Circle Wallet connection | Delete the caller's own Circle Wallet once it holds at most dust |
 
 The NIP-47 methods a Circle Wallet connection is granted, and which of them each state allows, are in
 §What a Circle Wallet Connection Allows.
@@ -57,9 +57,9 @@ The NIP-47 methods a Circle Wallet connection is granted, and which of them each
 This section describes the information a Circle Wallet Hub MUST be able to represent. It is not a wire
 format or a storage schema.
 
-A Circle Identity MUST record which admission mechanism it uses (§Membership), plus the data that
+A Circle Identity MUST record which admission mechanism it uses, plus the data that
 mechanism needs: the set of allowlisted pubkeys, or the follow set's address — its author (the provider
-pubkey) and its `d` identifier (§Membership). A Circle
+pubkey) and its `d` identifier. A Circle
 Identity MAY be referenced by more than one Circle Wallet Hub at once. It MUST NOT be tied to any one
 Hub's lifetime.
 
@@ -67,34 +67,32 @@ A Circle Wallet Hub MUST maintain, for itself:
 
 - the Circle Identity governing who may request a wallet from it;
 - a ceiling on the send cap (`max_amount`) and one on the receive cap (`max_receive`) a member may
-  request for their own wallet (§Own Funds and Caps);
-- a floor on how tight a member's requested budget-renewal period may be (§Budget Renewal Floor);
+  request for their own wallet;
+- a floor on how tight a member's requested budget-renewal period may be;
 - a ceiling on, and default value for, an issued wallet's lifetime, each in seconds with `0` meaning
   never. A Hub MUST NOT set a default above its ceiling, so a non-zero ceiling rules out a default of `0`;
 - the grace period a member gets before their wallet is deleted, and a dust threshold: the largest
-  balance it may keep from a wallet it deletes (§Lifecycle and Deletion);
-- a holdings ceiling: the most its Active wallets may hold together (§Own Funds and Caps);
-- a routing-fee reserve rule, the most routing fee a member's Lightning payment may pay (§Own Funds and
-  Caps);
+  balance it may keep from a wallet it deletes;
+- a holdings ceiling: the most its Active wallets may hold together;
+- a routing-fee reserve rule, the most routing fee a member's Lightning payment may pay;
 - optionally, a ceiling on what its wallets together may send as external traffic in one period of its
-  own (§Own Funds and Caps);
-- optionally, a rotation delay (§Recovering a Lost Connection).
+  own;
+- optionally, a rotation delay.
 
-For each Circle Wallet it issues, a Hub records the member's `connection_pubkey` (§Request) and authorizes
-it as that wallet's client key. It never generates, receives or stores the matching secret (§Pairing
-Connection).
+For each Circle Wallet it issues, a Hub records the member's `connection_pubkey` and authorizes
+it as that wallet's client key. It never generates, receives or stores the matching secret.
 
 For each member who currently holds an Active or Suspended Circle Wallet under a given Hub, an
 implementation MUST be able to determine that fact. §Membership's one-wallet-per-member rule is checked
-against it. That fact MUST stop being true once the member's wallet is neither Active nor Suspended
-(§Lifecycle and Deletion), freeing them to request a new one.
+against it. That fact MUST stop being true once the member's wallet is neither Active nor Suspended,
+freeing them to request a new one.
 
 A Hub also keeps, for each Circle Wallet, a join record written in step 9's transaction: the Circle Hub
 connection as its target, the join's `pubkey` as its authorizer, its `connection_pubkey`, its proof's
-`created_at`, and the `encrypted_details` it returns (§Lost Join Reply).
+`created_at`, and the `encrypted_details` it returns.
 
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has already
-consumed for `create_circle_wallet` or a member request (§Identity Proof, §Recovering a Lost Connection).
+consumed for `create_circle_wallet` or a member request.
 It MUST keep a join proof's ID in that record at least until the proof's `created_at` plus 360 seconds,
 past the last moment check 4 could still accept it, and a member request's ID as §Recovering a Lost
 Connection says.
@@ -138,18 +136,18 @@ again in full. With `never`, the wallet's whole life is one period.
   The member keeps the secret and never sends it; the Hub authorizes this pubkey as the wallet's client key.
   A request without it MUST be rejected — there is no Hub-generated alternative. A member SHOULD generate a
   fresh keypair per request, so the connection key links to nothing else they use.
-- `max_amount` — REQUIRED, a JSON integer, the send cap per budget period on the wallet's external traffic
-  (§Own Funds and Caps), in the chain's milli-unit (msats on Bitcoin, the same milli-unit for any other
-  energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling (§Data Model).
+- `max_amount` — REQUIRED, a JSON integer, the send cap per budget period on the wallet's external traffic,
+  in the chain's milli-unit (msats on Bitcoin, the same milli-unit for any other
+  energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling.
 - `max_receive` — REQUIRED, a JSON integer, the receive cap per budget period on the wallet's external
-  traffic (§Own Funds and Caps), in the same milli-unit. MUST NOT exceed the Hub's own per-wallet receive
-  ceiling (§Data Model).
+  traffic, in the same milli-unit. MUST NOT exceed the Hub's own per-wallet receive
+  ceiling.
 - `expiry` — OPTIONAL, a JSON integer, the wallet's lifetime in seconds; if omitted or zero, it MUST
-  default to the Hub's own default lifetime (§Data Model), not its ceiling.
+  default to the Hub's own default lifetime, not its ceiling.
 - `budget_renewal` — OPTIONAL, one of NIP-47's `daily` | `weekly` | `monthly` | `yearly` | `never`, with
   periods as §Budget Renewal Floor defines them; if omitted, it MUST default to `never`. Whether omitted
-  or explicit, the resolved value MUST satisfy the Hub's own renewal floor (§Budget Renewal Floor).
-- `identity_event` — REQUIRED, the JSON-encoded kind-23199 identity proof (§Identity Proof).
+  or explicit, the resolved value MUST satisfy the Hub's own renewal floor.
+- `identity_event` — REQUIRED, the JSON-encoded kind-23199 identity proof.
 
 ### Response
 
@@ -180,7 +178,7 @@ It carries no secret and no connection string. The member builds its own connect
 `wallet_pubkey`, `relays` and the secret it kept —
 `nostr+walletconnect://<wallet_pubkey>?relay=<each relay>&secret=<its own secret>` — and a Hub MUST NOT
 return a secret, a `pairing_uri`, or anything else derived from one. `relays` MUST carry at least one
-non-empty relay URL, in failover order (§Relay Hints Are Mandatory in NIP-CASH).
+non-empty relay URL, in failover order.
 
 `connection_pubkey` repeats the request's. A client MUST reject details whose `connection_pubkey` is
 missing or differs from the one in its request, so an old reply cannot pass as the answer to a new one.
@@ -188,7 +186,7 @@ missing or differs from the one in its request, so an old reply cannot pass as t
 `expires_at` is the wallet's expiry in unix seconds, or `0` when the wallet never expires.
 
 `dust_threshold_millis` is the Hub's dust threshold when the wallet was created, fixed for the wallet's
-life like `fees_ppm` (§Lifecycle and Deletion). `rotation_delay_secs` is present only on a Hub that serves
+life like `fees_ppm`. `rotation_delay_secs` is present only on a Hub that serves
 §Recovering a Lost Connection: the wallet's rotation delay, likewise fixed when it was created.
 
 `max_amount` and `max_receive` are the send and receive caps as the Hub resolved them, in the same
@@ -219,49 +217,47 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, the `connection` tag equals the
    requested `connection_pubkey`, and the `terms` tag equals the requested `max_amount`, `max_receive`,
    `expiry` and `budget_renewal`.
-3. Check the proof's event ID against the single-use replay guard (§Identity Proof, check 8). A Hub MUST
-   refuse a previously-consumed event ID with `REQUEST_REUSED` (§Errors), even if the proof is otherwise
+3. Check the proof's event ID against the single-use replay guard (check 8). A Hub MUST
+   refuse a previously-consumed event ID with `REQUEST_REUSED`, even if the proof is otherwise
    valid and still within its freshness window. The proof's ID is recorded as used here, before any later
    check.
 4. Authorize the requester against the Hub's Circle Identity: an `allowlist`-policy Hub performs a
-   direct lookup, while a `follow_set`-policy Hub resolves the current version of its follow set
-   (§Membership). A Hub that cannot resolve that list yet MUST NOT fall back to denying membership. It
-   MUST instead answer `NOT_READY` (§Errors), which the caller can retry.
-5. Check the one-wallet-per-(Hub, identity) rule (§Membership), rejecting with `WALLET_EXISTS`
-   (§Errors) if the identity already holds an Active or Suspended Circle Wallet under this Hub.
+   direct lookup, while a `follow_set`-policy Hub resolves the current version of its follow set.
+   A Hub that cannot resolve that list yet MUST NOT fall back to denying membership. It
+   MUST instead answer `NOT_READY`, which the caller can retry.
+5. Check the one-wallet-per-(Hub, identity) rule, rejecting with `WALLET_EXISTS`
+   if the identity already holds an Active or Suspended Circle Wallet under this Hub.
 6. Validate `max_amount` and `max_receive` against the Hub's own per-wallet ceilings, the resolved
    `budget_renewal` against the Hub's own renewal floor, and, if `expiry` was explicitly supplied
-   (non-zero), that it does not exceed the Hub's own expiry ceiling (§Data Model), where a ceiling of `0`
-   means no limit. A request over any of these limits is refused with `LIMIT_EXCEEDED` (§Errors), whose
+   (non-zero), that it does not exceed the Hub's own expiry ceiling, where a ceiling of `0`
+   means no limit. A request over any of these limits is refused with `LIMIT_EXCEEDED`, whose
    message names the field.
 7. Rate-limit per requester `pubkey`. A Hub SHOULD bound how often one member may ask, and MUST answer a
    throttled request with a distinct rate-limit error rather than a generic failure. That error is
-   `RATE_LIMITED` (§Errors). Quota SHOULD be spent only by requests that got this far.
+   `RATE_LIMITED`. Quota SHOULD be spent only by requests that got this far.
 8. Guard against concurrent requests against the same Hub. A Hub MUST NOT let two in-flight requests both
-   pass step 9 against the same state; rejecting the second with `RATE_LIMITED` (§Errors) is
+   pass step 9 against the same state; rejecting the second with `RATE_LIMITED` is
    sufficient.
-9. Inside one transaction, verify that the circle's holdings (§Own Funds and Caps) are below its holdings
+9. Inside one transaction, verify that the circle's holdings are below its holdings
    ceiling. Then create the Circle Wallet connection, authorizing `connection_pubkey` as its client key,
-   insert its membership row, and write its join record (§Data Model). The membership row's uniqueness
+   insert its membership row, and write its join record. The membership row's uniqueness
    constraint is the authoritative guard for step 5, so a conflict here, a `connection_pubkey` already
-   authorized for another connection on this node or pending in any rotation on it (§Recovering a Lost
-   Connection), or a failing holdings check, MUST roll back the entire transaction, including the
+   authorized for another connection on this node or pending in any rotation on it, or a failing holdings check, MUST roll back the entire transaction, including the
    just-created connection and permission rows. A uniqueness conflict is refused with `WALLET_EXISTS`, a
    `connection_pubkey` in use or pending with `RESTRICTED`, and a failing holdings check with
-   `INSUFFICIENT_CAPACITY` (§Errors). The Hub MUST NOT commit the transaction once the proof is past its
-   freshness window (§Identity Proof), checked at commit (§Lost Join Reply), and refuses such a join with
+   `INSUFFICIENT_CAPACITY`. The Hub MUST NOT commit the transaction once the proof is past its
+   freshness window, checked at commit, and refuses such a join with
    `BAD_REQUEST`, since nothing was made and the outcome is final. On any rollback, the step-3 replay
    record is not rolled back.
 
-   Step 8's guard is process-local. Each holdings check, here or when crediting a payment (§Own Funds
-   and Caps), and the change it guards need a database-level lock scoped to the Hub, so an
+   Step 8's guard is process-local. Each holdings check, here or when crediting a payment, and the change it guards need a database-level lock scoped to the Hub, so an
    implementation whose datastore cannot provide one MUST NOT be run as multiple concurrent processes
    against a shared database. A transaction-scoped advisory lock is sufficient where the datastore
    supports one.
 10. After the transaction commits, never before, publish the new connection's relay subscription.
 11. Return the `encrypted_details` recorded in step 9: a single ciphertext containing `wallet_pubkey`,
     `connection_pubkey`, `relays` and every resolved wallet parameter, and no secret. Nothing describing
-    the wallet may travel outside it (§Response).
+    the wallet may travel outside it.
 
 ### Errors
 
@@ -272,15 +268,15 @@ A Hub MUST use these error codes for these refusals, on either transport, each i
 |---|---|---|
 | `BAD_REQUEST` | a param is missing or malformed (step 1), or the proof passed its freshness window before the join could commit (step 9); nothing was made | yes, corrected, with a new proof |
 | `UNAUTHORIZED` | the identity proof does not verify (step 2) | yes, with a new proof |
-| `REQUEST_REUSED` | the identity proof was already used (step 3); a copy of this join may have been made | no; look the join up (§Lost Join Reply) |
+| `REQUEST_REUSED` | the identity proof was already used (step 3); a copy of this join may have been made | no; look the join up |
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
 | `RESTRICTED` | the requester is not a member of this circle (step 4), or its `connection_pubkey` is in use or pending in a rotation on this node (step 9) | no; for a key in use, yes with a new proof and a new `connection_pubkey` |
-| `WALLET_EXISTS` | the requester already holds an Active or Suspended Circle Wallet under this Hub (step 5) | no, until it is neither (§Lifecycle and Deletion) |
+| `WALLET_EXISTS` | the requester already holds an Active or Suspended Circle Wallet under this Hub (step 5) | no, until it is neither |
 | `LIMIT_EXCEEDED` | `max_amount`, `max_receive`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other values |
 | `RATE_LIMITED` | the requester has asked too often, or another request held the Hub (steps 7–8) | yes, later |
 | `INSUFFICIENT_CAPACITY` | the circle's holdings have reached its holdings ceiling (step 9) | yes, later |
 
-A wallet's own refusals, and a member request's (§Recovering a Lost Connection), use these:
+A wallet's own refusals, and a member request's, use these:
 
 | code | meaning | retry? |
 |---|---|---|
@@ -288,58 +284,55 @@ A wallet's own refusals, and a member request's (§Recovering a Lost Connection)
 | `REQUEST_REUSED` | a member request's id was already used | no; it was already applied or refused |
 | `NOT_FOUND` | a member request names a wallet the Hub does not hold, or one already Deleted | no |
 | `NOT_IMPLEMENTED` | the Hub, or the named wallet, does not serve §Recovering a Lost Connection | no |
-| `INSUFFICIENT_BALANCE` | the payment's full cost exceeds the wallet's balance (§Own Funds and Caps) | yes, for less |
-| `QUOTA_EXCEEDED` | the payment or invoice would pass the wallet's send cap or receive room, or the circle's outbound ceiling (§Own Funds and Caps) | yes, in a later period or for less |
-| `INSUFFICIENT_CAPACITY` | the invoice or payment would take the circle's holdings past its holdings ceiling (§Own Funds and Caps) | yes, later or for less |
-| `RATE_LIMITED` | too many same-circle transfers, invoices, open invoices or pending payments (§Own Funds and Caps) | yes, later |
-| `PAYMENT_FAILED` | the payment could not be routed, for example within the routing-fee reserve (§Own Funds and Caps) | yes, later or another way |
-| `RESTRICTED` | a method the wallet's state does not allow, an invoice with no amount, an invoice for a wallet that is not Active, a deletion while the wallet holds more than dust or has a payment in flight, or a rotation to a key in use (§What a Circle Wallet Connection Allows, §Own Funds and Caps, §Deleting a Circle Wallet, §Recovering a Lost Connection) | no |
-| `ROTATION_PENDING` | the wallet already has a pending rotation (§Recovering a Lost Connection) | no, until it completes or is cancelled |
-| `FROZEN` | the wallet is frozen, so its current key is refused (§Recovering a Lost Connection) | no, until it is unfrozen or rotated |
+| `INSUFFICIENT_BALANCE` | the payment's full cost exceeds the wallet's balance | yes, for less |
+| `QUOTA_EXCEEDED` | the payment or invoice would pass the wallet's send cap or receive room, or the circle's outbound ceiling | yes, in a later period or for less |
+| `INSUFFICIENT_CAPACITY` | the invoice or payment would take the circle's holdings past its holdings ceiling | yes, later or for less |
+| `RATE_LIMITED` | too many same-circle transfers, invoices, open invoices or pending payments | yes, later |
+| `PAYMENT_FAILED` | the payment could not be routed, for example within the routing-fee reserve | yes, later or another way |
+| `RESTRICTED` | a method the wallet's state does not allow, an invoice with no amount, an invoice for a wallet that is not Active, a deletion while the wallet holds more than dust or has a payment in flight, or a rotation to a key in use | no |
+| `ROTATION_PENDING` | the wallet already has a pending rotation | no, until it completes or is cancelled |
+| `FROZEN` | the wallet is frozen, so its current key is refused | no, until it is unfrozen or rotated |
 
 A client MUST sign a new proof for a retry after any refusal. A proof refused at step 3 or later is
 consumed, so resending it is refused with `REQUEST_REUSED`.
 
 **`REQUEST_REUSED` is not a failure:** an earlier copy of the join may have made the wallet. A client
 that receives it for a join it sent MUST NOT read it as a failure: it keeps the join pending and looks it
-up (§Lost Join Reply). Only after the lookup answers `unknown` MAY it join again, with a newly signed
+up. Only after the lookup answers `unknown` MAY it join again, with a newly signed
 proof and a new `connection_pubkey`.
 
 ### Lost Join Reply
 
 A member whose join reply never arrives recovers it with NIP-CASH's `cash_lookup` on the private
-transport (§The Private Transport in NIP-CASH), with params
+transport, with params
 `{"connection_pubkey": "<hex>", "deadline": <unix>}` in place of `request_id`:
 
 - **The item's `target` is the Circle Hub connection**, the original join's target, and it carries a bill
-  proof signed with the Hub connection's secret, exactly as a join does (§What differs from a bill
-  operation).
+  proof signed with the Hub connection's secret, exactly as a join does.
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
   request that named this `connection_pubkey`. The record is matched on (signer, `connection_pubkey`): a
   record held under another signer is no match, and a lookup with no match is answered by its `deadline`
   as below, not omitted. Only a lookup whose item proof or bill proof does not verify is omitted.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
-  would have checked the reply (§Response). A lookup naming the key a rotation moved the wallet to is
+  would have checked the reply. A lookup naming the key a rotation moved the wallet to is
   answered as §Recovering a Lost Connection says.
 - **`deadline` is the join's deadline, as the client sent it.** A join's deadline is its kind-23199
-  proof's `created_at` plus the 5-minute freshness window (§Identity Proof), and the Hub MUST NOT create a
+  proof's `created_at` plus the 5-minute freshness window, and the Hub MUST NOT create a
   wallet whose proof is past it, checked at commit (step 9). A `deadline` counts as at most 6 minutes
   from now (the 5-minute freshness window plus its 1-minute future allowance); a later one is treated as
   now plus 6 minutes. A lookup MUST NOT write state.
-- **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH
-  (§Looking Up a Call in NIP-CASH). `deadline` has passed when now > `deadline`.
+- **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH.
+  `deadline` has passed when now > `deadline`.
   - `pending`, with `retry_after` = `deadline` + 1, while `deadline` has not passed;
   - `unknown` while now is at most `deadline` plus 6 minutes: the join was not made and never will be;
   - `expired` after that: the outcome can no longer be known. A client MUST NOT join again automatically
     with that `connection_pubkey`, and SHOULD show the join to the member.
 - **The record outlives the lookup window.** The Hub keeps a join's record while now is no later than its
   `deadline` plus 6 minutes, even if the wallet is deleted sooner. It may drop the record only once the
-  wallet is deleted and now is later than that; a later lookup then answers `expired` (§The Record in
-  NIP-CASH).
+  wallet is deleted and now is later than that; a later lookup then answers `expired`.
 
-Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it (§Finding the
-Private Transport), and lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`
-(§Scope Surface in NIP-CASH). It MUST keep each join's record, with its `encrypted_details`, while the
+Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it, and lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`.
+It MUST keep each join's record, with its `encrypted_details`, while the
 wallet exists and for at least the window above. This works whichever transport carried the join.
 
 ## Identity Proof (kind 23199)
@@ -369,7 +362,7 @@ Verification MUST establish all of the following, and a failure of any one MUST 
 section that verifies a kind-23199 proof refers to this list.
 
 1. **The event's `kind` is 23199, and it carries no `action` tag.** An `action` tag marks a member
-   request about an existing wallet (§Recovering a Lost Connection), never a join.
+   request about an existing wallet, never a join.
 2. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
    compare; the single-use replay guard (check 8) is keyed on this id.
 3. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
@@ -386,7 +379,7 @@ section that verifies a kind-23199 proof refers to this list.
    the request's params and compare it byte for byte, and MUST reject a request whose tag differs. So
    `100000:200000:0:monthly` binds `max_amount` 100000, `max_receive` 200000, no `expiry` and `monthly`,
    while `0100000:200000:0:monthly` or `100000:200000:0:Monthly` matches no request.
-8. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
+8. **The `id` has not been used before**, against a single-use record. A previously-consumed
    id MUST be rejected even if everything above still holds.
 
 For example, the join proof by the pubkey `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`
@@ -402,7 +395,7 @@ used to probe list membership.
 
 ## Membership
 
-A Circle Identity's admission mechanism (§Terminology) supports two forms:
+A Circle Identity's admission mechanism supports two forms:
 
 - **allowlist**: an explicit list of pubkeys the host maintains directly.
 - **follow_set**: the pubkeys in one NIP-51 follow set (kind `30000`), named by its address: the
@@ -411,10 +404,9 @@ A Circle Identity's admission mechanism (§Terminology) supports two forms:
 
 **Removing a member suspends their wallet.** Whichever form it uses, a Hub MUST, within its staleness
 bound, suspend the Active Circle Wallet of any pubkey a successful resolution (below) no longer names as
-a member. A Suspended wallet can only pay out its balance (§Own Funds and Caps): it cannot receive and
+a member. A Suspended wallet can only pay out its balance: it cannot receive and
 stops counting toward the holdings ceiling, but still counts for the one-wallet-per-member rule (below).
-If a later successful resolution names the member again before the wallet's grace period ends (§Lifecycle
-and Deletion), the Hub MUST return it to Active: the same wallet, connection, balance, caps and periods,
+If a later successful resolution names the member again before the wallet's grace period ends, the Hub MUST return it to Active: the same wallet, connection, balance, caps and periods,
 with nothing for the member to redo. On an `allowlist` Hub each committed edit of the list is a
 successful resolution, and the Hub applies it at once. A Hub SHOULD alert the host when one resolution
 would suspend a large share of its wallets at once.
@@ -431,16 +423,16 @@ A `follow_set` Hub MUST apply these rules:
   any other author MUST be ignored, whatever it claims. A Hub MUST ignore a version whose `created_at` is
   more than 15 minutes in the future, and its relays SHOULD reject one.
 - **Which members.** Exactly the pubkeys in that event's public `p` tags, plus any `hidden_p` entries
-  the Hub can decrypt (§Hidden Members). NIP-51's private items in the encrypted `content` MUST NOT be
+  the Hub can decrypt. NIP-51's private items in the encrypted `content` MUST NOT be
   counted.
 - **Nothing else.** `title`, `description` and `image` (NIP-51) are display-only. A Hub MUST NOT read
   membership, terms or any other setting from a tag other than `d`, `p` and `hidden_p`; a Hub's terms
-  live in the Hub (§Data Model).
+  live in the Hub.
 - **Staleness.** "Current" means the Hub's most recent resolution of the set. An implementation MAY cache
   it and refresh it, and MUST bound that staleness.
 - **Unresolved is not empty.** A Hub MUST act only on a successful resolution: a version of the set it
   has fetched and verified as above. A Hub MUST treat a set it has not found yet, and a refresh that
-  fails or finds no version, as unresolved, not as empty (§Creating a Circle Wallet, step 4); a failed
+  fails or finds no version, as unresolved, not as empty (step 4); a failed
   refresh leaves the last successful resolution in force. A resolved set with no members is empty:
   nobody is a member, and every wallet issued under it is suspended (above).
 - **Deletion is ignored.** A Hub MUST ignore a NIP-09 deletion of the set; only a newer version changes
@@ -468,7 +460,7 @@ An example set, one of several the same account can publish:
 A Hub reading it is configured with the address `30000:<provider pubkey>:circle-7k2m9q4x`.
 
 A host SHOULD give the set a `title`. When it does, a Hub SHOULD use that `title` as the default
-`label` of its `circlehub1...` string (§The Circle Wallet Hub Connection), so the invite and the set
+`label` of its `circlehub1...` string, so the invite and the set
 carry the same name.
 
 ### Hidden Members
@@ -482,9 +474,8 @@ value only the provider and the Hub can read:
 
 - **Encryption.** The payload is NIP-44 version 2, encrypting the member's pubkey as 64-character
   lowercase hex, under the conversation key between the provider and the Hub's **inbox** pubkey, the one
-  in its kind-11190 announcement (§The Hub Announcement in NIP-CASH). It MUST NOT be encrypted to the
-  Hub's connection pubkey. A Hub with hidden members SHOULD offer §Private Join (§Finding the Private
-  Transport).
+  in its kind-11190 announcement. It MUST NOT be encrypted to the
+  Hub's connection pubkey. A Hub with hidden members SHOULD offer §Private Join.
 - **Reading.** For each `hidden_p` tag, a Hub MUST attempt NIP-44 v2 decryption with its inbox key and
   the provider pubkey. An entry that fails to decrypt MUST be skipped without error. An entry that
   decrypts to anything but a well-formed 64-character lowercase-hex pubkey MUST be skipped too.
@@ -503,10 +494,8 @@ claim to follow the host — MUST NOT be offered.
 
 Independent of which admission mechanism a Hub uses, a member MUST hold at most one Circle Wallet per Hub
 at a time that is Active or Suspended: this is the one-wallet-per-member rule. It is checked at step 5 and
-enforced authoritatively by the membership row's uniqueness constraint at step 9 (§Processing
-Algorithm). The
-membership row MUST be removed when its Circle Wallet is neither Active nor Suspended (§Lifecycle and
-Deletion), and in any case MUST cascade-delete when the wallet's connection record is deleted, freeing the
+enforced authoritatively by the membership row's uniqueness constraint at step 9. The
+membership row MUST be removed when its Circle Wallet is neither Active nor Suspended, and in any case MUST cascade-delete when the wallet's connection record is deleted, freeing the
 identity to request a new wallet.
 
 ## Own Funds and Caps
@@ -515,11 +504,11 @@ A Circle Wallet spends only what it has received. Its balance is what it has bee
 paid out, fees included, and `get_balance` reports exactly that. A Hub MUST NOT fund any part of a
 member's payment from its own balance or from another member's wallet, and MUST refuse a payment whose
 full cost exceeds the paying wallet's balance with `INSUFFICIENT_BALANCE`. A payment's full cost is its
-amount plus, for a Lightning payment, its routing fee and its `fees_ppm` fee (§Fees); until a Lightning
+amount plus, for a Lightning payment, its routing fee and its `fees_ppm` fee; until a Lightning
 payment resolves, its full cost is the most it may cost (Routing-fee reserve, below).
 
 **Routing-fee reserve.** Every Hub announces the routing fee it reserves for a Lightning payment as
-`circle_wallet.fee_reserve` in `get_info` (§The Circle Wallet Hub Connection): `ppm` and `min_millis`, so
+`circle_wallet.fee_reserve` in `get_info`: `ppm` and `min_millis`, so
 that a payment of amount A reserves the larger of `min_millis` and A times `ppm` divided by 1,000,000,
 rounded down. The most a Lightning payment may cost is its amount plus its `fees_ppm` fee plus that
 reserve, under the rule the Hub announces when the payment starts. While the payment is in flight the Hub
@@ -530,7 +519,7 @@ MUST NOT pay a routing fee above the reserve: a payment it cannot route within i
 **Four kinds of payment.** Every payment a Circle Wallet sends or receives is one of these, by where the
 other side is:
 
-1. **The same circle**: another wallet issued by the same Hub. Fee-free (§In-Circle Transfers), and
+1. **The same circle**: another wallet issued by the same Hub. Fee-free, and
    counted against neither member's caps.
 2. **Another circle on the same node**: a Circle Wallet issued by another Circle Wallet Hub on the same
    node. Fee-free and counted against neither member's caps, but the receiving circle's holdings ceiling
@@ -538,13 +527,12 @@ other side is:
 3. **Any other connection on the same node**: the host's own wallet, a Cash Hub or a cash bill, or any
    other application. Fee-free, but external traffic: a send counts against the sender's send cap and a
    receipt against the receiver's receive cap. A credit the Hub refuses from a
-   NIP-CASH `cash_redeem` fails that redemption with `PAYMENT_FAILED`, and the slice stays claimable
-   (§Redeeming a Slice in NIP-CASH).
+   NIP-CASH `cash_redeem` fails that redemption with `PAYMENT_FAILED`, and the slice stays claimable.
 4. **Lightning**: anyone off the node. External traffic, and the only kind a routing fee and `fees_ppm`
    apply to.
 
-**Caps.** Each wallet has two caps on its external traffic (kinds 3 and 4), both per budget period
-(§Budget Renewal Floor). Payments of kinds 1 and 2 never count against them.
+**Caps.** Each wallet has two caps on its external traffic (kinds 3 and 4), both per budget period.
+Payments of kinds 1 and 2 never count against them.
 
 - **Send cap, `max_amount`.** A Hub MUST refuse, with `QUOTA_EXCEEDED`, a payment from an Active wallet
   whose full cost would take the wallet's external sends in the current period past `max_amount`. A
@@ -572,7 +560,7 @@ arriving over Lightning. A payment between two Active wallets of the circle only
 holdings, and is never refused for this ceiling. A payment into an Active wallet from one of the circle's
 wallets that is not Active does raise the holdings, so the Hub checks it against the ceiling like a
 payment from another circle on the node. A wallet returning to
-Active (§Membership) may leave the holdings above the ceiling, which then only refuses new invoices and
+Active may leave the holdings above the ceiling, which then only refuses new invoices and
 credits until the holdings fall below it.
 
 **Circle outbound ceiling.** A Hub MAY also bound what all its wallets together send as external traffic
@@ -580,7 +568,7 @@ in one period of its own, `daily` to `yearly`, starting at the Hub's creation as
 starts a wallet's. It then refuses, with `QUOTA_EXCEEDED`, a payment that would take that total past the
 bound, counting each payment as for a send cap.
 
-**Only Active wallets receive.** A wallet in any other state (§Lifecycle and Deletion) can only pay out. A
+**Only Active wallets receive.** A wallet in any other state can only pay out. A
 Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it leaves Active,
 and MUST fail every payment to it, same-circle ones included. Its payouts still count against the circle's
 outbound ceiling, but not against its send cap.
@@ -594,14 +582,14 @@ bound the external payments each wallet has in flight at once, refusing the exce
 
 A Circle Wallet connection is granted these NIP-47 methods: `pay_invoice`, `pay_keysend`, `make_invoice`,
 `lookup_invoice`, `list_transactions`, `get_balance`, `get_budget` and `get_info`, plus
-`delete_circle_wallet` (§Deleting a Circle Wallet). It also receives the notifications of §Recovering a
-Lost Connection. Which methods a Hub serves depends on the wallet's state (§Lifecycle and Deletion):
+`delete_circle_wallet`. It also receives the notifications of §Recovering a
+Lost Connection. Which methods a Hub serves depends on the wallet's state:
 
 | state | methods served |
 |---|---|
 | Active | every method above |
 | Suspended, Expired, Closing | `get_info`, `get_balance`, `pay_invoice` and `pay_keysend` (payouts only), `lookup_invoice`, `list_transactions`, `delete_circle_wallet` |
-| frozen, in any state | none: every request by the current key is refused with `FROZEN` (§Recovering a Lost Connection) |
+| frozen, in any state | none: every request by the current key is refused with `FROZEN` |
 
 A Hub MUST refuse a request by a frozen wallet's current key with `FROZEN`, and otherwise MUST refuse a
 method outside this list, or one the wallet's state does not serve, with `RESTRICTED`.
@@ -631,26 +619,24 @@ A payment is treated as an internal, fee-free transfer whenever the invoice bein
 the *same underlying node* the payer's connection also runs on — regardless of which connection kind
 issued either side. A payment to anyone outside the circle is an ordinary Lightning payment, subject to
 normal routing and fees. Fee-free is not the same as uncounted: only a payment to another Circle Wallet
-on the same node (kinds 1–2) counts against no cap (§Own Funds and Caps).
+on the same node (kinds 1–2) counts against no cap.
 
 ## Fees
 
 A Circle Wallet Hub MAY apply a forwarding-fee skim to a member's payments — `fees_ppm`
-(parts-per-million), a Hub-level setting reported in `create_circle_wallet`'s own response
-(§Creating a Circle Wallet).
+(parts-per-million), a Hub-level setting reported in `create_circle_wallet`'s own response.
 
-- **When it applies.** Only to a payment that leaves the node over real Lightning routing (kind 4, §Own
-  Funds and Caps). An in-circle transfer, or any other payment settled between apps on the same
-  underlying node (§In-Circle Transfers above), is always fee-free — `fees_ppm` never applies to it, even
+- **When it applies.** Only to a payment that leaves the node over real Lightning routing (kind 4). An in-circle transfer, or any other payment settled between apps on the same
+  underlying node, is always fee-free — `fees_ppm` never applies to it, even
   where the payment counts against a cap.
 - **How much.** `fees_ppm` times the payment amount, divided by 1,000,000 and **rounded down**, so a
   small enough payment carries no fee at all.
 - **Who pays.** The paying member, on top of the payment amount, out of their own wallet balance —
   never any other member's, and never the Hub's own underlying balance. With the routing fee it is part
-  of the payment's full cost, which counts against the member's send cap (§Own Funds and Caps).
+  of the payment's full cost, which counts against the member's send cap.
 - **Which rate.** The one reported in that member's own `create_circle_wallet` response, fixed for the
   life of the wallet. A Hub MAY change its rate, but the new rate applies only to wallets created after
-  the change, and `get_info`'s `circle_wallet.fees_ppm` (§The Circle Wallet Hub Connection) reports the rate
+  the change, and `get_info`'s `circle_wallet.fees_ppm` reports the rate
   a new member would get. A member's economics MUST NOT shift underneath them because the host changed a
   setting after they joined.
 
@@ -660,13 +646,13 @@ advertises, it MUST actually apply that exact rate to every qualifying payment.
 ## Pairing Connection
 
 A Circle Wallet's connection keypair is generated by the member, on the member's own device, and only its
-public half (`connection_pubkey`) is ever sent (§Creating a Circle Wallet). The Hub authorizes that pubkey
+public half (`connection_pubkey`) is ever sent. The Hub authorizes that pubkey
 and MUST NOT generate, request, receive or store the secret.
 
 The host therefore cannot reconstruct a member's connection string or act as the member over it, and
 there is no way to reveal a connection again. A member who loses the secret has lost the connection, and
-nothing moves the wallet's balance without it (§Lifecycle and Deletion). On a Hub that serves it, the
-member moves the wallet to a new key (§Recovering a Lost Connection). On any other Hub the balance can no
+nothing moves the wallet's balance without it. On a Hub that serves it, the
+member moves the wallet to a new key. On any other Hub the balance can no
 longer be reached: the host can still delete the wallet, which moves it to Closing and frees the member
 to request a new one with a new keypair, but the old wallet keeps its balance, payout-only, for good. A
 client joining a Hub whose `get_info` reports no `rotation_delay_secs` MUST warn the member, before the
@@ -676,10 +662,10 @@ the secret up.
 ### Recovering a Lost Connection
 
 A Hub MAY let a member move a wallet to a new connection key. A Hub that does reports
-`circle_wallet.rotation_delay_secs` in `get_info` (§The Circle Wallet Hub Connection), and one that does
+`circle_wallet.rotation_delay_secs` in `get_info`, and one that does
 not MUST omit it. The delay is the Hub's choice; a Hub SHOULD use 432000 seconds (5 days) unless it has
 reason to choose otherwise. Each wallet's delay is the one in force when it was created, reported in its
-details (§Response) and fixed for its life. A wallet whose details carry none cannot be rotated, and a
+details and fixed for its life. A wallet whose details carry none cannot be rotated, and a
 Hub refuses a member request naming it with `NOT_IMPLEMENTED`.
 
 **The host submits, the member authorizes.** The request reaches the Hub through the host's own
@@ -713,7 +699,7 @@ A Hub MUST check a member request in this order, and refuse it at the first step
    whose value is `rotate`, `freeze` or `unfreeze`, exactly one `wallet` tag, exactly one `connection` tag
    on a `rotate` and none otherwise, and no `terms` tag. A failure is refused with `UNAUTHORIZED`, and
    nothing is recorded.
-3. **Single use.** Its id is checked against the single-use record (§Identity Proof, check 8), and one
+3. **Single use.** Its id is checked against the single-use record (check 8), and one
    used before is refused with `REQUEST_REUSED`. Otherwise the Hub records the id here, and MUST keep it
    for at least 24 hours and 1 minute after its `created_at`; a request refused at a later step stays
    consumed.
@@ -728,7 +714,7 @@ A Hub MUST check a member request in this order, and refuse it at the first step
 **Rotation.** A `rotate` request is allowed in every state but Deleted. A Hub MUST refuse it with
 `ROTATION_PENDING` while the wallet already has a pending rotation, and otherwise with `RESTRICTED` unless
 its `connection` names a valid x-only key that no connection on the node uses and no pending rotation
-names, checked and accepted as one atomic step with any join's step 9 (§Processing Algorithm). Once
+names, checked and accepted as one atomic step with any join's step 9. Once
 accepted, the rotation is pending from `requested_at`, the moment the Hub accepted it on its own clock,
 and completes at the first moment now is at or after `requested_at` plus the wallet's
 `rotation_delay_secs`. Until then:
@@ -755,12 +741,12 @@ notifications carry:
 `completes_at` is `requested_at` plus the delay, here 1720000000 plus 432000.
 
 **Recovering the details after a rotation.** `rotation_completed` carries only the new key, so a member on
-a new device recovers the wallet's details with the join lookup (§Lost Join Reply), signed by the same
+a new device recovers the wallet's details with the join lookup, signed by the same
 `pubkey` and naming the new key as `connection_pubkey`. A Hub that serves rotation MUST answer that lookup
 from the rotation that installed the wallet's current key: while it is pending, `pending` with
 `retry_after` its `completes_at`; once it has completed, `done`, whose result is the join's
-`encrypted_details` with `connection_pubkey` set to the new key, encrypted to the member exactly as at join
-(§Response). With no such rotation, the lookup is answered by its `deadline`, as for a join. The Hub keeps
+`encrypted_details` with `connection_pubkey` set to the new key, encrypted to the member exactly as at join.
+With no such rotation, the lookup is answered by its `deadline`, as for a join. The Hub keeps
 what this answer needs for as long as the wallet exists.
 
 **Freezing.** A `freeze` request takes effect at once, and the Hub MUST notify the current key with
@@ -794,19 +780,19 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
 ```
 
 The first five are the Hub's **terms**. A Hub MUST report `available_millis` as 0, never as a negative
-number, while its holdings are at or above its holdings ceiling (§Own Funds and Caps). `fee_reserve`
+number, while its holdings are at or above its holdings ceiling. `fee_reserve`
 carries `ppm` and `min_millis` as JSON integers, and every Hub MUST report it. `available_millis` is a
 snapshot, not a reservation — it MAY be stale by the time a request or a payment lands, and the
-holdings checks remain authoritative (§Own Funds and Caps).
+holdings checks remain authoritative.
 
 `per_wallet_max_millis` and `per_wallet_max_receive_millis` (the chain's milli-unit, like `max_amount`)
 and `min_budget_renewal` (`daily` | `weekly` | `monthly` | `yearly` | `never`) are the other limits step 6
 checks, so a client can validate a request before sending it. A Hub SHOULD report all three. They can
 change after `get_info`, so a client MUST still handle a refusal.
 
-`circle_policy` discloses the Hub's **admission mechanism**, not its terms (§Privacy Considerations).
+`circle_policy` discloses the Hub's **admission mechanism**, not its terms.
 
-`identity` is the pubkey that signs the Hub's kind-11190 announcement (§The Hub Announcement in NIP-CASH):
+`identity` is the pubkey that signs the Hub's kind-11190 announcement:
 its node identity, the same key a cash bill's mint signature recovers to, so every Hub on one node shares
 one announcement. Every Hub MUST report it, since every Hub serves the private transport for §Lost Join
 Reply. A prospective member learns it only from this field, in a response signed by the Hub's own key.
@@ -850,28 +836,26 @@ whoever copies whichever form is on screen at the time always knows which one th
 ## Private Join
 
 `create_circle_wallet` travels, by default, as an ordinary NIP-47 request to the Hub's own
-pubkey, which shows a relay observer who joined and when (§Privacy Considerations).
+pubkey, which shows a relay observer who joined and when.
 
-A Hub MAY therefore accept `create_circle_wallet` over NIP-CASH's **private transport** (§The
-Private Transport in NIP-CASH), which is defined once there and reused here unchanged: same
+A Hub MAY therefore accept `create_circle_wallet` over NIP-CASH's **private transport**, which is defined once there and reused here unchanged: same
 kinds, same envelope, same item proofs, same announcement. Every Hub serves that transport for
 §Lost Join Reply; one that also accepts joins there lists `create_circle_wallet` in its `get_info`
-`private_methods` (§Scope Surface in NIP-CASH). This section states only what is specific to
+`private_methods`. This section states only what is specific to
 joining.
 
 A Hub that offers it MUST continue accepting the standard transport.
 
 ### Finding the Private Transport
 
-A prospective member already calls `get_info` to read the Hub's terms (§The Circle Wallet Hub
-Connection). Its `circle_wallet.identity` is what reaches the private transport, for a join or for a
-lookup (§Lost Join Reply):
+A prospective member already calls `get_info` to read the Hub's terms. Its `circle_wallet.identity` is what reaches the private transport, for a join or for a
+lookup:
 
 1. If `private_methods` does not list `create_circle_wallet`, the Hub does not offer Private Join; the
    client joins over the standard transport, and needs the steps below only for a lookup.
 2. Otherwise the client fetches the Hub's kind-11190 announcement and verifies it against `identity`,
    under NIP-CASH's rules unchanged: reject one signed by anyone else, adopt only the newest, never move
-   backwards (§The Hub Announcement in NIP-CASH). A client MUST NOT take the identity from anywhere else
+   backwards. A client MUST NOT take the identity from anywhere else
    — not a URI parameter, a QR caption or a profile — since whoever supplies it chooses the inbox the
    join is encrypted to.
 3. A client SHOULD then join over the private transport, without asking the member to choose.
@@ -885,7 +869,7 @@ lookup (§Lost Join Reply):
 - **The item's `target` is the Hub**, not a bill. The `d` tag of the item's kind-23192 proof
   carries the Hub's own pubkey, which is the same value §Identity Proof already requires the
   kind-23199 proof to bind to. NIP-CASH's `cash_lookup` for a lost join reply is the other item
-  that targets the Hub (§Lost Join Reply).
+  that targets the Hub.
 - **The 23199 identity proof and the 23192 item proof travel together, and both are REQUIRED.**
   The kind-23199 identity proof is what authorizes the join, and is unchanged — every check in
   §Identity Proof still applies. The kind-23192 item proof authorizes the *item*, binding it to
@@ -894,11 +878,11 @@ lookup (§Lost Join Reply):
   23199 proof. A Hub MUST treat a join whose item proof is signed by any other key as carrying an
   item proof that did not verify.
 - **The bill proof is signed with the Hub connection's secret.** NIP-CASH requires a kind-23193
-  bill proof on every item (§Bill Proofs in NIP-CASH), and a join is no exception. With no bill
+  bill proof on every item, and a join is no exception. With no bill
   to hold, it is signed with the `secret` of the Hub connection the member was given
   (`circlehub1...`, or the equivalent pairing URI), and its `d` tag carries the Hub's pubkey like
   the item proof's. It authorizes nothing by itself; it lets the Hub answer a refused join with
-  an error rather than an omission (§Responses below).
+  an error rather than an omission.
 - **A batch of joins is legitimate.** One envelope MAY carry several joins, and each is
   independently proven, so a Hub MUST evaluate them individually rather than accepting or
   rejecting the batch as a unit.
@@ -909,17 +893,16 @@ lookup (§Lost Join Reply):
 ### Responses
 
 The response is a kind-23191 envelope like any other, and the join's own result — a single
-`encrypted_details` ciphertext (§Response) — travels inside its `result`. That ciphertext stays
+`encrypted_details` ciphertext — travels inside its `result`. That ciphertext stays
 encrypted to the requester's own pubkey exactly as on the standard transport, and likewise carries
 no secret; `connection_pubkey` travels in the item's params, where the item proof binds it.
 
 The reply is published where NIP-CASH publishes any private-transport reply: on the relay the
-join request arrived on, and optionally on the Hub's other inbox relays (§Addressing the
-Response in NIP-CASH). A prospective member MUST listen on the relay it sent the join to.
+join request arrived on, and optionally on the Hub's other inbox relays. A prospective member MUST listen on the relay it sent the join to.
 
 **An item the Hub will not serve is omitted, and a refused join is an error.** A join refused
 because the requester is not a member, is rate-limited, or already holds a wallet MUST be answered
-with the corresponding error. The codes are the same as on the standard transport (§Errors).
+with the corresponding error. The codes are the same as on the standard transport.
 Omission is reserved for an item the Hub structurally does not serve, or whose item proof did not
 verify.
 
@@ -943,10 +926,10 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
-A Circle Wallet is Active from creation, sending and receiving (§Own Funds and Caps), until one of these
+A Circle Wallet is Active from creation, sending and receiving, until one of these
 happens:
 
-- **Suspended.** Its pubkey is no longer resolved as a member (§Membership). It returns to Active, as the
+- **Suspended.** Its pubkey is no longer resolved as a member. It returns to Active, as the
   same wallet, if a resolution names the member again before its grace period ends, and becomes Closing
   when its grace period ends otherwise.
 - **Expired.** Its `expires_at` has passed: now is later than `expires_at`, so the wallet is still Active
@@ -958,14 +941,13 @@ edge: a wallet already in its grace period stays in it, and its grace period is 
 wallet that reaches its expiry becomes Expired, and one the host deletes becomes Closing, each keeping the
 grace period that began at its suspension.
 
-A wallet in any state but Active can no longer receive, and can only pay out its balance (§Own Funds and
-Caps). Only an Active wallet counts toward the holdings ceiling; an Active or Suspended one counts for the
+A wallet in any state but Active can no longer receive, and can only pay out its balance. Only an Active wallet counts toward the holdings ceiling; an Active or Suspended one counts for the
 one-wallet-per-member rule.
 
 **Member balances are never swept.** A Hub MUST NOT delete a wallet that holds more than dust, or one
 with a payment to or from it in flight, an accepted held payment included, whoever asks, and MUST NOT move
 a member's money anywhere the member did not pay it. A balance is dust when it is
-at most the wallet's `dust_threshold_millis` (§Response). A Suspended, Expired or Closing wallet that holds
+at most the wallet's `dust_threshold_millis`. A Suspended, Expired or Closing wallet that holds
 more than dust is not deleted, and keeps paying out only for as long as it does; a Suspended one still
 becomes Closing when its grace period ends (above).
 
@@ -990,7 +972,7 @@ both `{}`. No other connection can send it for the member: not the Hub's, and no
 
 A Hub MUST serve it on every Circle Wallet connection, in every state but Deleted and regardless of the
 wallet's spend state, and MUST refuse it with `RESTRICTED` while the wallet holds more than dust, or while
-a payment to or from it is in flight, an accepted held payment included (§Lifecycle and Deletion).
+a payment to or from it is in flight, an accepted held payment included.
 Otherwise it cancels the wallet's open invoices and deletes the wallet at once, in one step, with no grace
 period, and MAY keep any dust left in it. A payment of a cancelled invoice that arrives later fails.
 
@@ -1000,30 +982,30 @@ what it can first.
 ## Security Considerations
 
 - **Shared Hub connection.** Every prospective member holds the Hub's connection. The requester `pubkey`
-  in a `create_circle_wallet` call MUST NOT be trusted bare. The identity proof (§Identity Proof) prevents
+  in a `create_circle_wallet` call MUST NOT be trusted bare. The identity proof prevents
   rate-limit denial of service against a real member, an allowlist-membership oracle, and claiming
   wallets as real members.
 - **Single-use replay guard.** A Circle Wallet identity proof has no invoice to bind it to; without the
-  guard (§Identity Proof, check 8) a captured proof could be resubmitted within its freshness window.
-- **Every param is bound.** The `connection` and `terms` tags (§Identity Proof, checks 6–7) bind the
+  guard (check 8) a captured proof could be resubmitted within its freshness window.
+- **Every param is bound.** The `connection` and `terms` tags (checks 6–7) bind the
   connection key, `max_amount`, `max_receive`, `expiry` and `budget_renewal`. A co-member who reads a
   request on the standard transport before the Hub does can resubmit it first, but only unchanged: the
   wallet still goes to the requester's key, and the requester's own copy is refused with
-  `REQUEST_REUSED` (§Lost Join Reply).
+  `REQUEST_REUSED`.
 - **Private-transport inbox.** A client trusts the announcement only because `identity` came from a
-  `get_info` response signed by the Hub's connection key (§Finding the Private Transport). An inbox
+  `get_info` response signed by the Hub's connection key. An inbox
   taken from anywhere else learns who joined; it cannot plant a wallet, since `encrypted_details`
-  decrypts only under the Hub's own connection key (§Response).
-- **No connection secret on the Hub** (§Pairing Connection). A compromise of the Hub's storage, logs or
+  decrypts only under the Hub's own connection key.
+- **No connection secret on the Hub**. A compromise of the Hub's storage, logs or
   retained traffic yields no member's connection. The host's node still holds and moves the funds.
-- **Rotation rests on the member's Nostr key** (§Recovering a Lost Connection). The host cannot sign a
+- **Rotation rests on the member's Nostr key**. The host cannot sign a
   member request, so it alone can never move a wallet to a key of its choosing, and the delay lets the
   wallet key cancel a rotation it did not ask for. Someone holding the member's Nostr key, with the
   host's help, can freeze the wallet and then move it; a frozen wallet's key can pay nothing out. A
   member whose Nostr key is taken should pay out of every wallet on a Hub that serves rotation before a
   freeze lands, which `wallet_frozen` or `rotation_pending` announces to the wallet key.
 - **One wallet per (Hub, identity).** The step-5 pre-check alone is a race; the uniqueness constraint at
-  step 9 is the authoritative guard (§Processing Algorithm).
+  step 9 is the authoritative guard.
 - **Publish-after-commit ordering.** A new member's relay subscription MUST be published only after its
   creating transaction commits; publishing earlier can leave the wallet permanently unreachable over NWC.
 
@@ -1038,8 +1020,8 @@ what it can first.
   metadata, that some client reached this Hub at this moment, remains.
 - **A `follow_set` is public.** Anyone watching it can learn who is eligible, and its `title` and
   `description` too. Hosts who need membership itself to stay private SHOULD use `hidden_p` entries
-  (§Hidden Members) or the `allowlist` mechanism instead; NIP-51's own private items do not help, since
-  the Hub cannot count them (§Membership).
+  or the `allowlist` mechanism instead; NIP-51's own private items do not help, since
+  the Hub cannot count them.
 - **What `hidden_p` hides.** It hides who a hidden member is from everyone except the provider and the
   Hub. It does not hide how many hidden entries a set has, nor when the set was republished. A hidden
   member who joins over the standard transport puts their pubkey in a request every co-member can read
