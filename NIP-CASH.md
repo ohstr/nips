@@ -1761,6 +1761,10 @@ Batching is the point. One envelope consolidating fifty bills is one relay event
 fifty, so the count of a holder's bills stops being public, and the timing correlation that
 links them disappears.
 
+- **`params`** — exactly the method's own request params (§Redeeming a Slice, §Transferring and
+  Splitting a Slice, §Consolidating Tokens), including their kind-23198 sibling proof fields or
+  `cash_secret`. The kind-23192 item proof is carried in addition to them, never instead: it
+  binds the item to this envelope, while the kind-23198 proof binds the call.
 - **`proof`** — the item's kind-23192 slice proof (§Item Proofs). Absent only for a bearer
   item, whose `cash_secret` in `params` is that authorization instead (§Bearer Items).
 - **`bill_proof`** — REQUIRED on every item, with no exemption for any identity mode
@@ -1888,6 +1892,20 @@ that assembler perform a substitution.
 | `en` | the envelope `nonce` | banking a proof and replaying it in a later envelope |
 | `expiration` | the envelope's `not_after` | using it indefinitely |
 
+Each tag appears exactly once and its value is a string: `d` the target wallet pubkey and `h` the
+Hub's identity pubkey (the announcement's author, not its inbox), each as 64 lowercase hex; `m`
+the method name; `ph` 64 lowercase hex; `en` the envelope `nonce` exactly as sent; `expiration`
+the envelope's `not_after` in decimal. `content` is empty, and tag order is free. A Hub MUST
+refuse a proof that departs from these encodings as one that does not verify.
+
+For example, an item proof by the pubkey
+`79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`, with `created_at`
+`1720000000`, its tags in the table's order, `d` 64 `1`s, `h` 64 `2`s, `m` `cash_status`, empty
+`params` (so `ph` is `44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`, the
+`sha256` of `{}`), `en` 64 `3`s and `expiration` `1720000060`, has the NIP-01 event id
+`a121c54b100a68efbda151d0fe01c4290b7a9ea41c22409e916a0e9cb7aabb0b`. The same event as kind
+23193 has the id `7e4908cda700cd019f244c5c4dafc43c321a23cbc023daec37c6011bfa802c53`.
+
 This is the same reasoning kind-23198 already applies by binding `bolt11_hash` (§Redeeming a Slice)
 and `new_identity_hash` (§Transferring and Splitting a Slice) — extended, because a batch has an
 assembler that a single request does not.
@@ -1925,9 +1943,10 @@ item proof:
 | kind 23192 | which slice is mine? | the recipient's identity key, or none for a bearer item |
 | kind 23193 | do I hold this bill at all? | the bill's connection secret |
 
-It binds exactly the same six tags as kind 23192, for the same reasons: an assembler holds
-other people's bill proofs while building an envelope, and each MUST be unusable anywhere
-else.
+It binds exactly the same six tags as kind 23192, with the same encodings, for the same
+reasons: an assembler holds other people's bill proofs while building an envelope, and each
+MUST be unusable anywhere else. A Hub MUST hold its `created_at` to the same freshness window
+as kind 23192 (§Item Proofs).
 
 **A bill proof is REQUIRED on every item, whatever the bill's identity mode.** A bearer item
 carries no kind-23192 proof — its `cash_secret` is that authorization (§Bearer Items) — and is
