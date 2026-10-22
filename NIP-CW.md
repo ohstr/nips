@@ -99,6 +99,7 @@ This document uses MUST, MUST NOT, SHOULD, and MAY as defined in RFC 2119.
 | Method | Caller | Scope | Purpose |
 |---|---|---|---|
 | `create_circle_wallet` | a member, over the Circle Wallet Hub connection | `circle_wallet` | Self-service request for the caller's own Circle Wallet |
+| `delete_circle_wallet` | a member, over their own Circle Wallet connection | none: every Circle Wallet connection | Delete the caller's own Circle Wallet once it holds at most dust (§Deleting a Circle Wallet) |
 
 ## Data Model
 
@@ -948,8 +949,21 @@ the wallet and keep that dust.
 teardown without that grace is forbidden. An implementation MUST NOT remove the Hub itself while any of
 its wallets holds more than dust: the Hub goes only after its last wallet is deleted.
 
-Deleting a wallet removes its connection record. A member's own deletion of a wallet holding at most dust
-MUST be available regardless of the wallet's spend state.
+Deleting a wallet removes its connection record.
+
+### Deleting a Circle Wallet
+
+A member deletes their own wallet with `delete_circle_wallet`, a NIP-47 request sent over that wallet's
+own connection and authorized by the connection key the Hub already checks. Its params and its result are
+both `{}`. No other connection can send it for the member: not the Hub's, and not the host's.
+
+A Hub MUST serve it on every Circle Wallet connection, in every state but Deleted and regardless of the
+wallet's spend state, and MUST refuse it with `RESTRICTED` while the wallet holds more than dust (§Lifecycle
+and Deletion). Otherwise it deletes the wallet at once, with no grace period, and MAY keep any dust left
+in it.
+
+Before sending it, a client MUST tell the member that any dust left goes to the host, and SHOULD pay out
+what it can first.
 
 ## Security Considerations
 
