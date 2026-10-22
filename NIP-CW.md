@@ -935,7 +935,8 @@ lookup (§Lost Join Reply):
 3. A client SHOULD then join over the private transport, without asking the member to choose.
 4. If no announcement can be found or verified, a client MAY fall back to the standard transport only
    after telling the member the join will not be private: a member who expected Private Join may not
-   want their pubkey on the shared connection.
+   want their pubkey on the shared connection. A client that cannot tell the member at that moment MUST
+   NOT fall back unless the member consented to it beforehand.
 
 ### What differs from a bill operation
 
