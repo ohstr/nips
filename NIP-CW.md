@@ -117,7 +117,8 @@ A Circle Wallet Hub MUST maintain, for itself:
 - the Circle Identity governing who may request a wallet from it;
 - a ceiling on the amount a member may request for their own wallet;
 - a floor on how tight a member's requested budget-renewal period may be (§Budget Renewal Floor);
-- a ceiling on, and default value for, an issued wallet's lifetime;
+- a ceiling on, and default value for, an issued wallet's lifetime, each in seconds with `0` meaning
+  never. A Hub MUST NOT set a default above its ceiling, so a non-zero ceiling rules out a default of `0`;
 - the grace period a member gets before their wallet is deleted (§Lifecycle and Deletion);
 - an optional ceiling on the combined commitment across every currently-active wallet it has issued
   (§Creating a Circle Wallet's own Processing Algorithm, step 9), separate from and in addition to its own
@@ -248,8 +249,8 @@ request.
 `expires_at` is the wallet's expiry in unix seconds, or `0` when the wallet never expires.
 
 `max_amount` is the spend cap as the Hub resolved it, in the same milli-unit as the request. A Hub that
-adjusts the requested value, for example by rounding it to a unit its node can represent, reports what it
-actually applied, so the member is never left assuming a cap they do not have.
+adjusts the requested value, for example by rounding it down to a unit its node can represent, MUST NOT
+raise it, and reports what it actually applied, so the member is never left assuming a cap they do not have.
 
 **The response carries exactly one field on purpose.** `encrypted_details` MUST be encrypted (NIP-44) to
 the requester's own pubkey, and every term describing the issued wallet MUST be inside it. A Hub MUST NOT
