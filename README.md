@@ -13,3 +13,4 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP is self-containe
 | [NIP-CZ](./NIP-CZ.md) | Cash Zaps | `9522`, `10522` | `draft` |
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Web Identity Linking | `35521`, `35522` | `draft` |
 | [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
+| [NIP-PS](./NIP-PS.md) | Profile Stats: Zap, Follow and Identity Assertions | `30382` (NIP-85) | `draft` |
