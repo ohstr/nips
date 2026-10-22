@@ -100,7 +100,7 @@ This table lists only `satscash`. For any other energy-backed coin, that coin's 
 - `w`: exactly one, the token's wallet pubkey (TLV `0`), so every copy of a token can be found with `#w`.
 - `ia`: exactly one if `p` is a ConnectionKey, else none.
 
-**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires). On a token without TLV `8` = `2`, both are informational, `expires_at` taken from `cash_status`.
+**Optional tags**: `e`, `a`, `k` (at most one each; `e` and `a` MUST name the same event), `P` (at most one), `issued_at` and `expires_at` (at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires). On a token without TLV `8` = `2`, or whose zap signature does not verify (rule 7), both are informational: the sender chose them, so a wallet takes `expires_at` from `cash_status` instead.
 
 A `9522` MUST NOT carry a NIP-40 `expiration` tag: relays could drop it before the recipient sees it.
 
