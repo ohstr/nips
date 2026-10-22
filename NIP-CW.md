@@ -901,11 +901,11 @@ no secret; `connection_pubkey` travels in the item's params, where the item proo
 The reply is published where NIP-CASH publishes any private-transport reply: on the relay the
 join request arrived on, and optionally on the Hub's other inbox relays. A prospective member MUST listen on the relay it sent the join to.
 
-**An item the Hub will not serve is omitted, and a refused join is an error.** A join refused
+**An item without a verified bill proof is omitted, and a refused join is an error.** A join refused
 because the requester is not a member, is rate-limited, or already holds a wallet MUST be answered
 with the corresponding error. The codes are the same as on the standard transport.
-Omission is reserved for an item the Hub structurally does not serve, or whose item proof did not
-verify.
+Omission is reserved, as in NIP-CASH, for an item whose target the Hub does not hold or whose bill proof
+is missing or did not verify; a join whose item proof did not verify is refused with `UNAUTHORIZED`.
 
 ## Lifecycle and Deletion
 
