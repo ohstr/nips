@@ -152,17 +152,21 @@ Connection, §Security Considerations), since this proof has no invoice to bind 
 
 ### Budget Renewal Floor
 
-This floor protects the Hub from a member resetting their spend cap too often, rather than bounding how
+This floor protects the Hub from a member resetting their caps too often, rather than bounding how
 loose a cap the Hub itself may offer. With renewal periods ranked tightest-to-loosest (daily, weekly,
 monthly, yearly, never), a
-request MUST be rejected when its requested renewal is tighter than the Hub's floor. For example, a
+Hub MUST refuse a request with `LIMIT_EXCEEDED` when its requested renewal is tighter than the Hub's floor. For example, a
 `monthly` floor allows `monthly`/`yearly`/`never` and rejects `daily`/`weekly`.
 
 A budget period starts when the wallet is created, in UTC. Daily and weekly periods start at the
 creation instant plus k×86400 or k×604800 seconds. Monthly periods stay anchored to the creation day,
 clamped to the month's last day; yearly periods likewise (Feb 29 → Feb 28). A monthly or yearly period
-starts at the creation's UTC time of day on that date. At the start of each period the wallet's spend cap
-is available again in full. With `never`, the wallet's whole life is one period.
+starts at the creation's UTC time of day on that date. Each start is counted from the creation day, never
+from the previous period's start: a wallet created at 2024-01-31T10:00Z starts monthly periods at
+2024-02-29, 2024-03-31 and 2024-04-30, each at 10:00Z, and one created on 2024-02-29 starts yearly periods
+on 2025-02-28, 2026-02-28, 2027-02-28 and 2028-02-29. A period runs from its start, inclusive, to the next
+period's start, exclusive. At the start of each period the wallet's send and receive caps are available
+again in full. With `never`, the wallet's whole life is one period.
 
 ## Creating a Circle Wallet
 
