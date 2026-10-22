@@ -2298,10 +2298,10 @@ one-byte length field. The entries:
 | Type | Name | Value | Cardinality |
 |---|---|---|---|
 | `0` | wallet pubkey | 32 raw bytes | exactly one, REQUIRED |
-| `1` | relay | a relay URL, ASCII | **one or more**, order preserved; each MUST be non-empty |
+| `1` | relay | a relay URL, ASCII | **one or more**, order preserved; an encoder MUST NOT emit an empty one |
 | `2` | secret | 32 raw bytes — the NWC connection secret | exactly one, REQUIRED |
 | `3` | identity required | 1 byte, `0` or `1` | zero or one, OPTIONAL |
-| `5` | mint signature | 65 raw bytes — a compact recoverable ECDSA signature: 1 recovery byte, 32-byte R, 32-byte S (§Mint Provenance) | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
+| `5` | mint signature | 65 raw bytes — a compact recoverable ECDSA signature: 1 header byte, 32-byte R, 32-byte S (§Mint Provenance) | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `6` | attested amount | 8 bytes, big-endian millis — the value the mint signature commits to | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `7` | hub group | 4 raw bytes — the issuing Cash Hub's fingerprint (§The Hub Group Fingerprint) | zero or one, OPTIONAL |
 | `8` | signature scheme | 1 byte: `1` = `satscash-mint:v2`, `2` = `satscash-zap:v1` — what the mint signature signs (§Mint Provenance) | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
@@ -2327,8 +2327,8 @@ legacy token (§Mint Provenance). A wrong-length, repeated or unknown-valued typ
 valid provenance, exactly like a malformed `5`/`6`.
 
 A decoder MUST reject a token missing either required field (`0` or `2`), carrying a wrong-length value for
-any of the typed fields above **except the provenance fields `5`, `6` and `8` and the hub group `7`**, or
-repeating any of them except those.
+any fixed-length field above **except the provenance fields `5`, `6` and `8` and the hub group `7`**, or
+repeating a field the table allows at most once, except those. Type `1` repeats by design.
 
 Type `7` gets the same tolerance as the provenance pair, for a related reason: it is a grouping hint, not a
 credential. A decoder meeting a wrong-length or repeated hub group MUST drop it and leave the token
@@ -2351,8 +2351,8 @@ general rule.
 
 ### Relay Hints Are Mandatory
 
-**Every credential this document defines MUST carry at least one relay hint, and every hint MUST be
-non-empty.** That holds for a cash token (`satscash1...`, ...) exactly as it holds for a
+**Every credential this document defines MUST carry at least one non-empty relay hint, and an encoder MUST
+NOT emit an empty one.** That holds for a cash token (`satscash1...`, ...) exactly as it holds for a
 Hub connection (`cashhub1...`), and NIP-CW imposes the same rule on `circlehub1...`.
 
 The reason is that there is nothing else to fall back on. NWC is relay-mediated: a client does not
@@ -2368,8 +2368,11 @@ client already reads. None of that is true of a bill.
 
 **Both ends MUST enforce this**, and a decoder MUST NOT defer the check to whatever dials the connection:
 
-- An encoder MUST refuse to produce a credential with no usable relay.
-- A decoder MUST reject one, rather than returning a credential with an empty relay set.
+- An encoder MUST refuse to produce a credential with no usable relay, and MUST NOT encode an empty or
+  non-ASCII relay hint.
+- A decoder MUST reject one with no non-empty hint, rather than returning a credential with an empty relay
+  set, and MUST skip — not reject the credential for — an empty or unparseable hint when another hint is
+  non-empty (§Multiple Relay Hints).
 
 Deferring it is what makes the failure hard to diagnose. Such a credential is structurally perfect — its
 bech32 checksum verifies, every required TLV is present, an ordinary decode succeeds — so each layer in
@@ -2514,7 +2517,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   | `2` | `satscash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>:<recipient>:<sender>:<target_hash>:<issued_at>:<expires_at>` |
   | absent | `lokicash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>` (legacy) |
 
-  `<hrp>` is the token's HRP, `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
+  `<hrp>` is the token's HRP in lowercase — bech32 is case-insensitive, and a decoder lowercases the whole
+  string before decoding — `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
   committed amount (TLV `6`) in decimal. Every integer in a payload is unsigned decimal ASCII with no leading
   zeros (`0` for zero); every hex value is lowercase. The scheme labels `satscash-mint:v2`, `satscash-zap:v1` and the legacy `lokicash-mint:v1` are fixed ASCII
   constants, the same for every HRP: the token's own HRP appears only as `<hrp>`, and a signer or verifier
@@ -2535,8 +2539,8 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
 
   It is what makes a token's hints and secret part of what the minter signed. Without it, a copy of a token
   carrying other relays still verifies, and a holder trying every copy it sees would dial relays an attacker
-  chose. A verifier hashes every TLV `1` entry exactly as encoded, including one a client would skip when
-  dialing. A client choosing among copies of one bill SHOULD use only a copy whose provenance verifies;
+  chose. An encoder MUST sign over exactly the TLV `1` entries it encodes. A verifier hashes every TLV `1`
+  entry exactly as encoded, including one a client would skip when dialing. A client choosing among copies of one bill SHOULD use only a copy whose provenance verifies;
   a legacy token's hints are not signed.
 
   A Hub that issues a bill's token again with different relay hints signs it afresh; a token issued earlier
@@ -2593,15 +2597,19 @@ request parameter to opt in or out: the earlier `mint_signature` field is gone f
   Bitcoin's is the unqualified original. Every other energy-backed coin uses its own HRP, chain name,
   signed-message prefix and milli-unit, which that coin's implementation defines, not this document; a
   verifier needs the prefix to check it. A verifier MUST therefore select the prefix from the token's own
-  HRP (§The Cash Token), which is precisely what identifies the base asset. An implementation encountering an HRP it has no prefix for MUST treat the token as
-  carrying no valid provenance rather than guessing, and MUST NOT refuse to decode it.
+  lowercase HRP (§The Cash Token), which is precisely what identifies the base asset. An implementation
+  encountering an HRP it has no prefix for MUST treat the token as carrying no valid provenance rather
+  than guessing, and MUST NOT refuse to decode it.
 
   Both hashes are required: the convention is double-SHA256, matching the `SingleHash = false` default of
   the LND `SignMessage` RPC this derives from.
 - **The signature is recoverable.** It's a recoverable ECDSA signature over that digest; a verifier
   reconstructs the signer's pubkey from the signature itself, so the minter's pubkey need NOT be carried
-  separately in the token. It is a 65-byte compact signature — one recovery byte followed by 32-byte R and
-  32-byte S — and TLV type `5` MUST be exactly that length (§The Cash Token). Verification is purely local:
+  separately in the token. It is a 65-byte compact signature — one header byte, `31 + recid` for the
+  compressed key a signed-message signer uses, then 32-byte R and 32-byte S — and TLV type `5` MUST be
+  exactly that length (§The Cash Token). An encoder MUST emit that header. A verifier MUST accept a header
+  from 27 to 34, reading recid as `(header − 27) mod 4`, and a raw recid from 0 to 3; any other value is no
+  valid provenance. Verification is purely local:
   recompute the payload for the token's scheme (`8`) from its own HRP, pubkey (`0`), attested amount (`6`),
   relay hints (`1`) and secret (`2`) — plus, for a zap bill, the Cash Zap's tags — wrap it in the prefix
   above, hash twice, recover the signer, and compare it to whichever minter pubkey the holder expects or
@@ -2649,12 +2657,12 @@ since a Hub connection carries no slice, no expiry, and no provenance:
 | Type | Name | Value | Cardinality |
 |---|---|---|---|
 | `0` | wallet pubkey | 32 raw bytes — the Hub's own pubkey | exactly one, REQUIRED |
-| `1` | relay | a relay URL, ASCII | one or more, order preserved; each MUST be non-empty |
+| `1` | relay | a relay URL, ASCII | one or more, order preserved; an encoder MUST NOT emit an empty one |
 | `2` | secret | 32 raw bytes — the NWC connection secret | exactly one, REQUIRED |
 | `3` | label | a human-readable name, UTF-8 | zero or one, OPTIONAL |
 
 Types `0`–`2` carry the identical meaning §The Cash Token's own table gives them, including its relay
-cardinality: at least one, each non-empty. An earlier revision of this document allowed a cash token's
+cardinality: at least one non-empty hint, and none empty from an encoder. An earlier revision of this document allowed a cash token's
 relay hint to be absent, reasoning from the NIP-19 precedent that a relay-less string still has another
 discovery path to fall back on. **That reasoning was wrong and the allowance is withdrawn** — see
 §Relay Hints Are Mandatory. This format's type
@@ -2667,8 +2675,8 @@ same forward-compatibility rule §The Cash Token's Wire Format establishes.
 before a client is ever asked to actually dial the connection.
 
 A decoder MUST reject a `cashhub1...` string missing either required field (`0` or `2`), carrying a
-wrong-length value for a typed field, or repeating one — the same class of malformed-input rule §The Cash
-Token's Wire Format applies to `satscash1...`.
+wrong-length value for a fixed-length field, or repeating a field its table allows at most once — the same
+class of malformed-input rule §The Cash Token's Wire Format applies to `satscash1...`.
 
 This wire format is informative for connection portability and recognition, not a new authorization
 mechanism: everything §Security Considerations and §Scope Surface say about the underlying NWC connection
