@@ -540,7 +540,7 @@ Payments of kinds 1 and 2 never count against them.
   cost, its routing-fee reserve included; once it resolves, at what it cost, or not at all if it failed.
 - **Receive cap, `max_receive`.** A wallet's receive room is `max_receive` less its external receipts in
   the current period and less the amounts of its open invoices, held payments the Hub has accepted
-  included. Every open invoice counts, whoever pays it in the end; an invoice another Circle Wallet on the
+  included. Every open invoice counts, whoever pays it in the end, since the Hub cannot know the payer when it issues the invoice; an invoice another Circle Wallet on the
   node pays (kinds 1–2) is no receipt, so its room comes back once it is paid, as it does when an invoice
   expires or is cancelled. A Hub MUST
   refuse, with `QUOTA_EXCEEDED`, to issue an invoice for more than the wallet's receive room, and MUST
@@ -1003,7 +1003,8 @@ what it can first.
   wallet key cancel a rotation it did not ask for. Someone holding the member's Nostr key, with the
   host's help, can freeze the wallet and then move it; a frozen wallet's key can pay nothing out. A
   member whose Nostr key is taken should pay out of every wallet on a Hub that serves rotation before a
-  freeze lands, which `wallet_frozen` or `rotation_pending` announces to the wallet key.
+  freeze lands, which `wallet_frozen` or `rotation_pending` announces to the wallet key. Once a wallet is frozen,
+  its balance moves again only after an `unfreeze`, or with the key a completed rotation installs.
 - **One wallet per (Hub, identity).** The step-5 pre-check alone is a race; the uniqueness constraint at
   step 9 is the authoritative guard.
 - **Publish-after-commit ordering.** A new member's relay subscription MUST be published only after its

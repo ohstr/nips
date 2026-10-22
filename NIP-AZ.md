@@ -17,7 +17,7 @@ AltZap extends NIP-57's zap request/receipt/LNURL flow with three kinds (`9520`,
 
 - **LNURL server**: The recipient's LNURL-pay server (NIP-57's "lnurl server"; LUD-06's "LN SERVICE"). It receives `9520`/`9523` requests at its callback, issues the invoices and publishes the resulting `9521` receipts.
 - **Web Identity**: A non-Nostr identity platform (Discord, email, X). Nostr itself is **not** a Web Identity.
-- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. A client builds it from `<platform-user-id>` in its canonical form; for a platform without a canonical form there, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
+- **ConnectionKey**: A deterministic `hex(SHA256("<platform>:<platform-user-id>"))` hash, in lowercase hex, standing in for a Nostr pubkey when the real recipient/sender has no keypair yet. A client builds it from `<platform-user-id>` in the canonical form NIP-IC gives; for a platform NIP-IC gives no canonical form, a client MUST NOT derive it from typed input and MUST use the key from the recipient's `35522` attestation or `nconnection` instead. Native Nostr identities MUST NOT be hashed into a ConnectionKey — a real pubkey is used as-is.
 - **Proxy Agent**: A bot or service that signs a `9523` event on behalf of a platform user it does not hold private keys for.
 - **Chain**: The Lightning-routable settlement network, e.g. `bitcoin`. Examples use `examplecoin` for any Lightning-routable chain other than Bitcoin.
 
@@ -72,7 +72,7 @@ All `p` (recipient) and `P` (sender) tags use:
 ```
 
 - `[1]` is a 64-character lowercase hex Nostr pubkey **or** a ConnectionKey. A receiver MUST reject any other value, uppercase hex included, and never lowercases it.
-- `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey. A sender MUST write any other value in NIP-IC's platform-name format (`0`–`9`, `.`, `_` and `-`), and a receiver MUST reject a tag whose `[2]` does not, and never lowercases or otherwise repairs it.
+- `[2]` is the platform name (`discord`, `email`, `x`, ...). If omitted or empty, it MUST be interpreted as `nostr` — `[1]` is a native pubkey. A sender MUST write any other value in NIP-IC's platform-name format (one or more of `a`–`z`, `0`–`9`, `.`, `_` and `-`), and a receiver MUST reject a tag whose `[2]` does not, and never lowercases or otherwise repairs it.
 
 `9521` receipts additionally allow a 4th element, `["p/P", "<hex-or-ConnectionKey>", "<platform>", "<handle>"]` — a stable, human-readable provider handle (e.g. a Discord username). It is informational only and MUST NOT be used for identity resolution.
 

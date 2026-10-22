@@ -418,7 +418,7 @@ object — a decoder must parse the string's contents as a second step.
   exactly the slice's committed amount minus its own redeem fee — or for the full
   committed amount, fee-free, whenever the payment resolves to one the Hub's own node is both sending and
   receiving. A slice pays exactly once, in full — there's no partial or repeated redemption (to move part of
-  a slice's value).
+  a slice's value, use a `cash_transfer` split instead).
 - `amount` — OPTIONAL. Overrides the amount of an **amountless** invoice. It MUST NOT be used to alter an
   invoice that already carries one, and it never changes what the slice is worth: the resolved amount is
   still checked against the slice's committed amount and its redeem fee exactly as if the invoice
@@ -1230,8 +1230,7 @@ The answer is one of:
 The Hub decides the status on its own clock, and `deadline` has passed when now > `deadline`.
 
 - **`done`** — the call committed. `result` is the original response, rebuilt: the same fields and the same
-  tokens byte for byte, each encrypted to the same keys as originally (Not a
-  New Channel). Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
+  tokens byte for byte, each encrypted to the same keys as originally. Only the NIP-44 nonce differs. A created bill already destroyed appears as its tombstone
   object, in the clear, in place of its token string (`cash_token`,
   `new_wallet_token` or `remainder_wallet_token`), never as a token; its `*_wallet_pubkey` stays, and
   `pairing_uri` is omitted. Past that bill's `retained_until`, while the record is still held, the object
