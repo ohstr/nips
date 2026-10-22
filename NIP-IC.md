@@ -15,9 +15,9 @@ Two event kinds bind a user's Nostr pubkey to an account on a non-Nostr platform
 
 ## Terminology
 
-- **IA (Identity Authority)**: A service that verifies a user's ownership of a Web Identity account and signs a Kind `35522` attestation. Anyone can run one, and each client chooses which IAs it trusts; there is no protocol-level allowlist.
-- **Web Identity**: A non-Nostr identity platform (Discord, Telegram, X, GitHub, Instagram, Facebook, a DNS domain, or email). Any platform can be linked through an IA.
-- **ConnectionKey**: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. A client MUST build it from the canonical `<platform-user-id>` given in §Canonical Platform User IDs, or, for any other platform, take it from the IA's attestation as described there. The `d` tag of both event kinds in this NIP.
+- **IA (Identity Authority)**: A service that verifies which Nostr pubkey controls a Web Identity and attests it in a Kind `35522` event. For a platform outside §Canonical Platform User IDs it also defines the platform's user-id format, and so the account's ConnectionKey. Anyone can run one, and each client chooses which IAs it trusts; there is no protocol-level allowlist.
+- **Web Identity**: An account on a non-Nostr platform, e.g. a Discord, Telegram, X, GitHub, Instagram or Facebook account, a DNS domain, or an email address. Nostr itself is not a Web Identity. Any platform can be linked through an IA.
+- **ConnectionKey**: An identifier of one Web Identity, used to address someone who has no Nostr keypair yet: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. A client MUST build it from the canonical `<platform-user-id>` given in §Canonical Platform User IDs, or, for any other platform, take it from the IA's attestation as described there; such a key is defined by the IA that attested it, and wherever it addresses value it travels with that IA's pubkey (`ia_pubkey`). A Nostr pubkey is never hashed into a ConnectionKey. The `d` tag of both event kinds in this NIP.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
@@ -25,7 +25,7 @@ Two event kinds bind a user's Nostr pubkey to an account on a non-Nostr platform
 
 ### Canonical Platform User IDs
 
-Every client hashing a ConnectionKey for the same account MUST get the same hash, so `<platform-user-id>` has one canonical form per platform. The table lists the only platforms whose canonical form a sender can compute from what a user types, and so the only ones for which a sender MAY derive a ConnectionKey from typed input:
+Every client hashing a ConnectionKey for the same account on a platform in the table below MUST get the same hash, so `<platform-user-id>` has one canonical form on each of these platforms. The table lists the only platforms whose canonical form a sender can compute from what a user types, and so the only ones for which a sender MAY derive a ConnectionKey from typed input:
 
 | Platform | `<platform>` | `<platform-user-id>` |
 |---|---|---|
@@ -154,7 +154,7 @@ A second IA performing cross-IA re-verification from existing evidence MUST:
 
 ### The `nconnection` Bech32 Encoding
 
-A string bundling a ConnectionKey with the relays where its `35521` events are published, as TLV in the pattern [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) uses for `nprofile`/`nevent`:
+A string bundling a ConnectionKey with the relays where its `35521` events are published, and optionally its platform, as TLV in the pattern [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) uses for `nprofile`/`nevent`:
 
 | Type | Name | Length | Description | Cardinality |
 |---|---|---|---|---|
