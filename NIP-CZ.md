@@ -223,7 +223,7 @@ A client MAY mark a Cash Zap past `expires_at` as possibly expired. A sender's N
 
 A Cash Zap shows its amount, chain, recipient and Minter; for a self-hosted Hub, the Minter is the sender's own node. The minting Hub learns the zapped event from `zap_target`, which the `9522` makes public anyway.
 
-Anyone holding the public token can poll `get_balance` and `cash_status` and learn when the value left — redeemed, reclaimed or expired, without telling which — exactly, via the tombstone's `retained_until`. A sender who wants this hidden SHOULD send the token privately instead.
+Anyone holding the public token can poll `get_balance` and `cash_status` and learn when the value left, via the tombstone's `retained_until`, and how, via its `reason`: redeemed, transferred, consolidated, reclaimed or expired (NIP-CASH §Answering About a Destroyed Bill). A sender who wants this hidden SHOULD send the token privately instead.
 
 ## Future Work
 
