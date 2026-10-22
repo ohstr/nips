@@ -573,7 +573,8 @@ bill holds the SAME connection string, so a Hub receiving the request there cann
 can only answer everyone or no one — and that is among the reasons it no longer serves it.
 
 A Hub MUST determine "mine" from the item proof's own signer, never from anything the item asserts about
-itself. And `mine` is a *view*, not an authorization boundary: it changes what is returned, never what a
+itself. For a bearer item, "mine" is the cash-mode slice whose commitment matches the item's
+`cash_secret`. And `mine` is a *view*, not an authorization boundary: it changes what is returned, never what a
 caller may do, so a Hub MUST NOT treat having asked for `mine` as narrowing any later call's permissions.
 
 A caller whose item proof verifies but who holds no slice of this bill receives no rows. A Hub MUST NOT
@@ -600,6 +601,7 @@ sequenceDiagram
 ```jsonc
 {
   "scope": "mine"   // OPTIONAL: "all" | "mine". Absent means "mine" — see §Scoping the Roster.
+  // "cash_secret": "<64 lowercase hex>"  // bearer item only (§Bearer Items)
 }
 ```
 
@@ -743,8 +745,8 @@ treats it as definitive will tell users their money is gone during an ordinary o
 
 The same applies to an **omission** on the private transport, for the same reason and more sharply: an
 omission is information-free by design, so it is the single answer a Hub gives for a bill it does not
-hold, a proof that did not verify, a possession proof it could not confirm, and a method it will not
-serve. A client MUST NOT resend an omitted `cash_redeem`, `cash_transfer` or `cash_consolidate` blind —
+hold and a possession proof it could not confirm; once possession is proved, every refusal is a named
+error instead (§Bill Proofs). A client MUST NOT resend an omitted `cash_redeem`, `cash_transfer` or `cash_consolidate` blind —
 it cannot be told apart from a request that WAS applied and whose reply was lost, so resending may pay
 twice. A client that sent a `request_id` asks for the outcome with `cash_lookup` instead (§Lost Replies).
 `cash_status` and `cash_lookup` are safe to retry, since they move nothing.
@@ -1650,8 +1652,10 @@ needed.
   signing device that can sign but cannot perform ECDH needs a *separate* decryption key, so
   the announcement carries the inbox explicitly and a client MUST use whatever it says.
 - **`limits`** — the envelope limits a Hub will actually accept: `max_bytes`, `max_items`,
-  `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`, and `max_request_age`
-  (§Lost Replies, Deadlines), which every Hub MUST announce.
+  `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget` (§Bearer Items), and
+  `max_request_age` (§Lost Replies, Deadlines), which every Hub MUST announce. A Hub MUST refuse
+  an envelope over `max_bytes`, `max_items` or `max_verify_budget` whole, with an envelope-level
+  `QUOTA_EXCEEDED`, and an item over `max_consolidate_sources` with `QUOTA_EXCEEDED`.
 - **`relays`** — OPTIONAL. Where the Hub reads its inbox. A bill's own token already carries relay
   hints (§The Cash Token), but those were fixed when the bill was minted and a Hub may have moved
   since; a bill minted years earlier is exactly the case this field exists for. When present a
@@ -1805,7 +1809,8 @@ links them disappears.
   inside — a one-item status check is visibly not a fifty-source consolidation. Padding to a
   bucket boundary collapses that into a few indistinguishable sizes.
 
-An envelope MUST carry at least one item, and item `id`s MUST be unique within it.
+An envelope MUST carry at least one item, and item `id`s MUST be unique within it; a Hub MUST
+refuse an envelope that breaks either rule with an envelope-level `BAD_REQUEST`.
 
 ### Batching Across Bills
 
@@ -1831,9 +1836,9 @@ A client SHOULD reject such an envelope locally before sending it: the Hub's onl
 answer is silence, which is indistinguishable from a bill it does not hold, so an envelope
 mixing Hubs produces a failure the sender cannot diagnose.
 
-That last point generalises. Because an unservable item is answered by **omission**
+That last point generalises. Because an item whose bill proof fails is answered by **omission**
 (§Responses), and omission is deliberately information-free, a client learns nothing from the
-wire about *why* an item was skipped. A malformed proof, a mismatched params hash, a stale
+wire about *why* an item was skipped. A malformed bill proof, a mismatched params hash, a stale
 envelope nonce and a wrong Hub all look identical from outside. An implementation SHOULD
 therefore validate an envelope's internal coherence before sending — that a proof binds to its
 own item's target, method and params hash, that every proof carries this envelope's nonce, and
@@ -1868,13 +1873,18 @@ its outer key is ephemeral. The exposure that ban prevents does not exist here.
 This is the requirement that keeps the allowance from becoming a hole. An identity-bound slice
 could otherwise dodge its proof by omitting one and looking bearer — so a Hub presented with a
 proofless item MUST look the target up, and serve it only if that slice is genuinely cash-mode
-and the supplied secret matches. For any other slice the item is unservable and MUST be
-omitted, exactly as an unverifiable proof is — unless the item's bill proof verified, in which case the
-Hub MAY refuse it with an error instead (§Bill Proofs: once possession is proved, a reason tells the
-sender nothing new). Possession decides between the two outcomes, never the item's own claims.
+and the supplied secret matches. For any other slice the Hub MUST refuse the item with
+`UNAUTHORIZED` once its bill proof has verified, and omit it otherwise, exactly as an
+unverifiable proof is (§Bill Proofs: once possession is proved, a reason tells the sender
+nothing new). Possession decides between the two outcomes, never the item's own claims.
 
-A Hub MUST NOT count a proofless item against a verification budget it advertises, since there
-is no signature to verify; and a client MUST NOT assume otherwise when packing an envelope.
+`max_verify_budget` is the number of signature verifications a Hub will perform for one
+envelope. Every signature the envelope carries counts one: each kind-23193 bill proof, each
+kind-23192 item proof, and each signed event inside an item's `params` — a kind-23198 proof or a
+kind-35522 attestation, one per source for a `cash_consolidate`. A cash secret is checked
+without a signature and counts nothing, so a bearer item counts its bill proof alone. A Hub MUST
+refuse an envelope over its budget whole, with an envelope-level `QUOTA_EXCEEDED` (§Responses),
+before it runs any item, and a client MUST pack an envelope against this same count.
 
 ### Item Proofs (kind 23192)
 
@@ -1924,9 +1934,9 @@ indication why. And preserving numbers verbatim is required because an amount in
 exceed the range a float64 represents exactly, so a canonicaliser that round-trips numbers
 through a float would change what the caller signed for.
 
-A proof's `created_at` MUST fall inside the same freshness window kind-23199 uses (up to five
-minutes past, one minute future), so a caller's clock tolerance is identical everywhere in
-this family.
+A proof's `created_at` MUST fall inside the same freshness window kind-23199 uses (from five
+minutes before to one minute after the Hub's clock, both bounds inclusive), so a caller's clock
+tolerance is identical everywhere in this family.
 
 An item proof establishes **which slice** the sender claims, and nothing more. Its key is the
 signer's own choice, so anyone can produce a structurally perfect one for any target they can
@@ -1967,13 +1977,17 @@ is public — so that demonstration disappeared with the change of addressing. T
 restores it explicitly.
 
 It is what makes a Hub's answers safe to give. Once possession is proved, confirming the bill
-exists tells the sender nothing they did not already know, so a Hub MAY then answer with a
-reason instead of an omission:
+exists tells the sender nothing they did not already know, so a Hub MUST then answer every
+item, with a result or an error from §Errors, never with an omission:
 
 - a sender who holds the bill but no slice of it MUST receive `NOT_FOUND` rather than silence
   (§Responses), since "this bill is not addressed to you" is otherwise indistinguishable from
   an unreachable Hub, and clients cannot tell whether to retry;
-- a destroyed bill MAY be answered with a tombstone (§Answering About a Destroyed Bill).
+- a slice proof, attestation or cash secret that fails gets `UNAUTHORIZED`, and a method the
+  Hub does not serve on this transport gets `NOT_IMPLEMENTED`;
+- a destroyed bill MAY be answered with a tombstone (§Answering About a Destroyed Bill). It is
+  the one exception to answering: an item naming a destroyed bill is answered only as that
+  section allows, and omitted otherwise.
 
 Without possession the Hub MUST omit, because a wallet pubkey is guessable and any answer —
 including a refusal — would confirm which bills a Hub holds.
@@ -1988,6 +2002,8 @@ that the bill was given to the sender, never that any slice is theirs.
 {
   "v": 1,
   "req_nonce": "<the request envelope's nonce>",
+  "seq": 1,
+  "total": 1,
   "results": [
     {"id": "1", "result_type": "cash_status", "result": { }},
     {"id": "2", "error": {"code": "NOT_FOUND", "message": "…"}}
@@ -1997,12 +2013,22 @@ that the bill was given to the sender, never that any slice is theirs.
 ```
 
 Per-item errors use NIP-47's own error shape, so a per-item failure reads exactly like a
-single-request failure does today.
+single-request failure does today. An envelope-level error is carried instead of `results`, and
+means no item ran (§Chunked Replies):
+
+```jsonc
+{"v": 1, "req_nonce": "…", "seq": 1, "total": 1, "error": {"code": "QUOTA_EXCEEDED", "message": "…"}}
+```
+
+A Hub MUST reply to every envelope it decrypts and parses, with `"results": []` when it omits
+every item, so a client can tell a complete reply of omissions from a lost one. A Hub MUST NOT
+reply to a copy of an envelope whose nonce it has already served, nor to one whose `not_after`
+has passed: such a reply would report an envelope-level error for items the first copy ran.
 
 **Results need not cover every item, and omission is meaningful.** An item whose target the
-Hub does not hold, or whose bill proof did not verify, MUST be **omitted** rather than answered
-with an error. Once the bill proof verifies, an item whose slice proof or bearer secret fails MAY
-be refused with an error instead of omitted (§Bill Proofs). This is what stops batching from becoming an existence oracle: producing a
+Hub does not hold, or whose bill proof is missing or did not verify, MUST be **omitted** rather
+than answered with an error. Every other item MUST be answered, with a result or an error
+(§Bill Proofs). This is what stops batching from becoming an existence oracle: producing a
 verifying proof requires the bill's connection secret in the first place, so a caller who
 legitimately holds a bill learns nothing it did not already know, while a caller probing for
 bills it does not hold learns nothing at all. A client MUST read an omission as "not served"
@@ -2130,7 +2156,9 @@ discover how large the answer is.
 - **`seq`** — this reply's position, counting from 1;
 - **`total`** — how many replies this request produced.
 
-A single-event reply carries `seq: 1, total: 1`.
+A single-event reply carries `seq: 1, total: 1`. `seq` and `total` travel inside the encrypted
+response, never as event tags, which would show a relay how a reply was split. A chunk whose
+`seq` is below 1 or above its `total` makes the reply incomplete.
 
 **`total` is load-bearing, not a convenience**, and the reason is specific to this protocol. The
 obvious alternative is for a client to collect until every item id it sent has an answer. That
@@ -2167,7 +2195,8 @@ events carry the same `seq`, the client MUST treat the reply as incomplete. It M
 every item outcome a validly decrypted chunk decided, exactly as for any other incomplete reply
 (below), since one of them may be the only copy of a new bill's token.
 
-**A client MUST NOT accept an item id answered in more than one chunk**, and MUST NOT resolve the
+**A client MUST NOT accept an item id answered more than once**, whether within one chunk or
+across chunks, and MUST NOT resolve the
 conflict by arrival order or by `seq`. That item has no decided outcome and MUST be surfaced as
 indeterminate; the other items keep theirs.
 
@@ -2227,9 +2256,10 @@ feature nobody asked for.
 
 `mint_cash` MUST NOT be served here. It is the Hub owner's method, gated by the Hub's own
 scope on the Hub's own connection, and its `request_id` is optional — without one, a Hub whose
-replay memory is bounded (as above) could double-mint on a caller's retry. An item naming a method
-the Hub does not serve MUST be omitted, exactly like an unverifiable one, so the allowlist
-itself discloses nothing.
+replay memory is bounded (as above) could double-mint on a caller's retry. A Hub MUST refuse an
+item naming a method it does not serve with `NOT_IMPLEMENTED` once the item's bill proof has
+verified, and omit it otherwise, exactly like an unverifiable one; the allowlist is fixed by this
+document, so the refusal discloses nothing.
 
 ### Ceilings
 
