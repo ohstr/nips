@@ -31,7 +31,10 @@ The client connects to the socket and writes requests; the signer writes one res
 - Each message is one UTF-8 JSON object followed by `\n`.
 - A request is NIP-46's request object: `{"id": "<string>", "method": "<string>", "params": ["<string>", ...]}`.
 - A response is NIP-46's response object: `{"id": "<request id>", "result": "<string>"}` or `{"id": "<request id>", "error": "<string>"}`. `result` is always a JSON string, as in NIP-46, even when it holds JSON text.
-- A client or signer MUST NOT send a message that exceeds 1 MiB, newline excluded. A signer whose result would exceed it answers that request with an `error` instead. A signer that receives a longer line MUST either close the connection or answer it with an empty `id` and an `invalid: ` error; it MUST NOT buffer more than 1 MiB of the line, and when it answers, it discards the rest of the line through its `\n`.
+- A client or signer MUST NOT send a message that exceeds 1 MiB, newline excluded.
+  - A signer whose result would exceed it answers that request with an `error` instead.
+  - A signer that receives a longer line MUST either close the connection or answer it with an empty `id` and an `invalid: ` error.
+  - It MUST NOT buffer more than 1 MiB of the line, and when it answers, it discards the rest of the line through its `\n`.
 - Blank lines are ignored. A line that is not a JSON object gets a response with an empty `id` and an `invalid: ` error.
 - A connection carries any number of requests. Clients that pipeline requests MUST match responses by `id`; a signer MAY answer requests on one connection strictly in order.
 
@@ -64,7 +67,17 @@ The text after the prefix is a human-readable reason. Any other error string is 
 
 ## Attestations
 
-A policy may require a third party's signed approval before signing (e.g. a kind-1 note reading `approve <event id>`). The client passes such events as a JSON array in `sign_event`'s `params[1]`. The event they approve is identified by the `id` the signer computes for `params[0]` after setting its own pubkey, which the client can compute in advance. What makes an attestation valid is the signer's policy, not this NIP.
+A policy may require a third party's signed approval before signing (e.g. a kind-1 note reading `approve <event id>`).
+
+- The client passes such events as a JSON array in `sign_event`'s `params[1]`.
+- The event they approve is identified by the `id` the signer computes for `params[0]` after setting its own pubkey, which the client can compute in advance.
+- What makes an attestation valid is the signer's policy, not this NIP.
+
+For example, a `sign_event` request carrying one attestation, with `params[1]` holding the array as a JSON string:
+
+```
+{"id": "1", "method": "sign_event", "params": ["<unsigned event JSON>", "[<attestation event JSON>]"]}
+```
 
 ## Signer requirements
 
