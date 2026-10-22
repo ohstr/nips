@@ -203,14 +203,14 @@ sequenceDiagram
   The member keeps the secret and never sends it; the Hub authorizes this pubkey as the wallet's client key.
   A request without it MUST be rejected — there is no Hub-generated alternative. A member SHOULD generate a
   fresh keypair per request, so the connection key links to nothing else they use.
-- `max_amount` — REQUIRED, the send cap per budget period on the wallet's external traffic (§Own Funds
-  and Caps), in the chain's milli-unit (msats on Bitcoin, the same milli-unit for any other energy-backed
-  coin), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling (§Data Model).
-- `max_receive` — REQUIRED, the receive cap per budget period on the wallet's external traffic (§Own
-  Funds and Caps), in the same milli-unit. MUST NOT exceed the Hub's own per-wallet receive ceiling
-  (§Data Model).
-- `expiry` — OPTIONAL, the wallet's lifetime in seconds; if omitted or zero, it MUST default to the Hub's
-  own default lifetime (§Data Model), not its ceiling.
+- `max_amount` — REQUIRED, a JSON integer, the send cap per budget period on the wallet's external traffic
+  (§Own Funds and Caps), in the chain's milli-unit (msats on Bitcoin, the same milli-unit for any other
+  energy-backed coin), as in NIP-47. MUST NOT exceed the Hub's own per-wallet send ceiling (§Data Model).
+- `max_receive` — REQUIRED, a JSON integer, the receive cap per budget period on the wallet's external
+  traffic (§Own Funds and Caps), in the same milli-unit. MUST NOT exceed the Hub's own per-wallet receive
+  ceiling (§Data Model).
+- `expiry` — OPTIONAL, a JSON integer, the wallet's lifetime in seconds; if omitted or zero, it MUST
+  default to the Hub's own default lifetime (§Data Model), not its ceiling.
 - `budget_renewal` — OPTIONAL, one of NIP-47's `daily` | `weekly` | `monthly` | `yearly` | `never`, with
   periods as §Budget Renewal Floor defines them; if omitted, it MUST default to `never`. Whether omitted
   or explicit, the resolved value MUST satisfy the Hub's own renewal floor (§Budget Renewal Floor).
@@ -441,10 +441,13 @@ one list of checks; every other section that verifies a kind-23199 proof refers 
    wallet issued to a key of their own instead (§Security Considerations).
 7. **The `terms` tag equals the request's terms.** Exactly one such tag, whose value is
    `<max_amount>:<max_receive>:<expiry>:<budget_renewal>` exactly as requested: `max_amount`,
-   `max_receive` and `expiry` as decimal integers, an omitted `expiry` written as `0` and an omitted
-   `budget_renewal` as `never`. A Hub MUST reject a request whose params differ. With the signer, `d` and
-   `connection`, this binds every param of the request, so nobody who sees it can resubmit the proof with
-   other terms.
+   `max_receive` and `expiry` as unsigned decimal ASCII with no leading zeros (`0` for zero), an omitted
+   `expiry` written as `0` and an omitted `budget_renewal` as `never`. A Hub MUST rebuild this string from
+   the request's params and compare it byte for byte, and MUST reject a request whose tag differs. So
+   `100000:200000:0:monthly` binds `max_amount` 100000, `max_receive` 200000, no `expiry` and `monthly`,
+   while `0100000:200000:0:monthly` or `100000:200000:0:Monthly` matches no request. With the signer, `d`
+   and `connection`, this binds every param of the request, so nobody who sees it can resubmit the proof
+   with other terms.
 8. **The `id` has not been used before**, against a single-use record (§Data Model). A previously-consumed
    id MUST be rejected even if everything above still holds.
 
