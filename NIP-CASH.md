@@ -1692,10 +1692,11 @@ kind-23190 events. The relays it reads its inbox from enforce it:
   with an `OK` false message beginning `pow:`, for example `pow: difficulty 20 required`. The minimum MAY
   change with load;
 - each rejects a kind-23190 event that carries no NIP-40 `expiration` tag, one already past, or one more than
-  86400 seconds ahead, and drops any event whose id it has already accepted, until that event's expiration.
+  1 day ahead, and drops any event whose id it has already accepted, until that event's expiration.
 
 A Hub that requires proof of work MUST read its inbox only on relays that enforce it, and MUST list them in
-its announcement's `relays`.
+its announcement's `relays`. It SHOULD NOT announce a `max_request_age` above 1 day, and a client sending to
+it SHOULD set its deadline at most 1 day ahead, whatever `max_request_age` allows.
 
 A client sending to such a Hub reads the relay's minimum before sending, and puts on the request event a
 `nonce` tag as NIP-13 defines it and an `expiration` tag equal to the envelope's `not_after`. On a `pow:`
