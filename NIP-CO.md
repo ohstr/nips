@@ -54,7 +54,8 @@ sequenceDiagram
 
 An Order connection belongs to one Cash Hub. Its owner MAY create several for one Hub, and MAY retire any of
 them. Its secret is public by design: it lets a Hub tell a request that found its shop from one that did not,
-and authorizes nothing.
+and authorizes nothing. An owner sells only through Order connections, and never shares its `cashhub1...`,
+which can mint.
 
 ### Wire Format
 
@@ -343,7 +344,8 @@ At `pay_by` the Hub looks at what it has seen for the order, confirmed or not:
 
 - a payment seen: the order is kept, and its address watched for as long as the Hub runs; later payments to
   it are minted the same way;
-- nothing seen: the Hub MUST delete the order at once; a payment arriving afterwards is kept by the Hub.
+- nothing seen: the Hub MUST delete the order at once, or at its deadline plus `max_request_age` if that is
+  later; a payment arriving afterwards is kept by the Hub.
 
 For the on-chain order above (`pay_millis` 21063000, `fee_millis` 63000), these rules give:
 
@@ -409,8 +411,16 @@ A client reads an order with NIP-CASH's `cash_lookup`, with the order's `request
   byte, rather than a copy of the first reply;
 - `pending`, `unknown` and `expired` keep NIP-CASH's meaning.
 
-A Hub MUST keep an order while it is open, and an order with a payment for as long as it keeps its address
-watched. It MAY drop an order deleted under the on-chain rule above.
+A Hub MUST keep an order:
+
+- while it is open;
+- at least until its deadline plus NIP-CASH's `max_request_age`, even unpaid;
+- for an on-chain order with a payment, for as long as it keeps its address watched;
+- for a Lightning order, while any bill it minted is live, plus that bill's tombstone window.
+
+It MAY drop an unpaid Lightning order once both `pay_by` and that minimum have passed, and an order deleted
+under the on-chain rule above; with an unpaid order it MAY drop the order's used `request_id` mark, as
+NIP-CASH allows.
 
 ## Order Notice (kind 23189)
 
@@ -447,7 +457,9 @@ notices, since ephemeral events can be missed.
    | Lightning | `minted` or `expired` |
    | on-chain | `expired` or `closed`, and a `closed` order may still gain bills |
 
-A lost reply is read with `cash_lookup`. After `unknown` the order was never placed, and a client places it
+A client that holds an order's reply knows its `pay_by`: after `pay_by`, an order it never saw `paid`,
+`minted` or `closed`, and that shows no bill, ended unpaid, whatever its lookup answers. A lost reply is read with `cash_lookup`. After `unknown` the order was
+never placed, and a client places it
 again only with its user's confirmation, since a new order asks for a new payment.
 
 ## Security Considerations
