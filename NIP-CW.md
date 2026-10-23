@@ -144,7 +144,7 @@ sequenceDiagram
     Note over M: builds its own connection string
     opt the reply is lost
         M->>H: cash_lookup on the private transport
-        H-->>M: the same encrypted_details
+        H-->>M: the same encrypted_details, once the join is recorded
     end
 ```
 
@@ -394,7 +394,7 @@ Kind 23199 is defined by this document. It is neither NIP-CASH's kind 23198 nor 
 }
 ```
 
-| field | binds |
+| field | what it carries |
 |---|---|
 | `pubkey` | the requester pubkey — MUST equal `pubkey` in the request |
 | `created_at` | freshness window: up to 5 minutes in the past, up to 1 minute in the future |
@@ -581,7 +581,7 @@ other side is:
 
 In short, with the caps and the holdings ceiling as below:
 
-| kind | other side | routing fee and `fees_ppm` | send and receive caps | holdings ceiling on a credit |
+| kind | other side | routing fee and `fees_ppm` | send and receive caps (send cap: Active wallets only) | holdings ceiling on a credit |
 |---|---|---|---|---|
 | 1 | the same circle | no | no | no between two Active wallets; yes from a wallet that is not Active |
 | 2 | another circle on the node | no | no | yes, the receiving circle's |
@@ -620,7 +620,7 @@ amounts of every open invoice they have issued, held payments the Hub has accept
 invoice counts whoever pays it in the end. A Hub MUST NOT let a new invoice or a credit take its holdings
 past its holdings ceiling:
 
-| what would pass the ceiling | outcome |
+| payment or invoice | outcome |
 |---|---|
 | such an invoice | refused with `INSUFFICIENT_CAPACITY` |
 | such a payment from the same node | refused with `INSUFFICIENT_CAPACITY` |
@@ -826,6 +826,8 @@ sequenceDiagram
     H-->>O: rotation_pending, with completes_at
     alt the old key signs a request before completes_at (wallet not frozen)
         O->>H: any request
+        H-->>O: rotation_cancelled
+    else completes_at is reached, the new key in use on the node by then
         H-->>O: rotation_cancelled
     else completes_at is reached
         Note over H: the new key replaces the old one
