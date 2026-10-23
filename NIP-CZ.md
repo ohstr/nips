@@ -23,7 +23,7 @@ A Cash Zap is a zap paid with a NIP-CASH cash token instead of a Lightning invoi
 - **Cash Zap**: a kind `9522` event carrying a cash token issued to its `p`.
 - **cash token**: a NIP-CASH token, `satscash1...` for Bitcoin.
 - **Minter**: the Lightning node that signed the token, the node the minting Hub runs on, as a 33-byte compressed pubkey written as 66 lowercase hex characters.
-  - A verifier compares a Minter with any other key, whether another Minter such as a `10522` `mint` tag or a Hub's x-only key (the author of its announcement, or its `get_info` `identity`), by its x-only part only: the last 32 bytes, as 64 lowercase hex, never the prefix byte.
+  - A verifier compares a Minter with any other key, whether another Minter such as a `10522` `mint` tag or a Hub's x-only key (the author of its announcement, or the `pubkey` its Cash Hub connection's `get_info` returns), by its x-only part only: the last 32 bytes, as 64 lowercase hex, never the prefix byte.
   - For example, the Minter `0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798` matches the x-only key `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`.
 - **Zap signature**: the signature over a `satscash-zap:v1` payload (TLV `8` = `2`) that a Hub puts on the bill it issues for a `cash_transfer` with `zap_target`.
 - **ConnectionKey**: NIP-IC's identifier of a Web Identity, lowercase `hex(SHA256("<platform>:<platform-user-id>"))`, used in place of a Nostr pubkey only for someone with no Nostr keypair yet.
