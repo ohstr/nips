@@ -38,4 +38,4 @@ NIPs can name. Upstream NIPs and other "Related" links are left out.
 
 Suggested reading order for the cash NIPs: NIP-CASH, then NIP-CP (holding bills), then NIP-CZ, NIP-CW and
 NIP-CO, which each add one use of a Cash Hub. NIP-IC explains the Web Identities that bills, zaps and
-circles can name.
+orders can name.
