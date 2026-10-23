@@ -70,13 +70,13 @@ sequenceDiagram
   participant H as Minting Hub
   participant R as Relays
   participant W as Recipient wallet
-  S->>R: fetch recipient's 10522
-  S->>H: cash_transfer (new_identity, zap_target)
-  H-->>S: new bill with zap signature (issued_at, expires_at)
+  S->>R: fetch recipient's 10522 (pubkey p only)
+  S->>H: cash_transfer (new_identity, plus zap_target for a pubkey p on an event)
+  H-->>S: new bill, with a zap signature when zap_target was set
   S->>R: publish 9522 with the token
   R-->>W: 9522
-  W->>W: verify rules 1–8
-  W->>H: claim the slice (rule 9), then redeem
+  W->>W: verify rules 1–6 and 8
+  W->>H: rule 9 (cash_status, or cash_transfer for a ConnectionKey p), then redeem
 ```
 
 1. If `p` is a pubkey, fetch the recipient's `10522`. If it lists `chain` tags, the sender MUST use one; if it lists `mint` tags for that chain, the sender SHOULD send a bill minted by one of them.
@@ -88,7 +88,7 @@ sequenceDiagram
 
    | Zap | Tags on the `9522` | `zap_target` |
    |---|---|---|
-   | pubkey `p`, on an event with an `a` coordinate | `a` | that tag's value, byte for byte |
+   | pubkey `p`, on an event with an `a` coordinate | `a`, and optionally `e` naming the same event | the `a` tag's value, byte for byte |
    | pubkey `p`, on an event by `e` id | `e`, no `a` | the `e` tag's value |
    | pubkey `p`, on no event (e.g. on a profile) | neither `e` nor `a` | none; valid, but never counted |
    | ConnectionKey `p` | | none |
@@ -149,7 +149,7 @@ sequenceDiagram
 | `ia` | | exactly one if `p` is a ConnectionKey, else none | |
 | `e`, `a`, `k` | **Optional tags** | at most one each | `e` and `a` MUST name the same event |
 | `P` | | at most one | |
-| `issued_at`, `expires_at` | | at most one each; exactly one each when the token's TLV `8` is `2` | equal to the values in the bill's zap signature; `expires_at` is `0` for a bill that never expires |
+| `issued_at`, `expires_at` | | at most one each; exactly one each when the token's TLV `8` is `2`, equal to the values in the bill's zap signature | `expires_at` is `0` for a bill that never expires |
 
 On a token without TLV `8` = `2`, or whose zap signature does not verify (rule 7), `issued_at` and `expires_at` are both informational: the sender chose them, so a wallet takes `expires_at` from `cash_status` instead.
 
