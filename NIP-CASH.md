@@ -1185,7 +1185,8 @@ expire.
 
 `cash_lookup` is served on the private transport only. Its item names the original
 call's target — the bill a `cash_transfer` item named, a `cash_consolidate`'s first source, the Cash Hub
-connection for `mint_cash`, or the Circle Hub connection for a NIP-CW join — which the Hub MUST serve even
+connection for `mint_cash`, the Circle Hub connection for a NIP-CW join, or the Order connection for a
+NIP-CO order — which the Hub MUST serve even
 if it has since destroyed that bill. Its bill proof is signed with that target's connection secret, as for any
 item. For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV
 `0`), and the item and bill proofs are both signed with that connection's client
