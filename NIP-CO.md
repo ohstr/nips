@@ -418,7 +418,8 @@ A Hub MUST keep an order:
 - for a Lightning order, while any bill it minted is live, plus that bill's tombstone window.
 
 It MAY drop an unpaid Lightning order once both `pay_by` and that minimum have passed, and an order deleted
-under the on-chain rule above.
+under the on-chain rule above; with an unpaid order it MAY drop the order's used `request_id` mark, as
+NIP-CASH allows.
 
 ## Order Notice (kind 23189)
 
