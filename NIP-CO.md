@@ -409,8 +409,14 @@ A client reads an order with NIP-CASH's `cash_lookup`, with the order's `request
   byte, rather than a copy of the first reply;
 - `pending`, `unknown` and `expired` keep NIP-CASH's meaning.
 
-A Hub MUST keep an order while it is open, and an order with a payment for as long as it keeps its address
-watched. It MAY drop an order deleted under the on-chain rule above.
+A Hub MUST keep an order:
+
+- while it is open;
+- for an on-chain order with a payment, for as long as it keeps its address watched;
+- for a Lightning order, while any bill it minted is live, plus that bill's tombstone window.
+
+It MAY drop an unpaid Lightning order once `pay_by` has passed, and an order deleted under the on-chain rule
+above.
 
 ## Order Notice (kind 23189)
 
