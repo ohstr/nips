@@ -79,9 +79,9 @@ particular (`cash` mode). Naming a recipient is never mandatory.
   owner's allowlist.
 - **min_transfer_millis**: a floor, in millis, on how small a piece a split may carve off or leave behind
   (zero = no floor).
-- **redeem_fee_base / redeem_fee_ppm**: a flat amount in millis plus a parts-per-million rate, charged on
-  a slice only when `cash_redeem` resolves to an external Lightning payment (zero = free), and the floor of
-  a `cash_withdraw` fee. See §The Redeem Fee.
+- **redeem_fee_base / redeem_fee_ppm**: a flat amount in millis plus a parts-per-million rate: the fee on a
+  `cash_redeem` that resolves to an external Lightning payment, and the floor of a `cash_withdraw` fee (zero =
+  free). See §The Redeem Fee.
 - **millis**: this document's amount unit — one-thousandth of whatever base unit the connection's own coin
   uses for Lightning-payable amounts (milli-satoshi for a Bitcoin-backed Cash Hub, and for any other
   energy-backed coin the milli-unit its implementation defines). Fixed per Cash Hub by which coin it mints
@@ -155,12 +155,12 @@ this document's own; the rest are NIP-47's:
 | `INTERNAL` | anything else that failed on the Hub's side | yes, later |
 
 A client acts on the code; the message is for people. `error` is always this NIP-47 object: a destroyed
-bill is answered with a `result`, never with an error.
+bill is answered with a `result`, never with an error. On the private transport a refusal is an error only
+once the item's bill proof has verified, and an omission otherwise.
 
-A refusal of `cash_withdraw_quote` or `cash_withdraw` to which §Redeeming On-chain gives a `reason` SHOULD
-carry it as a `reason` field of `error`, one of `network`, `script_type`, `below_min`, `too_slow`,
-`quote_expired`, `unfinal` and `own_address`; a client reads any other value, or none, as no reason. On the private
-transport a refusal is an error only once the item's bill proof has verified, and an omission otherwise.
+When §Redeeming On-chain gives a refusal a `detail`, a Hub SHOULD add it to `error` as a `detail` field: one
+of `network`, `script_type`, `below_min`, `too_slow`, `quote_invalid`, `quote_expired`, `unfinal` and
+`own_address`. A client reads any other value, or none, as no detail.
 
 **A client MUST NOT read an error other than `BAD_REQUEST` on a call carrying a `request_id` as a
 failure.** The call's outcome is open: the client keeps it pending and looks it up with `cash_lookup`,
@@ -259,9 +259,9 @@ A Cash Hub MUST maintain, for itself:
   freshly-minted wallet carries. Zero (free) is a valid default for either. `redeem_fee_ppm` is a
   parts-per-million rate, so it MUST be bounded at 1,000,000 — the whole slice. A Hub MUST reject a
   configured value above that bound rather than clamp it;
-- if it offers on-chain withdrawals, its current `withdraw_fee_base` and `withdraw_fee_ppm`, bounded as
-  `redeem_fee_ppm` is, its withdraw minimum and maximum, the script types it pays, and its `final_depth`,
-  a number of confirmations;
+- if it offers on-chain withdrawals: its current `withdraw_fee_base` and `withdraw_fee_ppm`, the ppm bounded
+  as `redeem_fee_ppm` is; its withdrawal minimum and maximum; the script types it pays; and its
+  `final_depth`, a number of confirmations;
 - the retention window for answering about a destroyed bill, in seconds.
   Zero disables tombstones. It MUST be bounded by the same absolute bound the expiry ceiling uses (`expiry`), with the same reject-rather-than-clamp requirement;
 
@@ -570,9 +570,12 @@ Step 4's cases:
 
 ## Redeeming On-chain (`cash_withdraw`)
 
-A recipient collects their exact slice on-chain, to an address they give, in two calls over the Cash Wallet
-connection: `cash_withdraw_quote` asks the Hub what the payout would be, and `cash_withdraw` accepts that
-quote. The Hub then owes the payout, and pays it on its own.
+A recipient collects their exact slice on-chain, to an address they give, instead of to a Lightning invoice.
+It takes two calls over the Cash Wallet connection: `cash_withdraw_quote` asks what the payout would be and
+moves nothing; `cash_withdraw` accepts the quote and ends the slice at once.
+
+From then on the Hub owes the payout and pays it on its own; the client follows it with `cash_lookup`. If the
+Hub cannot get it confirmed, it cancels it and re-mints the whole amount as a new bill for the same holder.
 
 ```mermaid
 sequenceDiagram
@@ -581,50 +584,61 @@ sequenceDiagram
     C->>H: cash_withdraw_quote (address)
     H-->>C: quote (payout, fees, sent_by, holds_until)
     C->>H: cash_withdraw (quote, request_id, notify)
-    H-->>C: the payout, queued, with its receipt
-    H->>H: broadcast, until final
+    H-->>C: queued, with its receipt
+    Note over H: owes the payout, broadcasts and bumps it on its own
+    H-->>C: state notice (kind 23189, on a relay)
     C->>H: cash_lookup
-    H-->>C: the payout's current state
+    H-->>C: done: the payout's current state
 ```
 
-A Hub that offers on-chain withdrawals lists both methods in `private_methods`; one that does not refuses
-them with `NOT_IMPLEMENTED`.
+A Hub that does not offer on-chain withdrawals refuses both methods with `NOT_IMPLEMENTED`. A client reads a
+Hub's current terms from the `withdraw` object of `cash_status`.
 
-- A **version** of a payout is a transaction the Hub signs that pays it; **broadcast** means offered to the
-  network.
+Terms used below:
+
+- A **version** of a payout is a transaction the Hub signs that pays it.
+- To **broadcast** a version is to offer it to the network.
+- The **about-to-sign record** is the Hub's durable note, written before it asks for any signature, of the
+  inputs it is about to sign.
+- To **set aside** coins is to reserve an amount over some of the node's own coins, durably and without
+  expiry, so that no other payout or spend may use them.
 - `final_depth` is the number of confirmations at which the Hub treats a payout as final. A Hub SHOULD set
-  it to at least 6, and at least NIP-CO's highest `confirmations` tier.
-- A quote **holds** while the Hub's best chain tip is at a height no greater than its `holds_until`.
+  it to at least 6, and to at least NIP-CO's highest `confirmations` tier.
+- A quote is **valid** while the Hub's best chain tip is at a height no greater than its `holds_until`.
 
 ### Quoting a Withdrawal (`cash_withdraw_quote`)
 
-A quote moves nothing. Its item carries the item proof of the slice it quotes, or, on a cash-mode bill,
-no `proof` and no `cash_secret`, answered from the bill proof alone as `cash_status` is.
+A quote moves nothing and needs no claim proof. Its item carries the item proof of the slice it quotes. On a
+cash-mode bill it carries neither `proof` nor `cash_secret`, and the Hub answers it on the bill proof alone,
+as for `cash_status`.
 
 ```jsonc
-{"address": "bc1q...", "send_before": 1720000900}
+{"address": "bc1q...", "send_before": 1720007200}
 ```
 
 | field | note |
 |---|---|
-| `address` | REQUIRED. An address of the Hub's network; a bech32 address in lowercase only |
-| `send_before` | OPTIONAL. The latest time, in unix seconds, the payee accepts the payment by |
+| `address` | REQUIRED. A bech32 or bech32m address of the Hub's network, in lowercase |
+| `send_before` | OPTIONAL. The latest time, in unix seconds, by which the caller needs the payout broadcast |
+| `identity_value`, `ia_pubkey`, `attestation_event` | REQUIRED for a `connection_key` slice, and only for one: the slice quoted, and its attestation, checked as §Claim Proofs requires, whose `p` signs the item proof |
 
 A Hub MUST refuse, in this order:
 
-| case | refusal | `reason` |
+| case | refusal | `detail` |
 |---|---|---|
-| no slice for the item proof's signer | `NOT_FOUND` | — |
+| no slice for the item proof's signer, or for the attestation it presents | `NOT_FOUND` | — |
 | a malformed `address` | `BAD_REQUEST` | — |
 | an address of another network | `RESTRICTED` | `network` |
-| a script type the Hub does not pay | `RESTRICTED` | `script_type` |
+| a script type the Hub does not pay, or an address with no witness program | `RESTRICTED` | `script_type` |
 | a slice claimed, terminal or past its expiry | `RESTRICTED` | — |
-| a slice above the Hub's withdraw maximum | `QUOTA_EXCEEDED` | — |
-| a slice below the Hub's withdraw minimum, or a payout below the network's dust limit | `RESTRICTED` | `below_min` |
+| a slice above the Hub's withdrawal maximum | `QUOTA_EXCEEDED` | — |
+| a slice below the Hub's withdrawal minimum, or a payout below the network's dust limit | `RESTRICTED` | `below_min` |
 | a `send_before` the Hub cannot broadcast by | `RESTRICTED` | `too_slow` |
 
-A script type is an exact pair of witness version and program length, decoded under the coin's address
+A script type is the exact pair of witness version and program length, decoded under the coin's address
 rules (BIP-173 and BIP-350 for Bitcoin). A quote never says whether the address is the Hub's own.
+
+The Hub answers:
 
 ```jsonc
 {
@@ -643,26 +657,49 @@ rules (BIP-173 and BIP-350 for Bitcoin). A quote never says whether the address 
 | field | meaning |
 |---|---|
 | `quote` | the quote event below, JSON-encoded as a string |
+| `address` | as requested |
 | `amount_millis` | the slice's committed amount |
 | `network_fee_millis`, `hub_fee_millis`, `fee_millis` | the fee, as §The Withdraw Fee computes it |
-| `payout_millis` | what the address receives, in whole base units |
-| `sent_by` | the time the Hub broadcasts by, earlier than `send_before` when one was given |
-| `holds_until` | the last block height at which the quote holds, chosen by the Hub |
+| `payout_millis` | what the address receives, in millis, always a whole number of base units |
+| `sent_by` | unix seconds the Hub broadcasts by, no later than `send_before` when one was given |
+| `holds_until` | the last block height at which the quote is valid, chosen by the Hub |
 
-The quote event is a kind-23196 event signed by the Hub's node identity, never published, with `content`
-empty and these tags, each once:
+The quote event is a kind-23196 event, never published, `content` empty, signed by the Hub's node identity,
+the key that signs its kind-11190 announcement. Its tags, each once, in any order:
 
 | tag | value |
 |---|---|
 | `d` | the bill's wallet pubkey, 64 lowercase hex |
-| `i` | the slice's `identity_value` |
-| `address` | the address, exactly as quoted |
+| `i` | the slice's `identity_value`, with its `ia_pubkey` as a third element for a `connection_key` slice |
+| `address` | the address, exactly as requested |
 | `amount_millis`, `network_fee_millis`, `hub_fee_millis`, `payout_millis` | as above |
 | `sent_by`, `holds_until` | as above |
 
-Numbers are unsigned decimal with no leading zeros. A Hub and a client MUST check a quote's id, recomputed
-under NIP-01, and its signature. A quote holds its price, not the Hub's funds: a `cash_withdraw` may still be
-refused for load or funds.
+- Numbers are unsigned decimal with no leading zeros; `created_at` carries no rule.
+- A client MUST check the quote's id, recomputed under NIP-01, its signature, and that its tags equal the
+  answer's fields, its `d` and `i` name the slice it asked about, its `address` the one it sent, and its
+  `sent_by` is no later than any `send_before`.
+- A quote fixes the price, not the Hub's funds: a `cash_withdraw` may still be refused with `RATE_LIMITED` or
+  `INSUFFICIENT_BALANCE`.
+
+### The Withdraw Fee
+
+```
+hub_fee_millis     = withdraw_fee_base + floor(withdraw_fee_ppm × amount_millis / 1,000,000)
+fee_millis         = max(network_fee_millis + hub_fee_millis, the slice's redeem fee), capped at amount_millis,
+                     raised so that payout_millis is a whole number of base units
+payout_millis      = amount_millis − fee_millis
+```
+
+- `network_fee_millis` is the Hub's own estimate, at quoting time, of what the payout's share of a
+  transaction costs for the address's script type. It is never a fixed setting.
+- `withdraw_fee_base`, in millis, and `withdraw_fee_ppm` are the Hub's current terms.
+- The slice's redeem fee is the one §The Redeem Fee computes from the slice's own terms.
+- The payout is fixed by the quote. The real miner fee, and every fee bump, is the Hub's.
+
+With a network fee of 1200000 millis, `withdraw_fee_base` 500000 and `withdraw_fee_ppm` 2000, a
+21000000-millis slice whose `redeem_fee_ppm` of 5000 gives a redeem fee of 105000 has `hub_fee_millis`
+500000 + 42000 = 542000, `fee_millis` max(1742000, 105000) = 1742000, and a payout of 19258000.
 
 ### Request
 
@@ -681,15 +718,18 @@ refused for load or funds.
 |---|---|
 | `quote` | REQUIRED. The kind-23196 quote event, JSON-encoded as a string |
 | `request_id` | REQUIRED, under §Lost Replies |
-| `notify` | REQUIRED. A fresh random value, 64 lowercase hex, for the state notice |
-| `remint_commitment` | REQUIRED for a cash-mode slice, and only for one: the commitment of a fresh cash secret, for the bill a cancel re-mints |
+| `notify` | REQUIRED. A fresh random value, 64 lowercase hex, that tags the payout's state notices |
+| `remint_commitment` | REQUIRED for a cash-mode slice, forbidden for any other: the commitment, encoded as `identity_value`, of a fresh cash secret, for the bill re-minted if the payout is cancelled |
 | proof fields | as `cash_redeem`: `identity_type`, `identity_value`, `identity_event` and, for a `connection_key` slice, `attestation_event`; or `cash_secret` |
 
-- The claim proof carries `m` = `cash_withdraw` and a `q` tag, the quote event's id, which binds the
-  address and the payout.
-- A missing or malformed `quote`, `notify` or `remint_commitment`, a `remint_commitment` equal to the slice's
-  own commitment, and a request carrying `invoice`, `amount` or `idempotency_key`, are refused with
-  `BAD_REQUEST` before step 1.
+The claim proof carries `m` = `cash_withdraw` and a `q` tag, the quote event's id, which binds the address
+and the payout.
+
+Before step 1, a Hub MUST refuse with `BAD_REQUEST`:
+
+- a missing or malformed `quote`, `notify` or `remint_commitment`;
+- a `remint_commitment` on a slice that is not cash-mode, or equal to the slice's own commitment;
+- a request carrying `invoice`, `amount` or `idempotency_key`.
 
 ### Processing Algorithm
 
@@ -697,23 +737,31 @@ On receiving `cash_withdraw`, the wallet MUST, in order:
 
 1. Locate the slice, exactly as `cash_redeem` step 1.
 2. Verify the caller is authorized, exactly as `cash_redeem` step 2. The `request_id` becomes used here.
-3. Check the payout, each refusal leaving the slice claimable:
-   - a quote not signed by this Hub's node identity, not for this bill and slice, or no longer holding →
-     `RESTRICTED`, `reason` `quote_expired`;
-   - payouts unconfirmed over the Hub's bound → `RATE_LIMITED` (a Hub SHOULD keep such a bound, by value);
-   - coins the Hub cannot set aside for the payout → `INSUFFICIENT_BALANCE`;
-   - an ordered slice whose minting payment is not yet at `final_depth` → MAY `RESTRICTED`, `reason`
-     `unfinal`;
-   - last, an address its own node's wallet controls, NIP-CO order addresses included → `RESTRICTED`,
-     `reason` `own_address`.
-4. Commit atomically, first-wins as `cash_redeem` step 4, rechecking the deadline, the slice's expiry and
-   the Identity Authority's trust: mark the slice `redeemed`, move its `amount_millis` out of the bill to the
-   Hub, set aside coins for the payout, consume the claim proof, and write the record of §Lost Replies. A
-   slice already claimed is refused with `RESTRICTED`; a commit past the deadline with `BAD_REQUEST`, final.
+3. Check the payout, in this order. A refusal here leaves the slice claimable.
+
+   | case | refusal | `detail` |
+   |---|---|---|
+   | a quote not signed by this Hub's node identity, or not for this bill and slice | `RESTRICTED` | `quote_invalid` |
+   | a quote no longer valid | `RESTRICTED` | `quote_expired` |
+   | the Hub's unconfirmed payouts already at its bound | `RATE_LIMITED` | — |
+   | coins the Hub cannot set aside for the payout | `INSUFFICIENT_BALANCE` | — |
+   | an ordered slice made from a payment not yet at `final_depth`, at the Hub's choice | `RESTRICTED` | `unfinal` |
+   | an address the Hub's own node wallet controls, a NIP-CO order address included | `RESTRICTED` | `own_address` |
+
+   A Hub SHOULD bound the total value of its unconfirmed payouts.
+4. Commit atomically, first-wins as `cash_redeem` step 4, rechecking the call's deadline, that the quote is
+   still valid, the slice's expiry and the Identity Authority's trust:
+   - mark the slice `redeemed`;
+   - move its `amount_millis` out of the bill and hold it for this payout until it is final or cancelled;
+   - set aside coins for the payout;
+   - consume the claim proof;
+   - write the record of §Lost Replies.
+
+   A slice already claimed is refused with `RESTRICTED`, and a commit past the deadline with `BAD_REQUEST`.
 5. Return the payout, `queued`, with its receipt.
 
 From the commit on, the Hub owes the payout until it is cancelled: it MUST pay it on its own, without waiting
-for any request, at exactly the quote's `payout_millis`, and MUST land it at most once.
+for any request, at exactly the quote's `payout_millis`, and MUST let at most one version confirm.
 
 ### Response
 
@@ -735,18 +783,19 @@ for any request, at exactly the quote's `payout_millis`, and MUST land it at mos
 |---|---|
 | `state` | as §Payout States |
 | `address`, `amount_millis`, `fee_millis`, `payout_millis`, `sent_by` | as in the quote |
-| `final_depth` | as above |
-| `signed` | whether a version may have been signed; once `true`, never `false` again |
+| `final_depth` | fixed for this payout at the commit |
+| `signed` | `true` once the Hub holds an about-to-sign record, and never `false` again: a cancellation then needs the payout invalidated first |
 | `receipt` | the receipt event below, JSON-encoded as a string |
 | `tx` | from the first signature on: the current version's raw transaction, lowercase hex |
-| `txid`, `vout` | from broadcast on: the version out, or the one that confirmed, and its output |
-| `depth` | from broadcast on: that output's confirmations, 0 until the first |
-| `cash_token` | `cancelled` only: the re-minted bill |
+| `txid`, `vout` | from the first broadcast on: the id of the confirmed version, or else of the version last broadcast, and the index of the payout's output in it |
+| `depth` | from the first broadcast on: that output's confirmations, 0 until the first, counted up to `final_depth` |
+| `new_wallet_pubkey`, `new_wallet_token` | `cancelled` only: the re-minted bill, delivered as §Delivery — Nested Encryption, Not a New Channel delivers a spin-off's |
 
-Every answer about a payout, the reply and each lookup `done`, carries `receipt`.
+Under `cancelled` the answer carries no `tx`, `txid`, `vout` or `depth`. A lookup's `done` carries this
+object as its `result`. The reply, every lookup `done` and every cancel-request answer carry `receipt`.
 
-The receipt is a kind-23197 event signed by the node identity, never published, `content` empty, with these
-tags, each once and encoded as the quote's:
+The receipt is a kind-23197 event, never published, `content` empty, signed by the Hub's node identity, with
+these tags, each once and encoded as the quote's:
 
 | tag | value |
 |---|---|
@@ -756,124 +805,120 @@ tags, each once and encoded as the quote's:
 | `address`, `payout_millis`, `sent_by` | as in the quote |
 
 A client MUST check its id and signature as for a quote. The receipt proves what the Hub owes, never that it
-paid; the transaction does that.
+paid. A client that relies on `tx` checks that its id is `txid` and that output `vout` pays exactly
+`payout_millis` to `address`.
 
 ### Payout States
 
 | `state` | meaning |
 |---|---|
 | `queued` | committed; the slice is ended; no version broadcast yet |
-| `broadcast` | a version paying `payout_millis` to `address` is out |
+| `broadcast` | a version paying `payout_millis` to `address` has been broadcast |
 | `confirmed` | that output has at least one confirmation |
 | `final` | it has `final_depth` confirmations |
-| `cancelled` | no version can confirm any more; the value was re-minted as `cash_token` |
+| `cancelled` | no version can confirm any more; the value was re-minted as a new bill |
 
 ```mermaid
 stateDiagram-v2
     [*] --> queued: commit
-    queued --> broadcast: a version is out
+    queued --> broadcast: a version broadcast
     broadcast --> broadcast: fee bump
     broadcast --> confirmed: one confirmation
     confirmed --> final: final_depth
     confirmed --> broadcast: reorganisation
-    queued --> cancelled: invalidated, re-minted
-    broadcast --> cancelled: invalidated, re-minted
+    queued --> cancelled: sent_by + 1 day, re-minted
+    broadcast --> cancelled: cancel request, invalidated, re-minted
     final --> [*]
     cancelled --> [*]
 ```
 
-### The Withdraw Fee
-
-```
-hub_fee      = withdraw_fee_base + floor(withdraw_fee_ppm × amount_millis / 1,000,000)
-fee          = max(network_fee + hub_fee, the slice's redeem fee), capped at amount_millis
-payout       = amount_millis − fee, rounded down to whole base units
-fee_millis   = amount_millis − payout
-```
-
-- `network_fee` is the Hub's own estimate, at quoting time, of what the payout's share of a transaction
-  costs for the address's script type. It is never a fixed setting.
-- `withdraw_fee_base` and `withdraw_fee_ppm` are the Hub's current terms, bounded as `redeem_fee_ppm` is.
-- The slice's redeem fee is the one §The Redeem Fee computes from the slice's own terms.
-- `fee_millis` MAY exceed `network_fee_millis` plus `hub_fee_millis`, by the rounding or the redeem-fee floor.
-- The payout is fixed by the quote. The real miner fee, and every fee bump, is the Hub's.
-
-With a network fee of 1200000, `withdraw_fee_base` 500000, `withdraw_fee_ppm` 2000 and a 21000000-millis
-slice whose redeem fee is 105000: `hub_fee` is 542000, `fee` max(1742000, 105000) = 1742000, and the payout
-19258000.
-
-### Paying a Payout
-
-A Hub MUST keep every version of a payout from landing beside another:
-
-- before it asks for any signature, it durably records that it is about to sign, with the inputs it will
-  sign;
-- it stores each signed version durably before broadcasting it;
-- every new version spends at least one input of every earlier signed version;
-- a payout in a signed version keeps the same output in every later version, until it is cancelled;
-- after a reorganisation it rebroadcasts the identical transaction, and signs no other version, while that
-  transaction is valid.
-
-Broadcasting:
-
-- A Hub MUST broadcast a version by `sent_by`, at or above the network's minimum relay fee rate.
-- It MUST bump its fee at least once when it stays unconfirmed past the Hub's own target.
-- A payout has no confirmation deadline.
-- A Hub MAY batch payouts. It SHOULD build batch versions that the network relays with limited descendants.
-- It SHOULD keep a change output of its own in each batch version, and bound the outputs per version.
-
-Coins:
-
-- To **set aside** coins is to reserve, durably and without expiry, an amount over a set of the node's own
-  coins that no other payout or spend may use. Until a version is first signed the set MAY change, and a
-  coin that vanishes is replaced.
-- A Hub SHOULD set aside only coins at its `final_depth`.
-- It SHOULD keep enough confirmed coins apart for its other on-chain obligations.
-- It SHOULD NOT pay withdrawals directly from NIP-CO order deposits.
+A payout not broadcast by `sent_by` plus 1 day is cancelled, as §Cancelling a Payout describes.
 
 ### Cancelling a Payout
 
-A payout is cancelled once no version of it can still confirm:
+A Hub cancels a payout only once no version of it can still confirm:
 
-| at `sent_by` plus 1 day, the payout | the cancel |
-|---|---|
-| has no about-to-sign record | the Hub MUST cancel it at once |
-| has an about-to-sign record but no version broadcast | the Hub MUST invalidate it, then cancel it |
-| has a version broadcast, still unconfirmed 7 days after `sent_by` | the holder MAY ask; the Hub then MUST invalidate it and cancel it |
+| the payout | from | the Hub |
+|---|---|---|
+| has no about-to-sign record | 1 day after `sent_by` | MUST cancel it |
+| has an about-to-sign record but no version broadcast | 1 day after `sent_by` | MUST invalidate it, then cancel it |
+| has a version broadcast, still unconfirmed | 7 days after `sent_by` | on the caller's cancel request, MUST invalidate it, then cancel it |
 
 **Invalidating** a payout means confirming, to `final_depth`, a transaction of the Hub's own that pays none
-of its versions and spends at least one input of every version that may have been signed, the inputs
-recorded as about to sign included. It MAY be a new version of the other payouts in a batch. A version that
-confirms instead was paid, and the payout is not cancelled.
+of its versions and spends at least one input of every version that may have been signed, the inputs in the
+about-to-sign record included. It MAY be a new version of the other payouts in a batch. If a version
+confirms instead, the payout is paid, not cancelled.
 
-The cancel re-mints, in one commit, a new Cash Wallet holding the whole `amount_millis`:
+The caller asks with a **cancel request**, a `cash_withdraw` item naming the bill:
 
-- for the slice's registered identity, or for a cash-mode slice for `remint_commitment`, never the old
-  commitment;
-- with the slice's fee terms and ordered mark, and an expiry no earlier than the slice's own, nor than the
-  cancel time plus the Hub's default; "never" stays never;
+```jsonc
+{"cancel": true, "request_id": "<the original call's>"}
+```
+
+| field | note |
+|---|---|
+| `cancel` | REQUIRED, `true` |
+| `request_id` | REQUIRED. The original `cash_withdraw`'s |
+| `cash_secret` | only for a call authorized by a cash commitment |
+
+- Nothing else is allowed. It is authorized exactly as a `cash_lookup` of that call, and served while the Hub
+  keeps the call's record, whether or not the bill still exists; with no record the Hub refuses it with
+  `NOT_FOUND`.
+- It is not a call: it marks no `request_id` used, and sending it again is harmless.
+- The Hub answers with the payout's current state, or `RESTRICTED` before 7 days after `sent_by`. The payout
+  stays `broadcast` until the invalidating transaction reaches `final_depth`.
+
+The cancellation re-mints, in one commit, a new Cash Wallet holding the whole `amount_millis`:
+
+- bound to the slice's registered identity or, for a cash-mode slice, to `remint_commitment`, never to the
+  old commitment;
+- with the slice's fee terms and its ordered mark;
+- expiring no earlier than the slice did, and no earlier than the cancel time plus the Hub's default expiry;
+  a slice that never expired gives a bill that never expires;
 - whose slice its owner can neither delete nor remove, as for an ordered slice;
-- delivered as a spin-off's token is, under §Delivery;
-- funded from the `amount_millis` the commit took, never from the source bill.
+- funded from the `amount_millis` the commit held, never from the source bill.
 
-The cancel also rewrites the source slice's terminal state from `redeemed` to `transferred`, the only change
-a terminal state allows, and a tombstone answered after it says `transferred`.
-
-The holder asks for a cancel with a **cancel request**: a `cash_withdraw` item naming the bill.
-
-- Its `params` carry `cancel`, the original `request_id`, and `deadline`, and nothing else but, for a call
-  authorized by a cash commitment, its `cash_secret`.
-- It is authorized exactly as a `cash_lookup` of that call, and served while the Hub keeps the call's record,
-  whether or not the bill still exists.
-- It is not a call: it carries no `request_id` of its own and marks none used.
-- The Hub answers with the payout's current state, or `RESTRICTED` while the holder may not yet ask.
+The cancellation also rewrites the source slice's terminal state from `redeemed` to `transferred`, the only
+change a terminal state allows, and a tombstone answered after it says `transferred`.
 
 ### State Notice
 
 When a payout is first broadcast, and when it is cancelled, a Hub SHOULD publish NIP-CO's order notice
-(kind 23189) with `p` = the call's `notify`, on the relay the call arrived on, after a random delay of at
-least 10 minutes that does not follow block times. A client reads the payout with `cash_lookup` when one
-arrives, and MUST NOT rely on notices.
+(kind 23189) with `p` = the call's `notify`, on the relay the call arrived on.
+
+- It first waits a random delay of at least 10 minutes, not aligned to block arrivals.
+- No notice marks `confirmed` or `final`: a client reads the payout with `cash_lookup` on each notice, and
+  polls it until `final`. It MUST NOT rely on notices.
+
+### Paying a Payout
+
+A Hub MUST make sure at most one version of a payout can confirm:
+
+- it writes the about-to-sign record before it asks for any signature;
+- it stores each signed version durably before broadcasting it;
+- every new version spends at least one input of every earlier signed version;
+- a payout in a signed version keeps an output of the same script and value in every later version, until
+  it is cancelled;
+- after a reorganisation it rebroadcasts the identical transaction while that transaction is valid, and
+  bumps a version that has confirmed once only through a child of it.
+
+Broadcasting:
+
+- A Hub MUST broadcast a version by `sent_by`, at a fee rate the network's nodes accept to relay at the
+  time, and MUST bump or rebroadcast a version they no longer relay.
+- It SHOULD bump the fee of a version still unconfirmed past its own target.
+- A payout has no confirmation deadline.
+- A Hub MAY batch payouts. It SHOULD build batch versions that the network's relay policy lets it replace
+  and fee-bump with few descendants, such as version 3 transactions for Bitcoin.
+- It SHOULD keep a change output of its own in each batch version, and bound the outputs per version.
+
+Coins:
+
+- Until a version is first signed, the coins set aside for a payout MAY change, and a coin that vanishes is
+  replaced.
+- A Hub SHOULD set aside only coins at its `final_depth`.
+- It SHOULD keep enough confirmed coins apart for its other on-chain obligations.
+- It SHOULD NOT pay withdrawals directly from NIP-CO order deposits.
 
 ## The Redeem Fee
 
@@ -904,7 +949,8 @@ change afterward, even if the Hub's default later changes or the slice changes h
 recipient's economics MUST NOT shift underneath them because the operator adjusted a setting after the value
 was committed.
 
-A `cash_withdraw` is priced by the Hub's current terms instead, fixed by the quote the recipient accepts.
+A `cash_withdraw` fee is the exception: it follows the Hub's current withdrawal terms, fixed by the accepted
+quote, with the slice's own redeem fee as its floor.
 
 **The fairness invariant.** The redeeming recipient's payout, plus the Hub's settlement-time reconciliation,
 always debits the shared wallet by exactly the redeemed slice's committed amount — never more, whatever the
@@ -1014,8 +1060,8 @@ refuse a value that is neither `all` nor `mine` with `BAD_REQUEST`.
   null/zero timestamp, on a row belonging to a wallet that never expires, matching `mint_cash`'s own
   response convention.
 - `withdraw` — beside `recipients`, only when the Hub offers on-chain withdrawals: its current
-  `withdraw_fee_base`, `withdraw_fee_ppm`, `min_millis`, `max_millis`, `script_types` and `final_depth`. It
-  is for display; only a quote fixes a payout.
+  `withdraw_fee_base` (millis), `withdraw_fee_ppm`, `min_millis` and `max_millis` (bounds on the slice's
+  amount), `script_types` and `final_depth`. It is for display; only a quote fixes a payout.
   - `script_types` is an array of `[witness_version, program_length]` pairs, e.g. `[[0,20],[0,32],[1,32]]`.
   - `min_millis` or `max_millis` is omitted when the Hub sets none.
 - `withdraw_request_id` — on the row of a slice a `cash_withdraw` ended, while the Hub keeps that call's
@@ -1570,7 +1616,7 @@ and a `cash_lookup` by it afterwards recovers a lost reply.
 
 ### `request_id`
 
-`mint_cash`, `cash_transfer`, `cash_consolidate` and `cash_withdraw` take a REQUIRED `request_id`: an even number of lowercase
+`mint_cash`, `cash_withdraw`, `cash_transfer` and `cash_consolidate` take a REQUIRED `request_id`: an even number of lowercase
 hex characters, 32 to 64 inclusive (16 to 32 bytes), from a CSPRNG, fresh for every call.
 
 - A Hub MUST refuse a call without one, or with one of any other length or form, with `BAD_REQUEST`. A caller
@@ -1584,7 +1630,7 @@ except that on the private transport it verifies the item's bill proof first.
 
 A `request_id` becomes used once the call carrying it passes **authorization**, whatever happens to that call
 afterwards: for `mint_cash` at the reuse check itself, since the Cash Hub connection has already authorized
-the call, and for `cash_transfer`, `cash_consolidate` and `cash_withdraw` once the item proof and every
+the call, and for `cash_withdraw`, `cash_transfer` and `cash_consolidate` once the item proof and every
 claim proof or cash secret of the call has verified.
 
 - A call refused before that point leaves its id unused.
@@ -1596,7 +1642,7 @@ claim proof or cash secret of the call has verified.
 | item | its `request_id` is marked used |
 |---|---|
 | `mint_cash` | at the reuse check itself |
-| `cash_transfer`, `cash_consolidate`, `cash_withdraw` | once the item proof and every claim proof or cash secret has verified |
+| `cash_withdraw`, `cash_transfer`, `cash_consolidate` | once the item proof and every claim proof or cash secret has verified |
 | `cash_lookup` | never |
 
 **The Hub MUST keep a used mark for good.** The mark is the `request_id` alone, kept after the full record
@@ -1821,14 +1867,17 @@ NIP-CO's `cash_order` carries a `request_id` under the rules above, and differs 
 - Its record names the bill as target and the claim-proof signer, or the cash commitment, as authorizer,
   and also keeps the slice's registered identity, any `remint_commitment`, the quote and every signed
   version.
-- The Hub keeps the record until the payout is final or cancelled plus its tombstone window, counted from
-  then; at least until its deadline plus `H`; and while a bill its cancel re-minted is live.
-- While it keeps the record it MUST serve lookups that name the bill, whether or not the bill still exists,
-  and answers them `done` whatever `deadline` they carry.
+- The Hub keeps the record for the longest of: its deadline plus `H`; the time the payout became `final` or
+  `cancelled`, plus the bill's tombstone window; and the life of any bill its cancellation re-minted.
+- While it keeps the record it MUST keep the bill's pairing key derivable and verify bill proofs against it,
+  serve lookups and cancel requests that name the bill, whether or not the bill still exists, and answer a
+  lookup `done` whatever `deadline` it carries.
 - A `cash_lookup` of a withdrawal names the bill, and its `done` carries the payout's current state, as
   §Redeeming On-chain describes, instead of the original response.
-- Only the client that placed it MAY place it again, and automatically only after a lost reply, while its
-  quote still holds; after an error answer it shows the call to its user.
+- Only the client that placed a `cash_withdraw` MAY place it again. It does so automatically only when it
+  got no answer and a lookup then answered `unknown`, while its quote is still valid; after an error answer
+  it surfaces the call to its user. A re-placed call MAY carry a new quote, and keeps its `notify` and
+  `remint_commitment`.
 
 ### Support
 
@@ -2160,14 +2209,14 @@ every item names one Hub — since an omission does not say why.
 
 A cash-mode slice has no keypair, only a secret. **A cash-mode item therefore MUST omit
 `proof`, and, except for `cash_status` and `cash_withdraw_quote`, carries its `cash_secret` in `params`
-instead.** An item MUST NOT
-carry both.
+instead.** An item MUST NOT carry both.
 
 **This exemption covers `proof` only.** A cash-mode item still MUST carry a `bill_proof`,
 signed with the bill's connection secret, which every token has regardless of identity mode.
 
-**A Hub MUST decide whether a slice is cash-mode from its own records, never from the item.** A Hub
-presented with a proofless item MUST look the target up, and serve it only if that slice is genuinely
+**A Hub MUST decide whether a slice is cash-mode from its own records, never from the item.**
+
+A Hub presented with a proofless item MUST look the target up, and serve it only if that slice is genuinely
 cash-mode and, for any method but `cash_status` and `cash_withdraw_quote`, the supplied secret matches.
 For any other slice the Hub MUST refuse the item with
 `UNAUTHORIZED` once its bill proof has verified, and omit it otherwise, exactly as an unverifiable proof is.
@@ -2496,14 +2545,14 @@ Then the Hub runs each item in array order, each as if it had arrived alone, so 
   nor, for `cash_order`, one of its Order connections, nor, for a `cash_withdraw` cancel request, a bill
   whose `cash_withdraw` record the Hub keeps.
 - **I3.** Omit an item whose `bill_proof` is absent or does not verify.
-- **I4.** Answer a `cash_status`, `cash_redeem`, `cash_withdraw_quote`, `cash_withdraw`, `cash_transfer` or
-  `cash_consolidate` naming a destroyed bill with its tombstone, other than a `cash_withdraw` cancel request,
-  and run nothing further for it.
+- **I4.** Answer a `cash_status`, `cash_redeem`, `cash_withdraw_quote`, `cash_withdraw` (other than a cancel
+  request), `cash_transfer` or `cash_consolidate` naming a destroyed bill with its tombstone, and run nothing
+  further for it.
 - **I5.** Refuse a method this transport does not serve with `NOT_IMPLEMENTED`.
-- **I6.** For `cash_transfer`, `cash_consolidate`, `cash_withdraw` (other than a cancel request) and
+- **I6.** For `cash_withdraw` (other than a cancel request), `cash_transfer`, `cash_consolidate` and
   `cash_order`, refuse a missing or malformed `request_id` with `BAD_REQUEST`.
-- **I7.** For a call, not a `cash_lookup`, refuse a `request_id` already used on this node with
-  `REQUEST_REUSED`.
+- **I7.** For a call, not a `cash_lookup` or a `cash_withdraw` cancel request, refuse a `request_id` already
+  used on this node with `REQUEST_REUSED`.
 - **I8.** Refuse an item carrying both `proof` and a `cash_secret` in `params` with `BAD_REQUEST`, a
   `cash_redeem`, `cash_withdraw`, `cash_transfer` or `cash_consolidate` carrying neither with `BAD_REQUEST`, a
   `cash_order` carrying no `proof` with `BAD_REQUEST`, and a `cash_status` or `cash_withdraw_quote` carrying a
@@ -3082,7 +3131,7 @@ both paid out and swept.
 A Hub MUST NOT sweep a slice whose `cash_redeem` payment is in flight until that payment has
 resolved, and MUST NOT delete a wallet while any `cash_redeem` payment from it is in flight.
 
-A `cash_withdraw` payout is the Hub's to pay once committed, and holds no wallet open.
+A committed `cash_withdraw` payout is the Hub's to pay, and keeps no wallet open.
 
 **Auto-delete on full drain.** An implementation SHOULD delete a Cash Wallet immediately,
 without waiting for the expiry sweep, the moment all of the following hold: its last unredeemed slice has
@@ -3191,8 +3240,8 @@ covers cash mode.
   - That `expiration` is the only bound on an attestation's age. A conformant attestation MUST also carry
     `platform` and `evidence` tags per NIP-IC's own shape, even though this document's own verification only
     checks their presence, not their content.
-- **A `cash_withdraw` payout lands at most once.** The first-wins claim ends the slice in one commit, and
-  every version of a payout conflicts with every other; a cancel re-mints only once no version can
+- **A `cash_withdraw` payout is paid at most once.** The first-wins claim ends the slice in one commit, and
+  every version of a payout conflicts with every other; a cancellation re-mints only once no version can
   confirm.
 - **The quote binds the destination.** The claim proof's `q` covers the quote, and the quote the address
   and the payout. A bearer item has no claim proof, so whoever assembles its envelope can redirect it, as it
@@ -3258,7 +3307,8 @@ covers cash mode.
 - **On-chain payouts.** A `cash_withdraw` links the bill, and an identity-bound slice's identity, to its
   address for the Hub. Anyone who knows a bill's amount and the Hub's terms can compute its payout and look
   for it on-chain, so a holder SHOULD withdraw only a bill whose amount others do not know, splitting first.
-  Batches and the Hub's coins mark their recipients as its withdrawers.
+  A batch, and the Hub's own coins as its inputs, show on-chain that each output's owner withdrew from this
+  Hub.
 - **Provenance.** A token exposes in the clear its minter node pubkey (recoverable from the signature) and
   its denomination (TLV `6`). The signature is REQUIRED, so this cannot be opted out of.
 - **Splits.** A spun-off wallet is isolated from the source wallet's co-recipients, but not from the Hub
