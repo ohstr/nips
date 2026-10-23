@@ -652,7 +652,8 @@ The tombstone is the item's `result`, never an error, whichever bill method the 
 `reason` is the terminal state
 of the slice whose ending destroyed the bill — its last live slice — so the
 expiry sweep answers `expired`, and an owner delete or a removal answers `reclaimed`. A Hub MUST send one
-of those five values; a client MUST read any other value as `spent` with no reason.
+of those five values, except for a bill whose last slice was `written-off`, whose tombstone omits
+`reason`; a client MUST read any other value, or none, as `spent` with no reason.
 
 Outcomes:
 
@@ -1530,14 +1531,15 @@ every item names one Hub — since an omission does not say why.
 ### Bearer Items
 
 A cash-mode slice has no keypair, only a secret. **A cash-mode item therefore MUST omit
-`proof`, and carries its `cash_secret` in `params` instead.** An item MUST NOT carry both.
+`proof`, and, except for `cash_status`, carries its `cash_secret` in `params` instead.** An item MUST NOT
+carry both.
 
 **This exemption covers `proof` only.** A cash-mode item still MUST carry a `bill_proof`,
 signed with the bill's connection secret, which every token has regardless of identity mode.
 
 **A Hub MUST decide whether a slice is cash-mode from its own records, never from the item.** A Hub
 presented with a proofless item MUST look the target up, and serve it only if that slice is genuinely
-cash-mode and the supplied secret matches. For any other slice the Hub MUST refuse the item with
+cash-mode and, for any method but `cash_status`, the supplied secret matches. For any other slice the Hub MUST refuse the item with
 `UNAUTHORIZED` once its bill proof has verified, and omit it otherwise, exactly as an unverifiable proof is.
 Possession decides between the two outcomes, never the item's own claims.
 
