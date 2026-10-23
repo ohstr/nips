@@ -576,7 +576,8 @@ bound, counting each payment as for a send cap.
 **Only Active wallets receive.** A wallet in any other state can only pay out. A
 Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it leaves Active,
 and MUST fail every payment to it, same-circle ones included. Its payouts still count against the circle's
-outbound ceiling, but not against its send cap.
+outbound ceiling, but not against its send cap. A Hub MAY exempt them from the circle's outbound ceiling as
+well.
 
 **Rate limits.** A Hub MAY rate-limit a wallet's same-circle transfers, the invoices and hold invoices it
 issues and the payments it has pending at once, and MAY cap how many open invoices one wallet holds at
