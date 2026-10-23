@@ -369,7 +369,7 @@ then as one that will be minted.
 A Hub MUST bound the total `amount_millis` of its open orders per payment kind (the open-order ceiling). An
 order counts against it from placement until it is minted, expires or is closed; a payment arriving later
 needs no room. A Hub SHOULD also bound the number of open on-chain orders, and SHOULD size its on-chain limits
-and fees to what it can pay out over Lightning.
+and fees to what it can pay out, over Lightning or on-chain.
 
 Requests reach the Hub through NIP-CASH's private transport, so its proof of work applies to orders as to any
 other item.
@@ -436,7 +436,8 @@ content     ""
 on the relay the order arrived on, and MAY publish it on its other inbox relays. It carries nothing else.
 A client listening for `{"kinds":[23189],"#p":["<notify>"]}` reads the order with `cash_lookup` when one
 arrives. A notice proves nothing: a client acts only on what `cash_lookup` returns, and MUST NOT rely on
-notices, since ephemeral events can be missed.
+notices, since ephemeral events can be missed. NIP-CASH's `cash_withdraw` uses the same kind for its own
+notices.
 
 ## Client Behavior
 
