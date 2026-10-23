@@ -11,12 +11,12 @@ Cash Pocket
 
 ## Abstract
 
-A Cash Pocket stores the cash tokens a wallet holds, and the bill-creating calls it has in flight. Each is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM, with no author, kind or amount.
+A Cash Pocket stores the cash tokens a wallet holds, and the bill-creating calls and withdrawals it has in flight. Each is a kind `9525` entry, gift-wrapped to the user's own pubkey: relays see only what looks like a DM, with no author, kind or amount.
 
 ## Terminology
 
 - **Pocket**: a user's Pocket Entries.
-- **Pocket Entry**: one token the wallet holds or held, or one bill-creating call it has placed (a `pending` entry), as a kind `9525` rumor.
+- **Pocket Entry**: one token the wallet holds or held, or one bill-creating call or `cash_withdraw` it has placed (a `pending` entry), as a kind `9525` rumor.
 - **wrap key**: the one-time key of an entry's gift wrap.
 
 ## Specification
@@ -160,9 +160,9 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 - **Add** an entry when the wallet receives or mints a token it keeps.
 - **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`, `cash_order`), and before a `cash_withdraw`, the wallet:
   1. stores a `pending` entry holding the call's `request_id`, `deadline`, `target`, its own `device` and any cash secret it generated;
-  2. reads it back before sending the call, which carries that `request_id` (NIP-CASH requires one on every call that creates a bill);
+  2. reads it back before sending the call, which carries that `request_id` (NIP-CASH requires one on every call that creates a bill and on every `cash_withdraw`);
   3. on the reply, writes the entries below;
-  4. reads these entries back, and only then marks the pending entry `done` and, in the same batch, every other source entry `spent`.
+  4. reads these entries back, and only then marks the pending entry `done` and, in the same batch, every other source entry `spent`; a `cash_withdraw` follows **Withdrawals** below instead.
 
   On the reply the wallet adds an entry for each new bill it keeps, and none for a bill made for someone else:
 
@@ -197,8 +197,9 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
     |---|---|
     | `cash_transfer`, `cash_consolidate` | MAY place the call again automatically |
     | `mint_cash`, `cash_order` | MUST NOT place the call again without its user's explicit confirmation; until the user confirms, it shows the call and leaves the entry `pending` |
-    | `cash_withdraw` | MAY place the call again automatically only after a lost reply, while its quote holds (the Hub's chain tip at most its `holds_until`); otherwise as `mint_cash` |
+    | `cash_withdraw` | MAY place the call again automatically only when it got no answer and the lookup answered `unknown`, while its quote is valid; otherwise as `mint_cash` |
 
+    - **A `cash_withdraw` quote** is valid while the Hub's chain tip is at most its `holds_until`; a wallet without its own view of the chain treats it as valid until refused with `quote_expired`. A re-placed `cash_withdraw` MAY carry a new quote, and keeps its `notify` and `secret`.
     - **The derived id.** The re-placed call always uses `request_id` = lowercase hex of sha256("retry:" ‖ the replaced entry's `request_id`), never a fresh id, and is written ahead as a new pending entry. It names the same target, with the same amounts, identities and any `secret` of the old entry, under a new deadline; a call re-placed again derives its id from the id it replaces, so re-placements chain.
 
       | | `request_id` |
@@ -232,7 +233,7 @@ stateDiagram-v2
 - **Orders**: a `cash_order` pending entry stays open while its order is open, and the wallet reads the order with `cash_lookup` as NIP-CO describes, signed by the buyer key. On each answer it adds an entry for every bill it keeps and does not hold yet, a `cash` bill carrying the `secret`, and none for a bill made for someone else. It marks the pending entry `done` only once the order is `minted` or `expired` for Lightning, or `expired` or `closed` for on-chain; the `done` entry keeps `request_id`, `target` and `order_key` or `secret`, so a closed on-chain order can be read again for late payments.
 - **Withdrawals**: a `cash_withdraw` pending entry stays open until its payout is `final` or `cancelled`.
   - On the reply or the first `done`, the wallet:
-    1. verifies the receipt: its id and signature by the Hub's identity, `d` = `target`, `q` = the stored quote's id, `request_hash` = the sha256 of `request_id`, and `address`, `payout_millis` and `sent_by` equal to the quote's; an answer without a valid receipt counts as no answer;
+    1. verifies the receipt: its id and signature by the Hub's node identity, `d` = `target`, `q` = the stored quote's id, `request_hash` = the sha256 of `request_id`, and `address`, `payout_millis` and `sent_by` equal to the quote's; an answer without a valid receipt counts as no answer;
     2. marks the source entry `spent`, keeping its token and any `secret` for the lookups;
     3. reads the payout with `cash_lookup`.
   - At `cancelled` it adds an entry for the re-minted bill, carrying the `secret`, then marks the pending entry `done`.
