@@ -130,8 +130,8 @@ Every refusal below uses a code from §Errors.
 | `23191` | ephemeral | a fresh key used once, for the Hub; authenticated by the reply key | Private response |
 | `23192` | ephemeral | the slice's registered identity (none for a bearer item) | Item proof, one per item |
 | `23193` | ephemeral | the bill's connection secret | Bill proof, one per item |
-| `23196` | ephemeral | the Hub's node identity | Withdraw quote; never published |
-| `23197` | ephemeral | the Hub's node identity | Withdraw receipt; never published |
+| `23187` | ephemeral | the Hub's node identity | Withdraw quote; never published |
+| `23188` | ephemeral | the Hub's node identity | Withdraw receipt; never published |
 
 This document also verifies NIP-IC's kind `35522` attestations; it does not define them.
 
@@ -664,7 +664,7 @@ The Hub answers:
 | `sent_by` | unix seconds the Hub broadcasts by, no later than `send_before` when one was given |
 | `holds_until` | the last block height at which the quote is valid, chosen by the Hub |
 
-The quote event is a kind-23196 event, never published, `content` empty, signed by the Hub's node identity,
+The quote event is a kind-23187 event, never published, `content` empty, signed by the Hub's node identity,
 the key that signs its kind-11190 announcement. Its tags, each once, in any order:
 
 | tag | value |
@@ -716,7 +716,7 @@ With a network fee of 1200000 millis, `withdraw_fee_base` 500000 and `withdraw_f
 
 | field | note |
 |---|---|
-| `quote` | REQUIRED. The kind-23196 quote event, JSON-encoded as a string |
+| `quote` | REQUIRED. The kind-23187 quote event, JSON-encoded as a string |
 | `request_id` | REQUIRED, under §Lost Replies |
 | `notify` | REQUIRED. A fresh random value, 64 lowercase hex, that tags the payout's state notices |
 | `remint_commitment` | REQUIRED for a cash-mode slice, forbidden for any other: the commitment, encoded as `identity_value`, of a fresh cash secret, for the bill re-minted if the payout is cancelled |
@@ -794,7 +794,7 @@ for any request, at exactly the quote's `payout_millis`, and MUST let at most on
 Under `cancelled` the answer carries no `tx`, `txid`, `vout` or `depth`. A lookup's `done` carries this
 object as its `result`. The reply, every lookup `done` and every cancel-request answer carry `receipt`.
 
-The receipt is a kind-23197 event, never published, `content` empty, signed by the Hub's node identity, with
+The receipt is a kind-23188 event, never published, `content` empty, signed by the Hub's node identity, with
 these tags, each once and encoded as the quote's:
 
 | tag | value |
@@ -2225,7 +2225,7 @@ Possession decides between the two outcomes, never the item's own claims.
 `max_verify_budget` is the number of signature verifications a Hub will perform for one envelope.
 
 - Every signature the envelope carries counts one: each kind-23193 bill proof, each kind-23192 item proof, and
-  each signed event inside an item's `params` — a kind-23198 proof, a kind-35522 attestation or a kind-23196
+  each signed event inside an item's `params` — a kind-23198 proof, a kind-35522 attestation or a kind-23187
   quote, one per source for a `cash_consolidate`.
 - A cash secret is checked without a signature and counts nothing, so a bearer item counts its bill proof
   alone. A Hub MUST refuse an envelope over its budget whole, with an envelope-level `QUOTA_EXCEEDED`, before
