@@ -262,7 +262,7 @@ What the rules show:
 - A wallet uses only copies of a token whose signature verifies (rule 6). With TLV `8`, the signature covers the relay hints and the connection secret through the relay hash, so a copy carrying other ones fails, and a wallet MUST NOT contact its relays. A token without TLV `8` has unsigned relay hints, so a wallet SHOULD prefer the relays in the minting Hub's announcement.
 - A token's state comes from `cash_status` only. A timeout MUST NOT be reported as spent.
 - A wallet SHOULD keep the tokens it holds in a [NIP-CP](./NIP-CP.md) Cash Pocket, and SHOULD keep a zap bill's `9522` with it (NIP-CP `source`) until it moves the bill: the bill's provenance, and so its minting Hub, can be recovered only with that `9522` (rules 6 and 7).
-- A wallet SHOULD claim promptly, since the minting Hub's owner can revoke until then. An external redemption pays `net_redeemable_millis`, and an on-chain withdrawal its quote's `payout_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node. Wallets MAY show such a zap as "below the withdrawal fee, combine with others".
+- A wallet SHOULD claim promptly, since the minting Hub's owner can revoke until then. An external redemption pays `net_redeemable_millis`, and an on-chain withdrawal its quote's `payout_millis`; a zap at or below the Hub's base fee can only be consolidated or redeemed same-node. Wallets MAY show such a zap as "below the redeem fee, combine with others".
 - Clients SHOULD NOT publish when a Cash Zap was claimed.
 
 ## Counting
