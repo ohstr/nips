@@ -17,7 +17,10 @@ Two event kinds bind a user's Nostr pubkey to an account on a non-Nostr platform
 
 - **IA (Identity Authority)**: A service that verifies which Nostr pubkey controls a Web Identity and attests it in a Kind `35522` event. For a platform outside §Canonical Platform User IDs it also defines the platform's user-id format, and so the account's ConnectionKey. Anyone can run one, and each client chooses which IAs it trusts; there is no protocol-level allowlist.
 - **Web Identity**: An account on a non-Nostr platform, e.g. a Discord, Telegram, X, GitHub, Instagram or Facebook account, a DNS domain, or an email address. Nostr itself is not a Web Identity. Any platform can be linked through an IA.
-- **ConnectionKey**: An identifier of one Web Identity, used to address someone who has no Nostr keypair yet: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. A client MUST build it from the canonical `<platform-user-id>` given in §Canonical Platform User IDs, or, for any other platform, take it from the IA's attestation as described there; such a key is defined by the IA that attested it, and wherever it addresses value it travels with that IA's pubkey (`ia_pubkey`). A Nostr pubkey is never hashed into a ConnectionKey. The `d` tag of both event kinds in this NIP.
+- **ConnectionKey**: An identifier of one Web Identity, used to address someone who has no Nostr keypair yet: `hex(SHA256("<platform>:<platform-user-id>"))`, in lowercase hex — the hash NIP-AZ, NIP-CZ and NIP-CASH use. The `d` tag of both event kinds in this NIP.
+  - A client MUST build it from the canonical `<platform-user-id>` given in §Canonical Platform User IDs, or, for any other platform, take it from the IA's attestation as described there.
+  - Such a key is defined by the IA that attested it, and wherever it addresses value it travels with that IA's pubkey (`ia_pubkey`).
+  - A Nostr pubkey is never hashed into a ConnectionKey.
 - **Deep Check**: Fetching the Kind `35522` attestation from its origin relay (rather than trusting an unverified reference) to confirm it is genuinely signed, unexpired, and unrevoked.
 - **Challenge Token (`npv1`)**: A bech32-encoded, session-bound proof string a user publishes publicly on the Web Identity platform as evidence of control.
 
@@ -34,13 +37,35 @@ Every client hashing a ConnectionKey for the same account on a platform in the t
 | Email | `email` | The whole address, trimmed and lowercased, its domain part as IDNA A-labels without a trailing dot. |
 | DNS domain | `dns` | The domain, trimmed, as IDNA A-labels, lowercased, without a trailing dot. |
 
-Any other platform works through an IA, which defines that platform's user-id format and how it verifies an account. Its ConnectionKey is the hash of the exact `<platform>:<platform-user-id>` string the IA attests (the `35522`'s `platform` tag and `evidence.user_id`), byte for byte, with no normalization. A sender MUST NOT derive such a ConnectionKey from typed input: it MUST take the key from the recipient's `35522` attestation or `nconnection`. Wherever such a key addresses value, it travels with the pubkey of the IA that attested it (`ia_pubkey`), and trust in it rests on that IA alone: two IAs may define different user ids, and so different ConnectionKeys, for one account.
+Any other platform works through an IA, which defines that platform's user-id format and how it verifies an account:
+
+- Its ConnectionKey is the hash of the exact `<platform>:<platform-user-id>` string the IA attests (the `35522`'s `platform` tag and `evidence.user_id`), byte for byte, with no normalization.
+- A sender MUST NOT derive such a ConnectionKey from typed input: it MUST take the key from the recipient's `35522` attestation or `nconnection`.
+- Wherever such a key addresses value, it travels with the pubkey of the IA that attested it (`ia_pubkey`), and trust in it rests on that IA alone: two IAs may define different user ids, and so different ConnectionKeys, for one account.
 
 A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, `_` and `-`, so it never contains `:`. An IA MUST NOT issue a `35522` whose `platform` is outside this format, and a client MUST NOT build or accept a ConnectionKey for one.
 
-A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Lowercasing is ASCII-only: only `A`–`Z` change. Trimmed means leading and trailing ASCII whitespace removed. For `email` and `dns`, a client applies only trimming, ASCII lowercasing and the A-label conversion below; it applies nothing to an `x` or `discord` ID. A client MUST refuse a value that these steps do not bring to its canonical form, and never repairs one (e.g. by removing a leading zero, a leading `@` or a trailing dot); a refused value has no ConnectionKey.
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. The steps a client applies:
 
-After trimming and ASCII lowercasing, a client MUST refuse, never map, a domain that UTS #46 non-transitional mapping or NFC normalization would change (e.g. non-ASCII uppercase such as `Ü`, full-width forms, or a decomposed `ü`), and one that contains a deviation character (`ß`, `ς`, U+200C or U+200D), which UTS #46 processing modes convert differently. It converts an accepted domain to A-labels with UTS #46 ToASCII, non-transitional, with CheckHyphens, CheckBidi, CheckJoiners, UseSTD3ASCIIRules and VerifyDnsLength set, and MUST refuse a domain ToASCII rejects. The local part of an `email` gets no IDNA processing; a client MUST refuse one that NFC normalization would change.
+- **Trimmed** means leading and trailing ASCII whitespace removed.
+- **Lowercasing** is ASCII-only: only `A`–`Z` change.
+- **A-label conversion** is the domain processing below.
+
+| Platform | Trimming | ASCII lowercasing | A-label conversion |
+|---|---|---|---|
+| `email` | yes | yes | its domain part only |
+| `dns` | yes | yes | yes |
+| `x`, `discord` | no | no | no |
+
+For `email` and `dns`, a client applies only trimming, ASCII lowercasing and the A-label conversion below; it applies nothing to an `x` or `discord` ID. A client MUST refuse a value that these steps do not bring to its canonical form, and never repairs one (e.g. by removing a leading zero, a leading `@` or a trailing dot); a refused value has no ConnectionKey.
+
+A domain is processed in this order:
+
+1. Trim and lowercase it (ASCII only).
+2. After trimming and ASCII lowercasing, a client MUST refuse, never map, a domain that UTS #46 non-transitional mapping or NFC normalization would change (e.g. non-ASCII uppercase such as `Ü`, full-width forms, or a decomposed `ü`), and one that contains a deviation character (`ß`, `ς`, U+200C or U+200D), which UTS #46 processing modes convert differently.
+3. It converts an accepted domain to A-labels with UTS #46 ToASCII, non-transitional, with CheckHyphens, CheckBidi, CheckJoiners, UseSTD3ASCIIRules and VerifyDnsLength set, and MUST refuse a domain ToASCII rejects.
+
+The local part of an `email` gets no IDNA processing; a client MUST refuse one that NFC normalization would change.
 
 Test vectors:
 
@@ -63,6 +88,18 @@ No value carries a leading `@`.
 | `35522` | IA Attestation | The Identity Authority | Yes (parameterized, per `d` tag) |
 
 Both are kind-30000-range parameterized replaceable events per NIP-01: a new event with the same `pubkey` + `d` tag replaces the prior one.
+
+How the two events point at each other:
+
+```mermaid
+flowchart LR
+  C["35521 Identity Connection<br/>signed by the user<br/>d = ConnectionKey"]
+  A["35522 IA Attestation<br/>signed by the IA<br/>d = ConnectionKey"]
+  U(["user pubkey"])
+  C -- "e: attestation id + IA relay" --> A
+  A -- "p" --> U
+  U -. "signs" .-> C
+```
 
 ### Kind 35521 — Identity Connection
 
@@ -112,7 +149,16 @@ Published by the end user to claim a connection; on its own it is unverified.
 
 Signed by the IA on completing a successful verification. `content` is always empty. Its `created_at` is the time the IA signs it: an IA MUST NOT date a `35522` in the future.
 
-**Required tags**: `d` (same ConnectionKey as the `35521` it will be referenced by), `p` (the Nostr pubkey that proved ownership — a client MUST verify this equals the outer `35521`'s `pubkey` when cross-checking), `platform`, `evidence` (see below). `expiration` is a [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) timestamp; a default of 90 days is RECOMMENDED, and an IA MAY omit it for a non-expiring attestation.
+**Required tags**:
+
+| Tag | Value |
+|---|---|
+| `d` | same ConnectionKey as the `35521` it will be referenced by |
+| `p` | the Nostr pubkey that proved ownership — a client MUST verify this equals the outer `35521`'s `pubkey` when cross-checking |
+| `platform` | the Web Identity's platform name |
+| `evidence` | see below |
+
+`expiration` is a [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) timestamp; a default of 90 days is RECOMMENDED, and an IA MAY omit it for a non-expiring attestation.
 
 #### The `evidence` Tag
 
@@ -162,7 +208,14 @@ A string bundling a ConnectionKey with the relays where its `35521` events are p
 | `1` | Relay | variable | A relay URL, ASCII. | zero or more, order preserved |
 | `2` | Platform | variable | The `<platform>` name, ASCII. | zero or one, OPTIONAL |
 
-The encoding is NIP-19's: the TLV entries `<type: 1 byte><length: 1 byte><value>`, concatenated and bech32-encoded with the human-readable part `nconnection`, with no length limit on the string. A decoder MUST ignore a TLV of an unrecognized type. A decoder MUST reject an `nconnection` that has no type `0`, more than one type `0` or type `2`, a type `0` whose length is not 32, or a TLV whose length runs past the end of the data. An encoder MUST NOT produce any of these.
+The encoding is NIP-19's: the TLV entries `<type: 1 byte><length: 1 byte><value>`, concatenated and bech32-encoded with the human-readable part `nconnection`, with no length limit on the string. A decoder MUST ignore a TLV of an unrecognized type. A decoder MUST reject an `nconnection` that has:
+
+- no type `0`;
+- more than one type `0` or type `2`;
+- a type `0` whose length is not 32;
+- or a TLV whose length runs past the end of the data.
+
+An encoder MUST NOT produce any of these.
 
 Test vector: the Discord ConnectionKey `22ced17fc7b3a6f7262d2dbe00b42d302948595468e025f4392b0a5022b8319d`, relay `wss://relay.example.com` and platform `discord`, in that order, are the TLV bytes `002022ced17fc7b3a6f7262d2dbe00b42d302948595468e025f4392b0a5022b8319d01177773733a2f2f72656c61792e6578616d706c652e636f6d0207646973636f7264`, which encode as:
 
@@ -176,7 +229,11 @@ nconnection1qqsz9nk30lrm8fhhyckjm0sqksknq22gt92x3cp97sujkzjsy2urr8gpzamhxue69uhh
 
 A client holding a 3-element identity tag (e.g. `["p", "<ConnectionKey>", "discord"]`, per NIP-AZ) resolves it to a Nostr identity as follows:
 
-The IA is the authority, not the user's claim. An IA holds at most one current attestation per ConnectionKey: its latest `35522` for that `d` tag, which replaces any earlier one (see Event Lifecycle). The pubkey in that attestation's `p` tag is the only pubkey the IA links to the account. A `35521` that points to any other attestation is not verified, even if the attestation it points to is validly signed.
+The IA is the authority, not the user's claim:
+
+- An IA holds at most one current attestation per ConnectionKey: its latest `35522` for that `d` tag, which replaces any earlier one (see Event Lifecycle).
+- The pubkey in that attestation's `p` tag is the only pubkey the IA links to the account.
+- A `35521` that points to any other attestation is not verified, even if the attestation it points to is validly signed.
 
 A client MUST NOT show a connection as **Verified** unless every check in step 3 passes. Steps 4 and 5 are MUST for a client that displays a state at all; how it renders each state is a SHOULD (see the table).
 
@@ -187,7 +244,7 @@ A client MUST NOT show a connection as **Verified** unless every check in step 3
    - its `d` and `platform` tags equal the `35521`'s `d` and `platform` tags;
    - its `p` tag equals the `35521`'s `pubkey`;
    - it is unexpired (NIP-40) and not deleted (NIP-09);
-   - its `created_at` is no more than 900 seconds (15 minutes) ahead of the verifier's clock;
+   - its `created_at` is no more than 15 minutes ahead of the verifier's clock;
    - it is the IA's current attestation: querying the IA's relay for `{"kinds": [35522], "authors": ["<ia-pubkey>"], "#d": ["<ConnectionKey>"]}` returns this same event ID.
 4. A `35521` with at least one attestation that counts is **Verified**. A `35521` without one is **Spoofed**: someone published a claim that does not check out, which is distinct from *Unverified*.
 5. If trusted IAs' current attestations name different pubkeys for the same ConnectionKey, the attestation with the latest `created_at` wins; claims from every other pubkey are **Spoofed**. Only attestations that pass step 3 take part, so a verifier MUST ignore one dated more than 900 seconds ahead of its clock here too: a future-dated attestation cannot outrank every later re-verification.
@@ -197,6 +254,20 @@ A client MUST NOT show a connection as **Verified** unless every check in step 3
 | **Verified** | `35521` found; it points to a trusted IA's current attestation for its own pubkey | ✅ native Nostr profile |
 | **Unverified** | No `35521` found | ⏳ fallback Web Identity profile |
 | **Spoofed** | `35521` found, but no attestation it points to passes step 3, or a newer attestation names another pubkey | ⚠️ flag as suspicious |
+
+The same steps as a flow:
+
+```mermaid
+flowchart TD
+  Q["1. query 35521 by d = ConnectionKey"] --> F{"any 35521?"}
+  F -- no --> UV["Unverified"]
+  F -- yes --> D["3. Deep Check each referenced 35522"]
+  D --> P{"at least one counts?"}
+  P -- no --> SP["Spoofed"]
+  P -- yes --> N{"5. newer trusted attestation<br/>names another pubkey?"}
+  N -- yes --> SP
+  N -- no --> V["Verified"]
+```
 
 ## Event Lifecycle
 
