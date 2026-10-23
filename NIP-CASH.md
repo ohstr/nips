@@ -6,8 +6,8 @@ Cash Hub
 
 `draft` `optional` `nwc`
 
-**Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect)
-**Related**: [NIP-CW](./NIP-CW.md) (Circle Wallet), [NIP-CZ](./NIP-CZ.md) (Cash Zaps), [NIP-IC](./NIP-IC.md) (Identity Connection)
+**Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect); for proof of work, [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) (Relay Information Document), [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) (Proof of Work) and [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp)
+**Related**: [NIP-CO](./NIP-CO.md) (Cash Order), [NIP-CW](./NIP-CW.md) (Circle Wallet), [NIP-CZ](./NIP-CZ.md) (Cash Zaps), [NIP-IC](./NIP-IC.md) (Identity Connection)
 
 ## Abstract
 
@@ -90,7 +90,7 @@ field's rule. A request's `expiry` duration is not a timestamp, and keeps its ow
 | `cash_transfer` | a recipient, proof-gated against their current registered identity | `cash_transfer` | Reassign an unredeemed slice's identity, or split part of its value off into a new cash token — see §Transferring and Splitting a Slice |
 | `cash_consolidate` | a recipient controlling every source slice, proof-gated against each | `cash_consolidate` | Combine several same-hub slices this node custodies into one new cash token — see §Consolidating Tokens |
 | `cash_status` | any holder of the Cash Wallet connection | `cash_redeem` | The bill's state: the read-only roster of every recipient, including each slice's redeem fee quote, or a tombstone for a destroyed bill — see §Cash Status |
-| `cash_lookup` | whoever authorized the original call | none | Read the outcome of a `mint_cash`, `cash_transfer` or `cash_consolidate` whose reply was lost — see §Lost Replies |
+| `cash_lookup` | whoever authorized the original call | none | Read the outcome of a `mint_cash`, `cash_transfer` or `cash_consolidate` whose reply was lost, or the state of a NIP-CO order — see §Lost Replies |
 
 Every refusal below uses a code from §Errors.
 
@@ -250,7 +250,9 @@ For each recipient slice, an implementation MUST track:
 - whether the slice's value was moved into a brand-new dedicated Cash Wallet, either in full or as part of a
   split, and if so, which one — informational only (an implementation MAY surface this for an operator's own
   bookkeeping); it changes no guard. A wallet created this way SHOULD, symmetrically, record which slice it
-  was split from.
+  was split from;
+- whether the slice is **ordered**: minted for a [NIP-CO](./NIP-CO.md) order, or made from ordered slices
+  only. An ordered slice never expires, and its owner can neither delete its wallet nor remove it.
 
 An implementation MUST treat a slice's registered identity as mutable pre-redemption (via an in-place
 reassignment), but its committed amount as immutable, exactly as §Transferring and Splitting a Slice
@@ -975,7 +977,7 @@ own configuration, not from the Hub's current config (which only supplies the de
 directly by `mint_cash`). A split relocates an existing entitlement; it does not grant a fresh one, shorten
 it, or lengthen it. This holds even when the old wallet never expires: each new wallet inherits that same
 "never" status rather than an arbitrary fallback duration. The inheritance holds across any number of
-splits.
+splits. A new wallet made from an ordered slice is ordered, and an in-place reassignment keeps the mark.
 
 ## Consolidating Tokens (`cash_consolidate`)
 
@@ -1074,7 +1076,8 @@ On receiving `cash_consolidate`, the node MUST, in order:
    call's `request_id` used.
 3. Only then check each source's state: one already claimed or terminal, or past its expiry, a source not a
    child of the **same** Cash Hub as the others, or one whose Identity Authority is no longer trusted MUST
-   refuse the whole request with `RESTRICTED`.
+   refuse the whole request with `RESTRICTED`. Sources that are ordered and sources that are not MUST NOT
+   be consolidated together, refused with `RESTRICTED`; a merge of ordered sources is ordered.
 4. Validate `new_identity` exactly as `mint_cash`/`cash_transfer` do: identity shape and live IA trust for
    `connection_key`, a well-formed caller-supplied commitment for `cash`. A malformed `new_identity` is
    refused with `BAD_REQUEST`, an untrusted IA with `RESTRICTED`.
@@ -1185,7 +1188,8 @@ expire.
 
 `cash_lookup` is served on the private transport only. Its item names the original
 call's target — the bill a `cash_transfer` item named, a `cash_consolidate`'s first source, the Cash Hub
-connection for `mint_cash`, or the Circle Wallet Hub connection for a NIP-CW join — which the Hub MUST serve even
+connection for `mint_cash`, the Circle Wallet Hub connection for a NIP-CW join, or the Order connection for a
+NIP-CO order — which the Hub MUST serve even
 if it has since destroyed that bill. Its bill proof is signed with that target's connection secret, as for any
 item. For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV
 `0`), and the item and bill proofs are both signed with that connection's client
@@ -1276,6 +1280,15 @@ automatically, and surfaces it to its user instead. A client MUST NOT read an om
 `unknown`.
 
 A client SHOULD keep every `request_id` as private as the call it names.
+
+### Orders
+
+NIP-CO's `cash_order` carries a `request_id` under the rules above, and differs in three ways. Its
+`request_id` becomes used once its item proof verifies, and its record names the Order connection as target
+and the buyer key, the item proof's signer, as authorizer. The Hub keeps the record as NIP-CO requires, not
+under the retention rule above, and MAY drop the used mark of an order dropped unpaid once its deadline
+plus `H` has passed. A `cash_lookup` of an order names the Order connection, and its `done`
+carries the order's current state, as NIP-CO describes, instead of the original response.
 
 ### Support
 
@@ -1372,6 +1385,7 @@ Transport per method:
 |---|---|
 | `cash_status`, `cash_redeem`, `cash_transfer`, `cash_consolidate`, `cash_lookup` | private ONLY |
 | `mint_cash` | standard ONLY (see below) |
+| `cash_order` | private ONLY |
 | `create_circle_wallet` | either |
 | `get_balance`, `pay_invoice`, `get_info`, … | standard, unchanged |
 
@@ -1439,7 +1453,7 @@ A private request is a **kind-23190 event carrying one NIP-44 ciphertext**:
 ```
 kind        23190
 pubkey      a FRESH ephemeral key, used once and discarded
-tags         [["p", "<the announced inbox>"]]
+tags         [["p", "<the announced inbox>"]], plus "nonce" and "expiration" under proof of work
 created_at  randomised into the past (see below)
 content     NIP-44( envelope JSON ) under the conversation key
             between that ephemeral key and the announced inbox
@@ -1450,6 +1464,31 @@ anything else. Authorization travels per item.
 
 A request's `created_at` is randomised up to two days into the past, as in NIP-59; freshness lives inside
 the ciphertext, in `not_after` below.
+
+### Proof of Work
+
+A Hub MAY require [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) proof of work on
+kind-23190 events. The relays it reads its inbox from enforce it:
+
+- each advertises its minimum difficulty for kind 23190 as `limitation.min_pow_difficulty` in its
+  [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) document, and rejects an event below it
+  with an `OK` false message beginning `pow:`, for example `pow: difficulty 20 required`. The minimum MAY
+  change with load;
+- each rejects a kind-23190 event that carries no NIP-40 `expiration` tag, one already past, or one more than
+  1 day ahead, and drops any event whose id it has already accepted, until that event's expiration.
+
+A Hub that requires proof of work MUST read its inbox only on relays that enforce it, and MUST list them in
+its announcement's `relays`. It SHOULD NOT announce a `max_request_age` above 1 day, and a client sending to
+it SHOULD set its deadline at most 1 day ahead, whatever `max_request_age` allows.
+
+A client sending to such a Hub reads the relay's minimum before sending, and puts on the request event a
+`nonce` tag as NIP-13 defines it and an `expiration` tag equal to the envelope's `not_after`. On a `pow:`
+rejection it mines the event to the difficulty stated and publishes it again, with the same envelope, so that
+a request the Hub already ran is not run twice. A Hub ignores both tags; the envelope's `not_after` still
+decides freshness.
+
+The proof of work protects every item this transport carries, whatever its method. It does not cover the
+standard transport (kind 23194), which a Hub rate-limits instead.
 
 ### Envelopes
 
@@ -1789,10 +1828,12 @@ Every bill method carries its own replay guard.
 
 A Hub MUST serve over this transport only the methods that operate on a **bill** —
 `cash_status`, `cash_redeem`, `cash_transfer` and `cash_consolidate` — plus `cash_lookup`, which reads
-the outcome of one, and NIP-CW's `create_circle_wallet`, which a Hub MAY also serve here.
-`cash_lookup` is the one method whose target need not be a live bill: it names
-the original call's target, which may be a bill the Hub has destroyed, its Cash Hub connection, or a
-Circle Wallet Hub connection.
+the outcome of one, NIP-CW's `create_circle_wallet`, which a Hub MAY also serve here, and NIP-CO's
+`cash_order`, which a Hub that sells cash serves here only.
+`cash_lookup` and `cash_order` are the methods whose target need not be a live bill: `cash_order` names an
+Order connection, and `cash_lookup` names
+the original call's target, which may be a bill the Hub has destroyed, its Cash Hub connection, a
+Circle Wallet Hub connection, or an Order connection.
 
 **This MUST be an explicit allowlist, not a reuse of the Hub's ordinary method dispatch**, so that no other
 NIP-47 method is reachable from a bill's connection key.
@@ -1827,12 +1868,13 @@ Then the Hub runs each item in array order, each as if it had arrived alone, so 
 - **I1.** Omit an item that is not an object with string `id`, `target` and `method`, and with `params`,
   when present, an object.
 - **I2.** Omit an item whose `target` the Hub does not hold: neither a live bill, nor a bill it destroyed
-  whose retention window is still open, nor, for `cash_lookup`, one of the targets §Looking Up a Call names.
+  whose retention window is still open, nor, for `cash_lookup`, one of the targets §Looking Up a Call names,
+  nor, for `cash_order`, one of its Order connections.
 - **I3.** Omit an item whose `bill_proof` is absent or does not verify.
 - **I4.** Answer a `cash_status`, `cash_redeem`, `cash_transfer` or `cash_consolidate` naming a destroyed
   bill with its tombstone, and run nothing further for it.
 - **I5.** Refuse a method this transport does not serve with `NOT_IMPLEMENTED`.
-- **I6.** For `cash_transfer` and `cash_consolidate`, refuse a missing or malformed `request_id` with
+- **I6.** For `cash_transfer`, `cash_consolidate` and `cash_order`, refuse a missing or malformed `request_id` with
   `BAD_REQUEST`.
 - **I7.** For a call, not a `cash_lookup`, refuse a `request_id` already used on this node with
   `REQUEST_REUSED`.
@@ -2309,7 +2351,8 @@ Display state at the WALLET level (Unredeemed / Active / Redeemed) MAY be comput
 (`spent = total funded − current balance`). Reassigning a slice's identity in place via `cash_transfer`
 doesn't change its redemption state — an unredeemed, reassigned slice is still unredeemed. The wallet owner
 MAY delete a Cash Wallet in any redemption state, and any remaining balance MUST be swept back to the Cash
-Hub before the connection record is removed.
+Hub before the connection record is removed. A Hub MUST NOT delete a wallet holding an unclaimed ordered
+slice: only its holder ends it.
 
 **Hub teardown.** A Cash Hub MUST NOT be deleted while any bill it minted is live, or while any of its
 `request_id` records is still within retention.
@@ -2354,7 +2397,8 @@ Hub adopts, it MUST be the same for `cash_redeem`, `cash_transfer`, `cash_consol
 
 The wallet owner MAY remove a single unclaimed slice from a live Cash Wallet, for example a recipient added
 by mistake. The slice's committed amount MUST be swept back to the Cash Hub in the same atomic step that
-removes it, and the slice becomes terminal as `reclaimed`. A claimed slice MUST NOT be removed. Removing the
+removes it, and the slice becomes terminal as `reclaimed`. A claimed slice or an ordered slice MUST NOT be
+removed. Removing the
 wallet's last unclaimed slice leaves nothing on it, and the wallet is then deleted like any other drained
 wallet.
 
