@@ -652,7 +652,8 @@ The tombstone is the item's `result`, never an error, whichever bill method the 
 `reason` is the terminal state
 of the slice whose ending destroyed the bill — its last live slice — so the
 expiry sweep answers `expired`, and an owner delete or a removal answers `reclaimed`. A Hub MUST send one
-of those five values; a client MUST read any other value as `spent` with no reason.
+of those five values, except for a bill whose last slice was `written-off`, whose tombstone omits
+`reason`; a client MUST read any other value, or none, as `spent` with no reason.
 
 Outcomes:
 
