@@ -63,6 +63,7 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
 | `request_id`, `deadline`, `target`, `device` | no | yes | no |
 | `secret` | optional, for a `cash` token | for each cash-mode bill the call makes | — |
 | `order_key` | no | for some `cash_order` calls (below) | no |
+| `notify` | no | for a `cash_order` | no |
 | `mint`, `source` | optional | — | — |
 
 **Required tags**:
@@ -79,7 +80,7 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
   - It is required for a bill that expires, taken from the Hub's reply, `cash_status`, or a `9522` whose zap signature verifies (NIP-CZ rule 7), never from any other `9522`, whose `expires_at` the sender chose.
   - A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
-A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device`, the call's `chain`, as `amount` the amount the call sends, a `secret` for each cash-mode bill the call makes, and for a `cash_order` to a `pubkey` or `connection_key` recipient an `order_key`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
+A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device`, the call's `chain`, as `amount` the amount the call sends, a `secret` for each cash-mode bill the call makes, and for a `cash_order` to a `pubkey` or `connection_key` recipient an `order_key`, and for every `cash_order` its `notify`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 
 | call | `amount` |
 |---|---|
@@ -101,6 +102,7 @@ A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline
   | `["secret", "<cash-secret>", "remainder"]` | the remainder of a split of a cash-mode source, which the wallet always binds to a fresh commitment of its own |
 
 - `order_key`: the secret key of a `cash_order`'s random buyer key, in lowercase hex, stored before the call is sent. It reads the order, and is as sensitive as a `secret`.
+- `notify`: a `cash_order`'s `notify` value, in lowercase hex, so any device can listen for its order notices.
 
 For example, a `pending` entry for a split that sends 5000 to a cash-mode identity:
 
