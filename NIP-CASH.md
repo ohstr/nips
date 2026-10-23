@@ -160,8 +160,9 @@ and tries again only as §Lost Replies allows, never by resending the same `requ
 
 ### Freshness
 
-A Hub MUST accept a kind-23192, 23193 or 23198 event only if its `created_at` lies from 300 seconds before
-to 60 seconds after the Hub's own clock, both bounds inclusive: `now − 300 ≤ created_at ≤ now + 60`.
+A Hub MUST accept a kind-23192, 23193 or 23198 event only if its `created_at` lies from 5 minutes before
+to 1 minute after the Hub's own clock, both bounds inclusive: `now − 300 ≤ created_at ≤ now + 60`, in
+seconds.
 
 ### Claim Proofs (kind 23198)
 
@@ -217,7 +218,7 @@ binding fields, and the item proof covers every other param, such as `zap_target
 
 **A claim proof is single-use.** A Hub consumes a claim proof when the call it authorized commits, tracking
 it by its recomputed event id, independent of the call's parameters, and MUST keep each consumed id at least
-until its `created_at` plus 360 seconds. A proof that failed verification, or whose call was refused or
+until its `created_at` plus 6 minutes. A proof that failed verification, or whose call was refused or
 never committed, is not consumed, so a legitimate caller can retry with the identical proof.
 
 For example, claim proofs by the pubkey `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`,
@@ -1276,8 +1277,8 @@ Every call carrying a `request_id` has a **deadline**: the envelope's `not_after
 the NIP-47 `expiration` that `mint_cash` then requires.
 
 - A Hub announces a horizon `H`, `max_request_age` in seconds, among its announcement's `limits`. `H` is the
-  Hub's own setting: a Hub MUST announce an integer of at least 60, SHOULD keep it at most 86400, and is
-  RECOMMENDED to default to 300.
+  Hub's own setting: a Hub MUST announce an integer of at least 60 (1 minute), SHOULD keep it at most 86400
+  (1 day), and is RECOMMENDED to default to 300 (5 minutes).
 - A Hub MUST NOT announce a smaller `H` than it has announced before, so its current `H` is also the largest
   it has ever announced, and every rule in this section uses that one value.
 
@@ -1479,7 +1480,7 @@ NIP-CO's `cash_order` carries a `request_id` under the rules above, and differs 
 Every Hub MUST record `request_id` and refuse a repeat as above, MUST announce `max_request_age`, and MUST serve `cash_lookup` and list it in `private_methods`.
 
 A client MUST send a `request_id`, and a deadline, on every call that creates a bill. A client MUST NOT send
-a bill-creating call to a Hub whose announcement carries no `max_request_age`, or one below 60.
+a bill-creating call to a Hub whose announcement carries no `max_request_age`, or one below 60 (1 minute).
 
 ## Cash-Mode Slices
 
