@@ -308,7 +308,7 @@ A member whose join reply never arrives recovers it with NIP-CASH's `cash_lookup
 transport, with params
 `{"connection_pubkey": "<hex>", "deadline": <unix>}` in place of `request_id`:
 
-- **The item's `target` is the Circle Hub connection**, the original join's target, and it carries a bill
+- **The item's `target` is the Circle Wallet Hub connection**, the original join's target, and it carries a bill
   proof signed with the Hub connection's secret, exactly as a join does.
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
   request that named this `connection_pubkey`. The record is matched on (signer, `connection_pubkey`): a
@@ -322,7 +322,8 @@ transport, with params
   proof's `created_at` plus the 5-minute freshness window, and the Hub MUST NOT create a
   wallet whose proof is past it, checked at commit (step 9). A `deadline` counts as at most 6 minutes
   from now (the 5-minute freshness window plus its 1-minute future allowance); a later one is treated as
-  now plus 6 minutes. A lookup MUST NOT write state.
+  now plus 6 minutes. A lookup MUST NOT change any record, wallet or replay state; logs and rate-limit counters are not
+  state for this rule.
 - **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH.
   `deadline` has passed when now > `deadline`.
   - `pending`, with `retry_after` = `deadline` + 1, while `deadline` has not passed;
@@ -333,7 +334,7 @@ transport, with params
   `deadline` plus 6 minutes, even if the wallet is deleted sooner. It may drop the record only once the
   wallet is deleted and now is later than that; a later lookup then answers `expired`.
 
-Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it, and lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`.
+Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it, and lists `cash_lookup` in the Circle Wallet Hub connection's `get_info` `private_methods`.
 It MUST keep each join's record, with its `encrypted_details`, while the
 wallet exists and for at least the window above. This works whichever transport carried the join.
 
