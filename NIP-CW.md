@@ -100,7 +100,7 @@ connection as its target, the join's `pubkey` as its authorizer, its `connection
 
 An implementation MUST also maintain a single-use record of every identity-proof event ID it has already
 consumed for `create_circle_wallet` or a member request.
-It MUST keep a join proof's ID in that record at least until the proof's `created_at` plus 360 seconds,
+It MUST keep a join proof's ID in that record at least until the proof's `created_at` plus 6 minutes,
 past the last moment check 4 could still accept it, and a member request's ID as §Recovering a Lost
 Connection says.
 
@@ -115,7 +115,7 @@ A budget period starts when the wallet is created, in UTC.
 
 | renewal | when each period starts |
 |---|---|
-| `daily`, `weekly` | Daily and weekly periods start at the creation instant plus k×86400 or k×604800 seconds. |
+| `daily`, `weekly` | Daily and weekly periods start at the creation instant plus k × 24 hours or k × 7 days. |
 | `monthly`, `yearly` | Monthly periods stay anchored to the creation day, clamped to the month's last day; yearly periods likewise (Feb 29 → Feb 28). A monthly or yearly period starts at the creation's UTC time of day on that date. |
 | `never` | With `never`, the wallet's whole life is one period. |
 
@@ -413,8 +413,8 @@ section that verifies a kind-23199 proof refers to this list.
 2. **The event's `id` matches its own content.** Recompute the id from the canonical serialization and
    compare; the single-use replay guard (check 8) is keyed on this id.
 3. **The signature verifies** against `pubkey`, and `pubkey` equals the `pubkey` named in the request.
-4. **`created_at` is inside the freshness window** given above: from now − 300 to now + 60 seconds on
-   the Hub's clock, both bounds inclusive.
+4. **`created_at` is inside the freshness window** given above: from 5 minutes before now to 1 minute
+   after, on the Hub's clock, both bounds inclusive.
 5. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
    Wallet Hub's **pairing URI**. An implementation that maintains a second, internal keypair derived from
    the connection's secret MUST NOT bind against that one.
@@ -745,7 +745,7 @@ the secret up.
 
 A Hub MAY let a member move a wallet to a new connection key. A Hub that does reports
 `circle_wallet.rotation_delay_secs` in `get_info`, and one that does
-not MUST omit it. The delay is the Hub's choice; a Hub SHOULD use 432000 seconds (5 days) unless it has
+not MUST omit it. The delay is the Hub's choice; a Hub SHOULD use 5 days (432000) unless it has
 reason to choose otherwise. Each wallet's delay is the one in force when it was created, reported in its
 details and fixed for its life. A wallet whose details carry none cannot be rotated, and a
 Hub refuses a member request naming it with `NOT_IMPLEMENTED`.
@@ -787,8 +787,8 @@ A Hub MUST check a member request in this order, and refuse it at the first step
    - It passes §Identity Proof's checks 2 and 5 unchanged;
    - its `kind` is 23199;
    - its signature verifies against its `pubkey`;
-   - its `created_at` is inside the window above, from now − 86,400 to now + 60 seconds on the Hub's
-     clock, both bounds inclusive;
+   - its `created_at` is inside the window above, from 24 hours before now to 1 minute after, on
+     the Hub's clock, both bounds inclusive;
    - and it carries exactly one `action` tag, whose value is `rotate`, `freeze` or `unfreeze`, exactly one
      `wallet` tag, exactly one `connection` tag on a `rotate` and none otherwise, and no `terms` tag.
 
