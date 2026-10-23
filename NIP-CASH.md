@@ -618,8 +618,8 @@ A Hub MUST determine "mine" from the item proof's own signer, never from anythin
 itself.
 
 - A cash-mode bill has exactly one slice, so its bill proof already names the row: a `cash_status` item for it
-  carries no `proof`, a client MUST NOT put the `cash_secret` in it, and a Hub MUST answer it from the bill
-  proof alone, with that single row as "mine".
+  carries no `proof`, a client MUST NOT put the `cash_secret` in it, a Hub MUST refuse one that carries it
+  with `BAD_REQUEST`, and a Hub MUST answer it from the bill proof alone, with that single row as "mine".
 - `mine` is a *view*, not an authorization boundary: it changes what is returned, never what a caller may do,
   so a Hub MUST NOT treat having asked for `mine` as narrowing any later call's permissions.
 
@@ -2146,8 +2146,9 @@ Then the Hub runs each item in array order, each as if it had arrived alone, so 
   `BAD_REQUEST`.
 - **I7.** For a call, not a `cash_lookup`, refuse a `request_id` already used on this node with
   `REQUEST_REUSED`.
-- **I8.** Refuse an item carrying both `proof` and a `cash_secret` in `params` with `BAD_REQUEST`, and a
-  `cash_redeem`, `cash_transfer` or `cash_consolidate` carrying neither with `BAD_REQUEST`.
+- **I8.** Refuse an item carrying both `proof` and a `cash_secret` in `params` with `BAD_REQUEST`, a
+  `cash_redeem`, `cash_transfer` or `cash_consolidate` carrying neither with `BAD_REQUEST`, a `cash_order`
+  carrying no `proof` with `BAD_REQUEST`, and a `cash_status` carrying a `cash_secret` with `BAD_REQUEST`.
 - **I9.** Refuse with `UNAUTHORIZED` an item whose `proof` does not verify, and a proofless
   item whose slice is not cash-mode by the Hub's own records, except as §Looking Up a Call
   provides for a lookup.
@@ -2674,7 +2675,9 @@ Display state at the WALLET level (Unredeemed / Active / Redeemed) MAY be comput
   unclaimed ordered slice: only its holder ends it.
 
 **Hub teardown.** A Cash Hub MUST NOT be deleted while any bill it minted is live, or while any of its
-`request_id` records is still within retention.
+`request_id` records is still within retention, not counting the time NIP-CO keeps a paid on-chain order only
+to watch its address. Deleting such a Hub ends that watch: a payment to one of those addresses afterwards
+becomes no bill, and an implementation SHOULD have the owner confirm this before deleting.
 
 A SLICE is never partially spent. Its state is one of the following, derived while the slice is live and
 stored once it becomes terminal:
