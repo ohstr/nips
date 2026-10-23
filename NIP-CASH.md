@@ -2675,7 +2675,9 @@ Display state at the WALLET level (Unredeemed / Active / Redeemed) MAY be comput
   unclaimed ordered slice: only its holder ends it.
 
 **Hub teardown.** A Cash Hub MUST NOT be deleted while any bill it minted is live, or while any of its
-`request_id` records is still within retention.
+`request_id` records is still within retention, not counting the time NIP-CO keeps a paid on-chain order only
+to watch its address. Deleting such a Hub ends that watch: a payment to one of those addresses afterwards
+becomes no bill, and an implementation SHOULD have the owner confirm this before deleting.
 
 A SLICE is never partially spent. Its state is one of the following, derived while the slice is live and
 stored once it becomes terminal:
