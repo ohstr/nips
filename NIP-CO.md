@@ -23,14 +23,14 @@ delete it.
 sequenceDiagram
     participant C as Buyer's client
     participant H as Hub
-    participant P as Payer (any wallet)
+    participant P as Payer
     C->>H: get_info on the Order connection
     H-->>C: terms
     C->>H: cash_order (private transport)
     H-->>C: order: invoice or address, pay_by
     P->>H: payment
     Note over H: mints the bill on its own
-    H-->>C: order notice (kind 23189)
+    H-->>C: order notice (kind 23189, on a relay)
     C->>H: cash_lookup
     H-->>C: done: the order with its bills
 ```
@@ -357,7 +357,7 @@ For the on-chain order above (`pay_millis` 21063000, `fee_millis` 63000), these 
 | 50000 millis | nothing: at most `fee_millis`, kept by the Hub |
 | a payment a reorganisation removes before it is minted | nothing yet |
 | a payment a reorganisation removes after it is minted | the bill stands, at the Hub's loss |
-| a first payment after `pay_by`, nothing seen before | kept by the Hub if it deleted the order |
+| a first payment after `pay_by`, nothing seen before | kept by the Hub |
 
 A client MUST tell its user to pay before `pay_by`, and MUST NOT present a payment the Hub did not see by
 then as one that will be minted.
@@ -390,11 +390,13 @@ stateDiagram-v2
     [*] --> open
     open --> paid: a payment arrives
     paid --> minted: its bill is minted
+    minted --> paid: another on-chain payment arrives
     open --> expired: pay_by, nothing seen
+    paid --> closed: pay_by, on-chain
     minted --> closed: pay_by, on-chain
     closed --> closed: a later payment is minted
     minted --> [*]: Lightning
-    expired --> [*]
+    expired --> [*]: Lightning
 ```
 
 ## Reading an Order
