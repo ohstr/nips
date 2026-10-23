@@ -1283,7 +1283,8 @@ A client SHOULD keep every `request_id` as private as the call it names.
 NIP-CO's `cash_order` carries a `request_id` under the rules above, and differs in three ways. Its
 `request_id` becomes used once its item proof verifies, and its record names the Order connection as target
 and the buyer key, the item proof's signer, as authorizer. The Hub keeps the record as NIP-CO requires, not
-under the retention rule above. A `cash_lookup` of an order names the Order connection, and its `done`
+under the retention rule above, and MAY drop the used mark of an order dropped unpaid once its deadline
+plus `H` has passed. A `cash_lookup` of an order names the Order connection, and its `done`
 carries the order's current state, as NIP-CO describes, instead of the original response.
 
 ### Support
