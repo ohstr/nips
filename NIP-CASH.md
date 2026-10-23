@@ -66,8 +66,8 @@ particular (`cash` mode). Naming a recipient is never mandatory.
   - A sender MAY derive it from typed input only for a platform NIP-IC gives a canonical form, with the
     identifier in that form and under NIP-IC's strict input rules: input those rules would change is refused,
     never mapped.
-  - For any other platform the sender MUST NOT derive it from typed input: it takes the exact `platform:id`
-    string, byte for byte, from the recipient's attestation or `nconnection`.
+  - For any other platform the sender MUST NOT derive it from typed input: it takes the ConnectionKey itself,
+    byte for byte, from the recipient's `35522` attestation or `nconnection`.
 - **cash mode**: the mode a slice is in when it carries no identity binding at all — `identity_type: "cash"`
   on the wire, with its secret carried as `cash_secret`; its `identity_value` is the SHA-256 commitment of
   that secret. Implementations MUST send and accept only `cash`, and MUST reject `bearer` as an unknown
@@ -1044,8 +1044,8 @@ The Hub MUST make the source claim, the creation and funding of every new wallet
 record one atomic commit, and MUST produce every new wallet's token, mint signature included, before that
 commit.
 
-- A failure at any point before it leaves no state at all — no claim, no wallet, no transfer, no record, no
-  consumed proof.
+- A failure at any point before it leaves no state but the used `request_id` mark — no claim, no wallet, no
+  transfer, no record, no consumed proof.
 - From the commit on, the old identity can no longer redeem or transfer this slice, and every new wallet holds
   its value: a partial split never yields the carved piece without the remainder, or the reverse, and a lookup
   never sees a partly applied call.
@@ -1335,7 +1335,7 @@ not MUST store them.
 `cash_lookup` is served on the private transport only.
 
 - Its item names the original call's target — the bill a `cash_transfer` item named, a `cash_consolidate`'s
-  first source, the Cash Hub connection for `mint_cash`, the Circle Hub connection for a NIP-CW join, or the
+  first source, the Cash Hub connection for `mint_cash`, the Circle Wallet Hub connection for a NIP-CW join, or the
   Order connection for a NIP-CO order — which the Hub MUST serve even if it has since destroyed that bill.
 - Its bill proof is signed with that target's connection secret, as for any item.
 - For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV `0`), and the item
@@ -1469,8 +1469,8 @@ A client SHOULD keep every `request_id` as private as the call it names.
 NIP-CO's `cash_order` carries a `request_id` under the rules above, and differs in three ways.
 
 - Its `request_id` becomes used once its item proof verifies, and its record names the Order connection as
-  target and the buyer key, the item proof's signer, as authorizer. The Hub keeps the record as NIP-CO
-  requires, not under the retention rule above.
+  target and the buyer key, the item proof's signer, as authorizer.
+- The Hub keeps the record as NIP-CO requires, not under the retention rule above.
 - A `cash_lookup` of an order names the Order connection, and its `done` carries the order's current state, as
   NIP-CO describes, instead of the original response.
 
@@ -2093,7 +2093,7 @@ sells cash serves here only.
 
 - `cash_lookup` and `cash_order` are the methods whose target need not be a live bill: `cash_order` names an
   Order connection, and `cash_lookup` names the original call's target, which may be a bill the Hub has
-  destroyed, its Cash Hub connection, a Circle Hub connection, or an Order connection.
+  destroyed, its Cash Hub connection, a Circle Wallet Hub connection, or an Order connection.
 
 **This MUST be an explicit allowlist, not a reuse of the Hub's ordinary method dispatch**, so that no other
 NIP-47 method is reachable from a bill's connection key.
@@ -2136,7 +2136,8 @@ Then the Hub runs each item in array order, each as if it had arrived alone, so 
 - **I5.** Refuse a method this transport does not serve with `NOT_IMPLEMENTED`.
 - **I6.** For `cash_transfer`, `cash_consolidate` and `cash_order`, refuse a missing or malformed `request_id` with
   `BAD_REQUEST`.
-- **I7.** Refuse a `request_id` already used on this node with `REQUEST_REUSED`.
+- **I7.** For a call, not a `cash_lookup`, refuse a `request_id` already used on this node with
+  `REQUEST_REUSED`.
 - **I8.** Refuse an item carrying both `proof` and a `cash_secret` in `params` with `BAD_REQUEST`, and a
   `cash_redeem`, `cash_transfer` or `cash_consolidate` carrying neither with `BAD_REQUEST`.
 - **I9.** Refuse with `UNAUTHORIZED` an item whose `proof` does not verify, and a proofless
@@ -2644,7 +2645,7 @@ transport, and a client MUST NOT read a method's presence here as permission to 
 
 `cash_lookup` has no scope: it is authorized by the original call's authorizer, and returns
 only what that call's reply carried. Every Hub MUST list it in `private_methods` on every Cash Wallet
-connection and on its Cash Hub connection, and on a Circle Hub connection whose join lookups it serves
+connection and on its Cash Hub connection, and on a Circle Wallet Hub connection whose join lookups it serves
 (NIP-CW).
 
 This concerns advertising only: the scopes above still GRANT these methods.
@@ -2700,7 +2701,7 @@ expiry sweep ends the slice as `expired`. `cash_status` keeps answering the rost
 
 **Sweeps claim like calls.** A Hub MUST make the expiry sweep, an owner delete, the removal of a slice and
 an auto-delete take, on each unclaimed slice they end, the same atomic first-wins claim that `cash_redeem`,
-`cash_transfer` and `cash_consolidate` take (step 4), so a slice is never both paid out
+`cash_transfer` and `cash_consolidate` take in their own processing, so a slice is never both paid out
 and swept. A Hub MUST NOT sweep a slice whose `cash_redeem` payment is in flight until that payment has
 resolved, and MUST NOT delete a wallet while any payout from it is in flight.
 
