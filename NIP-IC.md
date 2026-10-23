@@ -244,7 +244,7 @@ A client MUST NOT show a connection as **Verified** unless every check in step 3
    - its `d` and `platform` tags equal the `35521`'s `d` and `platform` tags;
    - its `p` tag equals the `35521`'s `pubkey`;
    - it is unexpired (NIP-40) and not deleted (NIP-09);
-   - its `created_at` is no more than 900 seconds (15 minutes) ahead of the verifier's clock;
+   - its `created_at` is no more than 15 minutes ahead of the verifier's clock;
    - it is the IA's current attestation: querying the IA's relay for `{"kinds": [35522], "authors": ["<ia-pubkey>"], "#d": ["<ConnectionKey>"]}` returns this same event ID.
 4. A `35521` with at least one attestation that counts is **Verified**. A `35521` without one is **Spoofed**: someone published a claim that does not check out, which is distinct from *Unverified*.
 5. If trusted IAs' current attestations name different pubkeys for the same ConnectionKey, the attestation with the latest `created_at` wins; claims from every other pubkey are **Spoofed**. Only attestations that pass step 3 take part, so a verifier MUST ignore one dated more than 900 seconds ahead of its clock here too: a future-dated attestation cannot outrank every later re-verification.
