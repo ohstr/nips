@@ -308,12 +308,13 @@ A member whose join reply never arrives recovers it with NIP-CASH's `cash_lookup
 transport, with params
 `{"connection_pubkey": "<hex>", "deadline": <unix>}` in place of `request_id`:
 
-- **The item's `target` is the Circle Hub connection**, the original join's target, and it carries a bill
+- **The item's `target` is the Circle Wallet Hub connection**, the original join's target, and it carries a bill
   proof signed with the Hub connection's secret, exactly as a join does.
 - **It is authorized by the joiner's identity.** Its item proof MUST be signed by the `pubkey` of the
   request that named this `connection_pubkey`. The record is matched on (signer, `connection_pubkey`): a
   record held under another signer is no match, and a lookup with no match is answered by its `deadline`
-  as below, not omitted. Only a lookup whose item proof or bill proof does not verify is omitted.
+  as below, not omitted. Only a lookup whose bill proof does not verify is omitted; one whose item proof
+  does not verify is refused with `UNAUTHORIZED`.
 - **Its result is the original response**, the same `encrypted_details`, which the client checks as it
   would have checked the reply. A lookup naming the key a rotation moved the wallet to is
   answered as §Recovering a Lost Connection says.
@@ -321,7 +322,8 @@ transport, with params
   proof's `created_at` plus the 5-minute freshness window, and the Hub MUST NOT create a
   wallet whose proof is past it, checked at commit (step 9). A `deadline` counts as at most 6 minutes
   from now (the 5-minute freshness window plus its 1-minute future allowance); a later one is treated as
-  now plus 6 minutes. A lookup MUST NOT write state.
+  now plus 6 minutes. A lookup MUST NOT change any record, wallet or replay state; logs and rate-limit counters are not
+  state for this rule.
 - **With no record, the Hub answers on its own clock**, with the same three statuses as NIP-CASH.
   `deadline` has passed when now > `deadline`.
   - `pending`, with `retry_after` = `deadline` + 1, while `deadline` has not passed;
@@ -332,7 +334,7 @@ transport, with params
   `deadline` plus 6 minutes, even if the wallet is deleted sooner. It may drop the record only once the
   wallet is deleted and now is later than that; a later lookup then answers `expired`.
 
-Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it, and lists `cash_lookup` in the Circle Hub connection's `get_info` `private_methods`.
+Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it, and lists `cash_lookup` in the Circle Wallet Hub connection's `get_info` `private_methods`.
 It MUST keep each join's record, with its `encrypted_details`, while the
 wallet exists and for at least the window above. This works whichever transport carried the join.
 
@@ -422,7 +424,9 @@ A `follow_set` Hub MUST apply these rules:
   pubkey and whose `d` tag equals the configured identifier. Of those, the one with the highest
   `created_at` wins; on a tie, the lowest `id` (NIP-01's rule for addressable events). An event from
   any other author MUST be ignored, whatever it claims. A Hub MUST ignore a version whose `created_at` is
-  more than 15 minutes in the future, and its relays SHOULD reject one.
+  more than 15 minutes in the future, and its relays SHOULD reject one. A Hub MUST NOT adopt a version
+  whose `created_at` is older than that of its last successful resolution; such a fetch counts as a
+  failed refresh.
 - **Which members.** Exactly the pubkeys in that event's public `p` tags, plus any `hidden_p` entries
   the Hub can decrypt. NIP-51's private items in the encrypted `content` MUST NOT be
   counted.
@@ -572,7 +576,8 @@ bound, counting each payment as for a send cap.
 **Only Active wallets receive.** A wallet in any other state can only pay out. A
 Hub MUST refuse its `make_invoice` with `RESTRICTED`, MUST cancel its open invoices when it leaves Active,
 and MUST fail every payment to it, same-circle ones included. Its payouts still count against the circle's
-outbound ceiling, but not against its send cap.
+outbound ceiling, but not against its send cap. A Hub MAY exempt them from the circle's outbound ceiling as
+well.
 
 **Rate limits.** A Hub MAY rate-limit a wallet's same-circle transfers, the invoices and hold invoices it
 issues and the payments it has pending at once, and MAY cap how many open invoices one wallet holds at
@@ -1032,6 +1037,8 @@ what it can first.
   NIP-51 client that republishes the set may drop tags it does not know, silently suspending every
   hidden member's wallet; a host SHOULD edit a circle's set only with a client that preserves
   `hidden_p`.
+- **`available_millis` is shared.** It tells every member how much room the whole circle has left under
+  its holdings ceiling, not only their own.
 - **Reading the terms is anonymous, not private.** The `get_info` call that yields `identity` travels on
   the standard transport, so a relay observer learns that someone looked at the circle and when, but not
   who: it is authored by the shared client key.
