@@ -23,14 +23,14 @@ delete it.
 sequenceDiagram
     participant C as Buyer's client
     participant H as Hub
-    participant P as Payer (any wallet)
+    participant P as Payer
     C->>H: get_info on the Order connection
     H-->>C: terms
     C->>H: cash_order (private transport)
     H-->>C: order: invoice or address, pay_by
     P->>H: payment
     Note over H: mints the bill on its own
-    H-->>C: order notice (kind 23189)
+    H-->>C: order notice (kind 23189, on a relay)
     C->>H: cash_lookup
     H-->>C: done: the order with its bills
 ```
@@ -223,8 +223,8 @@ group order is unusable, and the client generates a new cash secret. For the sec
 buyer secret key is `c853759de7b777f3588569e48461ec8ad52dbea4c8829b759a05e352cf649dea` and its x-only
 public key `a5a70781e66224a1a4e26614b36328c1a8913f1a2c80bca00fbb2e5af993c8a3`.
 
-For a `pubkey` or `connection_key` recipient the buyer key is a fresh random key, kept by the client until the
-order is closed. A buyer key MUST NOT be the buyer's or the recipient's Nostr key.
+For a `pubkey` or `connection_key` recipient the buyer key is a fresh random key, kept by the client for as long as
+it may read the order, for good for an on-chain order that is `closed`. A buyer key MUST NOT be the buyer's or the recipient's Nostr key.
 
 ### Response
 
@@ -264,7 +264,7 @@ Each entry of `bills`:
   "wallet_pubkey": "<hex>",
   "cash_token": "satscash1...",
   "amount_millis": 21000000,
-  "paid_millis": 21022000,
+  "paid_millis": 21063000,
   "outpoint": "<txid>:<vout>"
 }
 ```
@@ -277,7 +277,7 @@ Lightning. A destroyed bill appears as its tombstone in place of `cash_token`, a
 After NIP-CASH's envelope and item steps, a Hub MUST, in order:
 
 1. Refuse a missing or malformed `request_id` with `BAD_REQUEST` and a used one with `REQUEST_REUSED`. Mark it
-   used once the item proof verifies.
+   used once the item proof verifies. Refuse an item without `proof` with `BAD_REQUEST`.
 2. Refuse with `RESTRICTED` an order on a retired Order connection or for a payment kind the terms do not
    offer.
 3. Validate the request as above, refusing with `BAD_REQUEST`. Validate `recipient` as `mint_cash` validates a
@@ -343,7 +343,7 @@ At `pay_by` the Hub looks at what it has seen for the order, confirmed or not:
 
 - a payment seen: the order is kept, and its address watched for as long as the Hub runs; later payments to
   it are minted the same way;
-- nothing seen: the Hub MAY delete the order at once; a payment arriving afterwards is kept by the Hub.
+- nothing seen: the Hub MUST delete the order at once; a payment arriving afterwards is kept by the Hub.
 
 For the on-chain order above (`pay_millis` 21063000, `fee_millis` 63000), these rules give:
 
@@ -357,7 +357,7 @@ For the on-chain order above (`pay_millis` 21063000, `fee_millis` 63000), these 
 | 50000 millis | nothing: at most `fee_millis`, kept by the Hub |
 | a payment a reorganisation removes before it is minted | nothing yet |
 | a payment a reorganisation removes after it is minted | the bill stands, at the Hub's loss |
-| a first payment after `pay_by`, nothing seen before | kept by the Hub if it deleted the order |
+| a first payment after `pay_by`, nothing seen before | kept by the Hub |
 
 A client MUST tell its user to pay before `pay_by`, and MUST NOT present a payment the Hub did not see by
 then as one that will be minted.
@@ -377,7 +377,7 @@ other item.
 | `state` | meaning |
 |---|---|
 | `open` | waiting for payment, until `pay_by` |
-| `paid` | a payment arrived and its bill is not minted yet |
+| `paid` | a payment is seen and its bill is not minted yet |
 | `minted` | every payment seen is minted, and the window is still open or the order is Lightning |
 | `expired` | the window ended and nothing was seen |
 | `closed` | an on-chain order whose window ended after a payment was seen; later payments still mint |
@@ -388,9 +388,11 @@ gain bills later.
 ```mermaid
 stateDiagram-v2
     [*] --> open
-    open --> paid: a payment arrives
+    open --> paid: a payment is seen
     paid --> minted: its bill is minted
+    minted --> paid: another on-chain payment is seen
     open --> expired: pay_by, nothing seen
+    paid --> closed: pay_by, on-chain
     minted --> closed: pay_by, on-chain
     closed --> closed: a later payment is minted
     minted --> [*]: Lightning
