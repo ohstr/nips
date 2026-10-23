@@ -61,7 +61,7 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
 | `identity` | yes | no | yes |
 | `expires_at` | if the bill expires | no | only when an answer gives it |
 | `request_id`, `deadline`, `target`, `device` | no | yes | no |
-| `secret` | for a `cash` token | for each cash-mode bill the call makes | — |
+| `secret` | optional, for a `cash` token | for each cash-mode bill the call makes | — |
 | `order_key` | no | for some `cash_order` calls (below) | no |
 | `mint`, `source` | optional | — | — |
 
@@ -211,7 +211,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 ```mermaid
 stateDiagram-v2
     [*] --> pending: written ahead and read back
-    pending --> done: reply handled
+    pending --> done: reply handled (an order: once final)
     pending --> pending: lost reply or other error, then cash_lookup
     pending --> done: lookup done
     pending --> done: lookup unknown, call placed again under the derived id
