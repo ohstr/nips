@@ -326,8 +326,8 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 
   | `identity_type` | the entry also carries | never carries | alongside other entries? |
   |---|---|---|---|
-  | `pubkey` | `identity_value`, `amount_millis` | — | yes |
-  | `connection_key` | `identity_value`, `ia_pubkey`, `amount_millis` | — | yes |
+  | `pubkey` | `identity_value`, `amount_millis` | `cash_secret` | yes |
+  | `connection_key` | `identity_value`, `ia_pubkey`, `amount_millis` | `cash_secret` | yes |
   | `cash` | `identity_value` (the commitment), `amount_millis` | `ia_pubkey`, `cash_secret` | no, the only entry |
 - `expiry` — OPTIONAL.
   - If omitted or zero, it MUST default to the Hub's own expiry ceiling — which itself MAY be "never," in
@@ -836,8 +836,8 @@ The same rules, by request:
 | `zap_target`, full | spin-off | 1 | the zap scheme |
 | `zap_target`, partial | spin-off | 2 | the zap scheme for `new_identity`'s, the ordinary one for the remainder |
 | `amount_millis` below the slice's amount | split, a spin-off | 2 | the ordinary scheme |
-| full, to `pubkey` or `connection_key` | in place | 0 | — |
-| full, to an identity already holding an unclaimed slice here | spin-off | 1 | the ordinary scheme |
+| full, to a `pubkey` or `connection_key` holding no unclaimed slice here | in place | 0 | — |
+| full, to a `pubkey` or `connection_key` already holding an unclaimed slice here | spin-off | 1 | the ordinary scheme |
 | full, to `cash`, the wallet has only ever had one recipient | in place | 0 | — |
 | full, to `cash`, any other wallet | spin-off | 1 | the ordinary scheme |
 
@@ -880,17 +880,17 @@ STRINGS. The example's fields, and the ones it leaves out:
     a second time for the identical `new_identity`/`amount_millis`.
   - Concretely, the event is signed by the slice's registered identity and carries the tags §Claim Proofs
     gives for `cash_transfer`:
-  - `d`, the wallet's `WalletPubkey`, and `m`, `cash_transfer`;
-  - a `new_identity_hash` tag:
-    `sha256(new_identity.identity_type + ":" + new_identity.identity_value + ":" + new_identity.ia_pubkey)`,
-    hex-encoded (`identity_value` is the caller's own commitment for a `cash` target, the same value sent
-    in `new_identity`; `ia_pubkey` is `""` for every target type except `connection_key`). `ia_pubkey` MUST
-    be folded into the hash, not just `identity_type`/`identity_value`;
-  - an `amount_millis` tag: the decimal string of the exact amount this request resolves to — an omitted
-    request `amount_millis` (a full transfer) MUST still be bound to a concrete number: the slice's live
-    full amount at signing time, never a wildcard/unbound value;
-  - for `connection_key` mode only, `connection_key` and an `e` tag naming the accompanying
-    `attestation_event`, same as elsewhere. The proof is consumed as §Claim Proofs specifies.
+    - `d`, the wallet's `WalletPubkey`, and `m`, `cash_transfer`;
+    - a `new_identity_hash` tag:
+      `sha256(new_identity.identity_type + ":" + new_identity.identity_value + ":" + new_identity.ia_pubkey)`,
+      hex-encoded (`identity_value` is the caller's own commitment for a `cash` target, the same value sent
+      in `new_identity`; `ia_pubkey` is `""` for every target type except `connection_key`). `ia_pubkey` MUST
+      be folded into the hash, not just `identity_type`/`identity_value`;
+    - an `amount_millis` tag: the decimal string of the exact amount this request resolves to — an omitted
+      request `amount_millis` (a full transfer) MUST still be bound to a concrete number: the slice's live
+      full amount at signing time, never a wildcard/unbound value;
+    - for `connection_key` mode only, `connection_key` and an `e` tag naming the accompanying
+      `attestation_event`, same as elsewhere. The proof is consumed as §Claim Proofs specifies.
 - `cash_secret` — REQUIRED in place of `identity_type`, `identity_value` and `identity_event`, if and only
   if the slice's current identity is `cash`. Presenting its secret is the entire proof, as for `cash_redeem`.
 - `new_identity` — REQUIRED. `identity_type` of `pubkey`, `connection_key`, or `cash`. For `pubkey`/
@@ -1285,8 +1285,8 @@ A Hub MUST refuse with `BAD_REQUEST` a call whose deadline is missing, has alrea
 its current `H` past the moment it arrives; a deadline exactly `H` ahead is accepted.
 
 - On the private transport both checks fall on the envelope's `not_after`: an envelope past it is not run and
-  gets no reply, and one too far ahead gets an envelope-level `BAD_REQUEST`. A caller MUST NOT set a deadline
-  more than the `H` it last read past the moment it sends.
+  gets no reply, and one too far ahead gets an envelope-level `BAD_REQUEST`.
+- A caller MUST NOT set a deadline more than the `H` it last read past the moment it sends.
 - A caller SHOULD set its deadline well inside `H`, leaving room for clock skew between itself and the Hub and
   for relay delay, and SHOULD NOT send a call whose deadline is too close for the Hub to reach in time.
 
@@ -1457,10 +1457,10 @@ derived request_id = hex(sha256("retry:" ‖ <replaced request_id>))
 | answer | what the client does |
 |---|---|
 | `done` | takes the result; never resends |
-| `pending` | asks again at `retry_after` |
+| `pending` | keeps the call pending; `retry_after` is the deadline plus 1 |
 | `unknown` | only the client that placed the call may place it again, under the derived id: a `cash_transfer` or `cash_consolidate` automatically, a `mint_cash` only with its user's explicit confirmation |
 | `expired` | never places it again automatically; surfaces it to its user |
-| omitted | nothing: an omission is not `unknown` |
+| omitted | never reads it as `unknown`; after only omissions past `deadline` plus `H`, surfaces the call to its user, as above |
 
 A client SHOULD keep every `request_id` as private as the call it names.
 
@@ -2464,7 +2464,8 @@ do so before committing any funds. No request parameter opts in or out.
   2. prepend the HRP's signed-message prefix;
   3. hash the result twice with SHA-256;
   4. recover the signer from TLV `5`, its header read as above;
-  5. compare the recovered key's x-only part with the minter the holder expects or trusts.
+  5. compare the recovered key with the minter the holder expects or trusts, by its x-only part where that
+     minter is an x-only key, as below.
 
   The recovered minter is a 33-byte compressed key. Wherever a verifier compares it with a Nostr pubkey —
   an announcement's author, the `pubkey` that `get_info` returns, or any other
@@ -2681,6 +2682,7 @@ stored once it becomes terminal:
 
 ```mermaid
 stateDiagram-v2
+    state "written-off" as written_off
     [*] --> unclaimed
     unclaimed --> unclaimed: in-place cash_transfer
     unclaimed --> redeemed: cash_redeem payout
