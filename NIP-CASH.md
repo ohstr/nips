@@ -2146,8 +2146,9 @@ Then the Hub runs each item in array order, each as if it had arrived alone, so 
   `BAD_REQUEST`.
 - **I7.** For a call, not a `cash_lookup`, refuse a `request_id` already used on this node with
   `REQUEST_REUSED`.
-- **I8.** Refuse an item carrying both `proof` and a `cash_secret` in `params` with `BAD_REQUEST`, and a
-  `cash_redeem`, `cash_transfer` or `cash_consolidate` carrying neither with `BAD_REQUEST`.
+- **I8.** Refuse an item carrying both `proof` and a `cash_secret` in `params` with `BAD_REQUEST`, a
+  `cash_redeem`, `cash_transfer` or `cash_consolidate` carrying neither with `BAD_REQUEST`, and a `cash_order`
+  carrying no `proof` with `BAD_REQUEST`.
 - **I9.** Refuse with `UNAUTHORIZED` an item whose `proof` does not verify, and a proofless
   item whose slice is not cash-mode by the Hub's own records, except as §Looking Up a Call
   provides for a lookup.
