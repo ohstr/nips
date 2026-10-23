@@ -42,7 +42,7 @@ sequenceDiagram
   S->>L: fetch the LNURL-pay endpoint, its metadata listing chain/name entries
   S->>L: callback with amount and the signed 9520 or 9523
   L-->>S: BOLT11 invoice, description_hash = SHA256(request)
-  S->>L: the invoice is paid over Lightning
+  Note over L: the invoice settles
   L->>R: 9521 receipt, on the request's relays
 ```
 
