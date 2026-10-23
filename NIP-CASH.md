@@ -1484,7 +1484,8 @@ rejection it mines the event to the difficulty stated and publishes it again, wi
 a request the Hub already ran is not run twice. A Hub ignores both tags; the envelope's `not_after` still
 decides freshness.
 
-The proof of work protects every item this transport carries, whatever its method.
+The proof of work protects every item this transport carries, whatever its method. It does not cover the
+standard transport (kind 23194), which a Hub rate-limits instead.
 
 ### Envelopes
 

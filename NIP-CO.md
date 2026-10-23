@@ -54,7 +54,8 @@ sequenceDiagram
 
 An Order connection belongs to one Cash Hub. Its owner MAY create several for one Hub, and MAY retire any of
 them. Its secret is public by design: it lets a Hub tell a request that found its shop from one that did not,
-and authorizes nothing.
+and authorizes nothing. An owner sells only through Order connections, and never shares its `cashhub1...`,
+which can mint.
 
 ### Wire Format
 
