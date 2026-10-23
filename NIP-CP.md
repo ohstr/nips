@@ -63,7 +63,8 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
 | `request_id`, `deadline`, `target`, `device` | no | yes | no |
 | `secret` | optional, for a `cash` token | for each cash-mode bill the call makes | — |
 | `order_key` | no | for some `cash_order` calls (below) | no |
-| `notify` | no | for a `cash_order` | no |
+| `notify` | no | for a `cash_order` or a `cash_withdraw` | no |
+| `address`, `quote`, `receipt` | no | for a `cash_withdraw` | no |
 | `mint`, `source` | optional | — | — |
 
 **Required tags**:
@@ -82,6 +83,8 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
 
 A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device`, the call's `chain`, as `amount` the amount the call sends, a `secret` for each cash-mode bill the call makes, and for a `cash_order` to a `pubkey` or `connection_key` recipient an `order_key`, and for every `cash_order` its `notify`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 
+A `cash_withdraw` pending entry also carries its `notify`, `address` and `quote`, its `receipt` once received, and for a cash-mode slice the secret behind its `remint_commitment` as `secret`.
+
 | call | `amount` |
 |---|---|
 | a split | `amount_millis` |
@@ -89,6 +92,7 @@ A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline
 | `cash_consolidate` | the sum of the sources |
 | `mint_cash` | the sum of the recipients |
 | a [NIP-CO](./NIP-CO.md) `cash_order` | the ordered `amount_millis` |
+| `cash_withdraw` | the slice's `amount_millis` |
 
 - `request_id`: the call's NIP-CASH `request_id`.
 - `deadline`: the call's deadline as sent (the envelope's `not_after`, or `mint_cash`'s NIP-47 `expiration`).
@@ -100,9 +104,11 @@ A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline
   |---|---|
   | `["secret", "<cash-secret>"]` | the bill made for `new_identity` or for `mint_cash`'s `cash` recipient |
   | `["secret", "<cash-secret>", "remainder"]` | the remainder of a split of a cash-mode source, which the wallet always binds to a fresh commitment of its own |
+  | `["secret", "<cash-secret>", "remint"]` | the bill a `cash_withdraw` cancel would re-mint |
 
 - `order_key`: the secret key of a `cash_order`'s random buyer key, in lowercase hex, stored before the call is sent. It reads the order, and is as sensitive as a `secret`.
-- `notify`: a `cash_order`'s `notify` value, in lowercase hex, so any device can listen for its order notices.
+- `notify`: a `cash_order`'s or `cash_withdraw`'s `notify` value, in lowercase hex, so any device can listen for its notices.
+- `address`, `quote`, `receipt`: a `cash_withdraw`'s address, and its quote and receipt events as JSON strings.
 
 For example, a `pending` entry for a split that sends 5000 to a cash-mode identity:
 
@@ -152,7 +158,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
 ## Writing
 
 - **Add** an entry when the wallet receives or mints a token it keeps.
-- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`, `cash_order`), the wallet:
+- **Write ahead**: before any call that creates a bill (`mint_cash`, `cash_transfer`, `cash_consolidate`, `cash_order`), and before a `cash_withdraw`, the wallet:
   1. stores a `pending` entry holding the call's `request_id`, `deadline`, `target`, its own `device` and any cash secret it generated;
   2. reads it back before sending the call, which carries that `request_id` (NIP-CASH requires one on every call that creates a bill);
   3. on the reply, writes the entries below;
@@ -191,6 +197,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
     |---|---|
     | `cash_transfer`, `cash_consolidate` | MAY place the call again automatically |
     | `mint_cash`, `cash_order` | MUST NOT place the call again without its user's explicit confirmation; until the user confirms, it shows the call and leaves the entry `pending` |
+    | `cash_withdraw` | MAY place the call again automatically only after a lost reply, while its quote holds (the Hub's chain tip at most its `holds_until`); otherwise as `mint_cash` |
 
     - **The derived id.** The re-placed call always uses `request_id` = lowercase hex of sha256("retry:" ‖ the replaced entry's `request_id`), never a fresh id, and is written ahead as a new pending entry. It names the same target, with the same amounts, identities and any `secret` of the old entry, under a new deadline; a call re-placed again derives its id from the id it replaces, so re-placements chain.
 
@@ -223,6 +230,13 @@ stateDiagram-v2
 ```
 
 - **Orders**: a `cash_order` pending entry stays open while its order is open, and the wallet reads the order with `cash_lookup` as NIP-CO describes, signed by the buyer key. On each answer it adds an entry for every bill it keeps and does not hold yet, a `cash` bill carrying the `secret`, and none for a bill made for someone else. It marks the pending entry `done` only once the order is `minted` or `expired` for Lightning, or `expired` or `closed` for on-chain; the `done` entry keeps `request_id`, `target` and `order_key` or `secret`, so a closed on-chain order can be read again for late payments.
+- **Withdrawals**: a `cash_withdraw` pending entry stays open until its payout is `final` or `cancelled`.
+  - On the reply or the first `done`, the wallet:
+    1. verifies the receipt: its id and signature by the Hub's identity, `d` = `target`, `q` = the stored quote's id, `request_hash` = the sha256 of `request_id`, and `address`, `payout_millis` and `sent_by` equal to the quote's; an answer without a valid receipt counts as no answer;
+    2. marks the source entry `spent`, keeping its token and any `secret` for the lookups;
+    3. reads the payout with `cash_lookup`.
+  - At `cancelled` it adds an entry for the re-minted bill, carrying the `secret`, then marks the pending entry `done`.
+  - Once the payout is final it SHOULD rewrite the `done` entry without `address`, `quote` and `receipt`.
 - **Unusable Hubs**: NIP-CASH requires every Hub to serve `cash_lookup` and announce `max_request_age`. A wallet MUST NOT send a bill-creating call to a Hub that announces no `max_request_age`, or one NIP-CASH does not allow.
 - **Close** a pending entry by publishing it at the next `v` in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
 - **Versions**: every write for a `w` uses the highest `v` seen for that `w` plus 1.
