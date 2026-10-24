@@ -57,6 +57,9 @@ them. Its secret is public by design: it lets a Hub tell a request that found it
 and authorizes nothing. An owner sells only through Order connections, and never shares its `cashhub1...`,
 which can mint.
 
+A Hub MAY list an Order connection on relays, as NIP-CASH §Listing Offers defines, and SHOULD then require
+proof of work on its inbox.
+
 ### Wire Format
 
 The same bech32 TLV encoding as NIP-CASH's `cashhub1...`, with HRP `cashorder` and these entries:
@@ -68,21 +71,45 @@ The same bech32 TLV encoding as NIP-CASH's `cashhub1...`, with HRP `cashorder` a
 | `2` | secret | 32 raw bytes, the connection secret | exactly one, REQUIRED |
 | `3` | label | a human-readable name, UTF-8 | zero or one, OPTIONAL |
 | `4` | Hub identity | 32 raw bytes, the x-only node identity that signs the Hub's announcement and bills | exactly one, REQUIRED |
+| `5` | connection signature | 65 raw bytes, the connection signature NIP-CASH §Connection Signatures defines | exactly one, REQUIRED |
+| `6` | chain | the chain's name, as NIP-CASH §Connection Signatures defines it, e.g. `bitcoin` | exactly one, REQUIRED |
 
-An encoder MUST emit entries in ascending type order. A decoder MUST reject a string missing type `0`, `2` or
-`4`, carrying a wrong-length value for a fixed-length field, or repeating a field allowed at most once, and
+An encoder MUST emit entries in ascending type order. A decoder MUST reject a string missing type `0`, `2`,
+`4`, `5` or `6`, carrying a wrong-length or malformed value, or repeating a field allowed at most once, and
 MUST ignore an entry of an unrecognized type. Relay hints follow NIP-CASH's rules for every credential.
 
-For example, the connection pubkey `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the
-relay `wss://relay.example.com`, the secret `404142…5f` (the bytes `0x40`–`0x5f`), the label
-`Alice's cash counter` and the Hub identity
-`79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798` encode as one 255-character string,
-broken here only to fit the page:
+Types `5` and `6` are NIP-CASH's §Connection Signatures, with the text
+`cash-order:v1:<chain>:<connection_pubkey>:<hub_identity>:<relay_hash>:<label_hash>`. A signature that does
+not verify leaves the string decoded but unverified.
+
+For example, take the connection pubkey `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`,
+the relay `wss://relay.example.com`, the secret `404142…5f` (the bytes `0x40`–`0x5f`), the label
+`Alice's cash counter`, the Hub identity `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`
+(the x-only pubkey of the private key 1) and the chain `bitcoin`. The node signs:
+
+```
+cash-order:v1:bitcoin:f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9:
+79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798:
+1681e7f0cca2d68c5a2a57e369f815529f0127b2a118adfeafa2f0edadb4d3d5:
+4415045cc4156b398d107e30b03adc967e5cafa1008863146c4467e79f6ed76f
+```
+
+one string with no line breaks, whose signed-message digest is
+`0d819a660d269d960d5d898ca15a21fe79eab05c37c2949a973f4377d1180c28`. Signed with the private key 1, RFC 6979
+nonces and a low S, it gives recid 0, so the TLV `5` header is 31, and the TLV `5` value:
+
+```
+1fe2ee8cdfe9fbe579a7e945c946845b87f16ef8b617d13ce8e1e820c5b1405a80
+78611658df2f31462bf14858fda192228a782985f0b6eb84fd450704ff443745
+```
+
+The entries, in ascending type order, encode as one 376-character string, broken here only to fit the page:
 
 ```
 cashorder1qqs0jvy2qxf93scsfy6ylp0cn4fzndf3epzcxmuekzrqrugnhnsrd7gpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgzyp
 qyzsjrg3z5v36gf99yknzdfe84q52j2d2924jhtpv45k6ut4097qc5g9kxjcm9yaejqcmpwd5zqcm0w4h8getjqss8n0nx0muaewav2ksx99
-wwsu9swq5mlndjmn3gm9vl9q2mzmup0xq6f5hcn
+wwsu9swq5mlndjmn3gm9vl9q2mzmup0xq9gy079m5vml5lhete5l55tj2xs3dc0utwlzmp05fuars7sgx9k9q94qrcvyt93he0x9rzhu2gtr
+76ry3z3fuznp0skm4cfl29quz073phg5rqwcnfw33k76twqxha8f
 ```
 
 ### What It Allows
@@ -93,8 +120,9 @@ method on it with `NOT_IMPLEMENTED`.
 On NIP-CASH's private transport it is the `target` of `cash_order` items and of their `cash_lookup` items, and
 its secret signs their bill proofs. It is the target of nothing else.
 
-A retired Order connection refuses new `cash_order` items with `RESTRICTED`. Its Hub MUST still serve
-`cash_lookup` for the orders placed on it, and MUST still mint their payments.
+A retired Order connection refuses new `cash_order` items with `RESTRICTED`, and MUST answer `get_info` with
+`"cash_order": {}` from the moment it is retired. Its Hub MUST still serve `cash_lookup` for the orders
+placed on it, and MUST still mint their payments.
 
 ### Terms (`get_info`)
 
@@ -104,6 +132,9 @@ A retired Order connection refuses new `cash_order` items with `RESTRICTED`. Its
 {
   "methods": ["get_info"],
   "private_methods": ["cash_lookup", "cash_order"],
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "network": "mainnet",
+  "chain": "bitcoin",
   "cash_order": {
     "lightning": {
       "min_millis": 1000000,
@@ -131,6 +162,10 @@ A retired Order connection refuses new `cash_order` items with `RESTRICTED`. Its
 
 - A payment kind the Hub does not sell is absent. An object with neither kind means the Hub sells nothing on
   this connection.
+- `pubkey` MUST be the Hub identity, equal to the connection's type `4`: as 64 lowercase hex, RECOMMENDED,
+  or as the 66-hex compressed key. A client compares it in x-only form, as NIP-CASH §Connection Signatures
+  says.
+- `network` and `chain` are REQUIRED, as NIP-CASH §Network and Chain defines them.
 
 | field | in | meaning |
 |---|---|---|
@@ -441,8 +476,9 @@ notices.
 
 ## Client Behavior
 
-1. Decode the `cashorder1...` string, read the terms with `get_info`, and fetch and verify the Hub's
-   announcement against the Hub identity in the string, under NIP-CASH's rules.
+1. Decode the `cashorder1...` string and verify its type `5` (NIP-CASH §Connection Signatures). Read the
+   terms with `get_info`, and before ordering MUST check that its `pubkey` equals type `4` and its `chain`
+   equals type `6`. Fetch and verify the Hub's announcement against that Hub identity, under NIP-CASH's rules.
 2. Generate the cash secret (for a `cash` recipient), the buyer key, `notify` and `request_id`, and store
    them durably before sending.
 3. Send `cash_order`, show the invoice or the address with `pay_millis`, and tell the buyer that a different
@@ -475,6 +511,8 @@ again only with its user's confirmation, since a new order asks for a new paymen
   confirmation tiers set it.
 - **Custody.** An ordered bill is the Hub's liability like any bill. NIP-CASH forbids the Hub's owner to
   delete an ordered bill or let it expire; the Hub still decides when Lightning payouts can be made.
+- **Signed strings.** Type `5` shows which node issued a string; only the `get_info` check shows that the
+  string's connection reaches that node. A client checks both before ordering.
 - **Spam.** Placing an order is free. The open-order ceiling, the private transport's proof of work and the
   deletion of unpaid on-chain orders bound what spam can cost a Hub.
 
