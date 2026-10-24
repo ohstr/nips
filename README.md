@@ -7,7 +7,7 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP lists in its hea
 | NIP | Title | Kinds | Status |
 |-----|-------|-------|--------|
 | [NIP-AZ](./NIP-AZ.md) | AltZap: Cross-Chain Lightning Zaps | `9520`, `9521`, `9523` | `draft` |
-| [NIP-CASH](./NIP-CASH.md) | Cash Hub | `11190`, `23190`–`23193`, `23198` | `draft` |
+| [NIP-CASH](./NIP-CASH.md) | Cash Hub | `11190`, `11191`, `23187`, `23188`, `23190`–`23193`, `23198`, `31190`, `31191` | `draft` |
 | [NIP-CO](./NIP-CO.md) | Cash Order | `23189` | `draft` |
 | [NIP-CP](./NIP-CP.md) | Cash Pocket | `9525` | `draft` |
 | [NIP-CW](./NIP-CW.md) | Circle Wallet | `23199` | `draft` |

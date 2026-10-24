@@ -7,6 +7,7 @@ Cash Hub
 `draft` `optional` `nwc`
 
 **Depends on**: [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) (Encrypted Payloads), [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) (Nostr Wallet Connect); for proof of work, [NIP-11](https://github.com/nostr-protocol/nips/blob/master/11.md) (Relay Information Document), [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) (Proof of Work) and [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp)
+**For listings**: [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) (Event Deletion Request), [NIP-31](https://github.com/nostr-protocol/nips/blob/master/31.md) (Unknown Events), [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md) (Labeling), [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md) (Lists), [NIP-56](https://github.com/nostr-protocol/nips/blob/master/56.md) (Reporting) and [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) (Relay List Metadata); optionally [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) (Search)
 **Related**: [NIP-CO](./NIP-CO.md) (Cash Order), [NIP-CW](./NIP-CW.md) (Circle Wallet), [NIP-CZ](./NIP-CZ.md) (Cash Zaps), [NIP-IC](./NIP-IC.md) (Identity Connection)
 
 ## Abstract
@@ -30,7 +31,9 @@ bound only to a secret the caller holds: ordinary ecash, `cash` mode.
 | Bill methods | [Minting Cash](#minting-cash) · [Redeeming](#redeeming-a-slice-cash_redeem) · [On-chain](#redeeming-on-chain-cash_withdraw) · [Redeem Fee](#the-redeem-fee) · [Cash Status](#cash-status-cash_status) · [Transferring](#transferring-and-splitting-a-slice-cash_transfer) · [Spin-offs](#spinning-a-slice-off-into-a-dedicated-wallet) · [Consolidating](#consolidating-tokens-cash_consolidate) |
 | Reliability | [Lost Replies](#lost-replies) · [Cash-Mode Slices](#cash-mode-slices) |
 | Private transport | [The Private Transport](#the-private-transport) · [Announcement](#the-hub-announcement-kind-11190) · [Proof of Work](#proof-of-work) · [Envelopes](#envelopes) · [Item Proofs](#item-proofs-kind-23192) · [Bill Proofs](#bill-proofs-kind-23193) · [Responses](#responses-kind-23191) · [Serving an Envelope](#serving-an-envelope) |
-| Credentials | [The Cash Token](#the-cash-token-satscash1-) · [Mint Provenance](#mint-provenance) · [Cash Hub Connection](#the-cash-hub-connection-cashhub1) · [Scope Surface](#scope-surface) |
+| Credentials | [The Cash Token](#the-cash-token-satscash1-) · [Mint Provenance](#mint-provenance) · [Cash Hub Connection](#the-cash-hub-connection-cashhub1) · [Connection Signatures](#connection-signatures) · [Network and Chain](#network-and-chain) |
+| Discovery | [Listing Offers](#listing-offers) · [Offer Listing](#offer-listing-kind-31190) · [Hub Rules](#hub-rules) · [Wallet Rules](#wallet-rules) · [Fetching](#fetching-listings) |
+| Scope | [Scope Surface](#scope-surface) |
 | Lifecycle | [Lifecycle and Deletion](#lifecycle-and-deletion) · [Security](#security-considerations) · [Privacy](#privacy-considerations) |
 
 ## Non-Goals
@@ -46,10 +49,10 @@ particular (`cash` mode). Naming a recipient is never mandatory.
   calls a Cash Wallet, as its token's holders see it, a **bill**: a single-recipient bill is handed on
   much like physical cash, while a multi-recipient bill is shared access to a pool of several
   recipients' independent shares (see the next entries).
-- **Cash Wallet**: the NWC connection a cash token's pairing data decodes to — one connection string, shared
-  by every recipient it was created for; a wallet a split or other spin-off creates has exactly one
-  recipient, as §Transferring and Splitting a Slice describes. This is the custody/transport mechanism a
-  cash token rides on, not a separate end-user-facing concept.
+- **Cash Wallet**: the NWC connection a cash token names by its wallet pubkey, relays and secret — one token,
+  shared by every recipient it was created for; a wallet a split or other spin-off creates has exactly one
+  recipient, as §Transferring and Splitting a Slice describes. This is the custody/transport mechanism a cash
+  token rides on, not a separate end-user-facing concept.
 - **Cash Hub**: the wallet owner's own connection for minting cash tokens. It spends from its own
   balance to fund each one.
 - **recipient / slice**: one `(identity, amount)` pair inside a Cash Wallet. A wallet's total funding MUST
@@ -86,6 +89,13 @@ particular (`cash` mode). Naming a recipient is never mandatory.
   uses for Lightning-payable amounts (milli-satoshi for a Bitcoin-backed Cash Hub, and for any other
   energy-backed coin the milli-unit its implementation defines). Fixed per Cash Hub by which coin it mints
   for; never mixed within one wallet or one call.
+- **node identity**: the key of the Lightning node a Cash Hub runs on. It signs the Hub's bills, its
+  announcement, its connection strings and its listings.
+- **listing**: a kind-31190 event in which a Hub's node identity advertises one Order connection or circle;
+  it never sets terms.
+- **operator**: the Nostr account that runs a listed offer, when it is not the node's own; one node can host
+  several operators' Hubs.
+- **curator**: an account whose signals a user trusts beyond their follows (§Curators).
 
 `min_transfer_millis`, `redeem_fee_base` and `redeem_fee_ppm` are Hub-level defaults, stamped onto each
 slice at creation and thereafter fixed on that slice and inherited unchanged across splits.
@@ -132,6 +142,9 @@ Every refusal below uses a code from §Errors.
 | `23193` | ephemeral | the bill's connection secret | Bill proof, one per item |
 | `23187` | ephemeral | the Hub's node identity | Withdraw quote; never published |
 | `23188` | ephemeral | the Hub's node identity | Withdraw receipt; never published |
+| `31190` | addressable | the Hub's node identity | Offer listing |
+| `11191` | replaceable | the operator | The operator's offers, a NIP-51 standard list |
+| `31191` | addressable | any user | Recommendation of an offer |
 
 This document also verifies NIP-IC's kind `35522` attestations; it does not define them.
 
@@ -375,7 +388,6 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 ```json
 {
   "wallet_pubkey": "<hex>",
-  "pairing_uri": "nostr+walletconnect://...",
   "cash_token": "satscash1...",
   "expires_at": 1720000000,
   "recipients": [
@@ -388,9 +400,7 @@ single-recipient, never mixed with a `pubkey`/`connection_key` entry or a second
 `expires_at` is omitted entirely if this wallet never expires — see §Data Model and this section's own
 Processing Algorithm, step 5.
 
-`cash_token` packages the same pairing data as `pairing_uri` — the two MUST decode to an
-identical wallet pubkey, secret, and relay set. Either string alone is a fully sufficient connection
-credential.
+`cash_token` alone is the new bill's connection credential.
 
 **A Hub MUST NOT return an empty `cash_token`.** A Hub that cannot produce the token (an unobtainable mint
 signature, a TLV over its length limit) MUST fail the mint with `INTERNAL`, and MUST build the token, mint
@@ -448,7 +458,7 @@ On receiving `mint_cash`, the Hub MUST, in order:
    - This MUST be atomic: a failure at any point after this step MUST leave no partial state. Write the
      `request_id` record now, in the same atomic step, checking `expiration` again as it commits; a request
      that reaches this commit after its `expiration` is refused with `BAD_REQUEST`.
-8. Return the pairing connection string and the resolved recipient list.
+8. Return the cash token and the resolved recipient list.
 
 A request that fails any check above MUST be rejected before step 7. No partial wallet, slice, or
 transfer is ever observable from a rejected request.
@@ -676,9 +686,9 @@ the key that signs its kind-11190 announcement. Its tags, each once, in any orde
 | `sent_by`, `holds_until` | as above |
 
 - Numbers are unsigned decimal with no leading zeros; `created_at` carries no rule.
-- A client MUST check the quote's id, recomputed under NIP-01, its signature, and that its tags equal the
-  answer's fields, its `d` and `i` name the slice it asked about, its `address` the one it sent, and its
-  `sent_by` is no later than any `send_before`.
+- A client MUST check the quote's kind, 23187, its id, recomputed under NIP-01, its signature, and that its
+  tags equal the answer's fields, its `d` and `i` name the slice it asked about, its `address` the one it
+  sent, and its `sent_by` is no later than any `send_before`.
 - A quote fixes the price, not the Hub's funds: a `cash_withdraw` may still be refused with `RATE_LIMITED` or
   `INSUFFICIENT_BALANCE`.
 
@@ -804,9 +814,9 @@ these tags, each once and encoded as the quote's:
 | `request_hash` | the lowercase hex `sha256` of the ASCII bytes of `request_id` as sent |
 | `address`, `payout_millis`, `sent_by` | as in the quote |
 
-A client MUST check its id and signature as for a quote. The receipt proves what the Hub owes, never that it
-paid. A client that relies on `tx` checks that its id is `txid` and that output `vout` pays exactly
-`payout_millis` to `address`.
+A client MUST check that its kind is 23188, and its id and signature as for a quote. The receipt proves what
+the Hub owes, never that it paid. A client that relies on `tx` checks that its id is `txid` and that output
+`vout` pays exactly `payout_millis` to `address`.
 
 ### Payout States
 
@@ -1724,10 +1734,10 @@ not MUST store them.
 - Its bill proof is signed with that target's connection secret, as for any item.
 - For a `mint_cash` lookup the target is the Cash Hub connection's wallet pubkey (its TLV `0`), and the item
   and bill proofs are both signed with that connection's client key.
-- A client learns that Hub's identity, whose announcement carries the inbox, from the `pubkey` that `get_info`
-  returns on the Cash Hub connection — the node identity that signs the Hub's bills and its announcement,
-  compared in its x-only form — and fetches the announcement from that connection's relays. A Hub MUST return
-  that identity there.
+- A client learns that Hub's identity, whose announcement carries the inbox, from the Cash Hub connection's
+  TLV `4`, which `get_info`'s `pubkey` MUST equal as §Connection Signatures compares them — the node identity
+  that signs the Hub's bills and its announcement — and fetches the announcement from that connection's
+  relays.
 
 ```jsonc
 {"request_id": "<hex>", "deadline": 1720000060}
@@ -1796,7 +1806,7 @@ The Hub decides the status on its own clock, and `deadline` has passed when now 
     encrypted to the same keys as originally. Only the NIP-44 nonce differs.
   - A created bill already destroyed appears as its tombstone object, in the clear, in place of its token
     string (`cash_token`, `new_wallet_token` or `remainder_wallet_token`), never as a token; its
-    `*_wallet_pubkey` stays, and `pairing_uri` is omitted.
+    `*_wallet_pubkey` stays.
   - Past that bill's `retained_until`, while the record is still held, the object carries `status` and
     `reason` only.
 - **`pending`** — the call may still commit: the Hub has no record, and `deadline` has not passed. A
@@ -2000,7 +2010,8 @@ flowchart TB
 
 A Hub MUST serve `cash_status`, `cash_redeem`, `cash_withdraw_quote`, `cash_withdraw`, `cash_transfer` and
 `cash_consolidate` over the private transport, and MUST NOT serve them over kind 23194. A request for one of them on the
-standard transport MUST be refused with `NOT_IMPLEMENTED`. The same holds for `cash_lookup`.
+standard transport MUST be refused with `NOT_IMPLEMENTED`. A request for `cash_lookup`, NIP-CO's `cash_order` or
+NIP-CW's `create_circle_wallet` on the standard transport is refused the same way.
 
 Transport per method:
 
@@ -2009,12 +2020,11 @@ Transport per method:
 | `cash_status`, `cash_redeem`, `cash_withdraw_quote`, `cash_withdraw`, `cash_transfer`, `cash_consolidate`, `cash_lookup` | private ONLY |
 | `mint_cash` | standard ONLY (see below) |
 | `cash_order` | private ONLY |
-| `create_circle_wallet` | either |
+| `create_circle_wallet` | private ONLY |
 | `get_balance`, `pay_invoice`, `get_info`, … | standard, unchanged |
 
 `mint_cash` stays on the standard transport and MUST NOT be offered on the private one; its `cash_lookup`
-travels on the private transport like the others. `create_circle_wallet` acts on a Hub rather than a bill,
-so either transport is acceptable.
+travels on the private transport like the others.
 
 There is **no fallback**. A bill whose items cannot be built or served is an error, not a reroute to the
 standard transport.
@@ -2057,7 +2067,8 @@ returns exactly one event and no `d` tag is needed.
 against the announced values. This document specifies **no default for any limit**.
 
 A client MUST verify the announcement's signature against the identity it already trusts for that Hub, and
-MUST reject one signed by anyone else.
+MUST reject one signed by anyone else. That identity also signs the Hub's connection strings and listings,
+as §Connection Signatures and §Listing Offers define.
 
 **A client MUST prefer the newest announcement it can see, and MUST NOT adopt one older than
 the one it already holds.**
@@ -2293,14 +2304,16 @@ that does not verify. A bearer item has neither. Possession of the bill is prove
 
 ### Bill Proofs (kind 23193)
 
-Every item MUST also carry a **bill proof**, signed with the bill's own **connection secret**
-(the `secret` inside its token). It answers a different question from the
-item proof:
+Every item MUST also carry a **bill proof**, signed with the bill's own **connection secret** (the `secret`
+inside its token). It answers a different question from the item proof:
 
 | proof | question | signed with |
 |---|---|---|
 | kind 23192 | which slice is mine? | the recipient's identity key, or none for a bearer item |
 | kind 23193 | do I hold this bill at all? | the bill's connection secret |
+
+For an item whose target is a Circle Wallet Hub connection, that secret is the secret of any live connection
+the Hub issued with that pubkey (NIP-CW); a revoked one verifies no bill proof.
 
 It binds exactly the same six tags as kind 23192, with the same encodings, so each MUST be unusable anywhere
 else. A Hub MUST hold its `created_at` to the window of §Freshness.
@@ -2501,8 +2514,8 @@ The rules above, by what a client sees:
 
 A Hub MUST serve over this transport only the methods that operate on a **bill** — `cash_status`,
 `cash_redeem`, `cash_withdraw_quote`, `cash_withdraw`, `cash_transfer` and `cash_consolidate` — plus `cash_lookup`, which reads the outcome of one,
-NIP-CW's `create_circle_wallet`, which a Hub MAY also serve here, and NIP-CO's `cash_order`, which a Hub that
-sells cash serves here only.
+NIP-CW's `create_circle_wallet`, which a Circle Wallet Hub serves here only, and NIP-CO's `cash_order`, which a
+Hub that sells cash serves here only.
 
 - `cash_lookup` and `cash_order` are the methods whose target need not be a live bill: `cash_order` names an
   Order connection, and `cash_lookup` names the original call's target, which may be a bill the Hub has
@@ -2542,7 +2555,8 @@ Then the Hub runs each item in array order, each as if it had arrived alone, so 
   when present, an object.
 - **I2.** Omit an item whose `target` the Hub does not hold: neither a live bill, nor a bill it destroyed
   whose retention window is still open, nor, for `cash_lookup`, one of the targets §Looking Up a Call names,
-  nor, for `cash_order`, one of its Order connections, nor, for a `cash_withdraw` cancel request, a bill
+  nor, for `cash_order`, one of its Order connections, nor, for `create_circle_wallet`, one of its Circle
+  Wallet Hub connections, nor, for a `cash_withdraw` cancel request, a bill
   whose `cash_withdraw` record the Hub keeps.
 - **I3.** Omit an item whose `bill_proof` is absent or does not verify.
 - **I4.** Answer a `cash_status`, `cash_redeem`, `cash_withdraw_quote`, `cash_withdraw` (other than a cancel
@@ -2616,9 +2630,10 @@ connection.
 
 ## The Cash Token (`satscash1...`, ...)
 
-A cash token is the same pairing data as `pairing_uri`, a plain NWC `nostr+walletconnect://` string, plus
-the bill's mint provenance, wrapped in a NIP-19-style bech32 identifier: `satscash1...` for a Bitcoin-backed Cash Wallet, and a prefix of its
-own for any other coin this format is extended to.
+A cash token is a bill's connection credential: a NIP-19-style bech32 string carrying the bill's wallet
+pubkey, relays and connection secret, and its mint provenance, as §Wire Format defines. Its prefix is
+`satscash1...` for a Bitcoin-backed Cash Wallet, and a prefix of its own for any other coin this format is
+extended to.
 
 **The token doesn't need to be kept secret.** `cash_redeem` and `cash_transfer` both check the caller
 against the slice's registered identity, or for a cash-mode slice against its cash secret, which the token
@@ -2627,7 +2642,7 @@ does not carry. Neither trusts mere possession of the string.
 ### Wire Format
 
 A cash-token-family string is a NIP-19-style bech32 string: a human-readable prefix (`satscash`, ...), the
-digit `1`, then TLV-encoded pairing data converted from 8-bit to 5-bit groups exactly as NIP-19 does for
+digit `1`, then TLV-encoded entries converted from 8-bit to 5-bit groups exactly as NIP-19 does for
 `nprofile`/`nevent`/`naddr`. Implementations MUST NOT enforce BIP-173's 90-character total-length limit.
 
 Each TLV entry is `<type: 1 byte><length: 1 byte><value: length bytes>`, length capped at 255 by the
@@ -2642,7 +2657,7 @@ one-byte length field. The entries:
 | `5` | mint signature | 65 raw bytes — a compact recoverable ECDSA signature: 1 header byte, 32-byte R, 32-byte S | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `6` | attested amount | 8 bytes, big-endian millis — the value the mint signature commits to | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 | `7` | hub group | 4 raw bytes — the issuing Cash Hub's fingerprint | zero or one, OPTIONAL |
-| `8` | signature scheme | 1 byte: `1` = `satscash-mint:v2`, `2` = `satscash-zap:v1` — what the mint signature signs | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
+| `8` | signature scheme | 1 byte: `1` = `cash-mint:v1`, `2` = `cash-zap:v1` — what the mint signature signs | exactly one, REQUIRED of an encoder; a decoder tolerates it missing or malformed (below) |
 
 An encoder MUST emit TLV entries in ascending type order, the type-`1` entries in the order of the relay
 hints they carry, so a token rebuilt later is byte-identical to the one first issued; a
@@ -2658,9 +2673,9 @@ Types `5` and `6` are a matched pair: a token carrying one MUST carry the other.
 without the other MUST treat the token as carrying no valid provenance — never as a hard
 decode failure.
 
-Type `8` belongs to the same provenance: it says which payload the signature covers. A token without it is a
-legacy token. A wrong-length, repeated or unknown-valued type `8` MUST be treated as no
-valid provenance, exactly like a malformed `5`/`6`.
+Type `8` belongs to the same provenance: it says which payload the signature covers. A token without it,
+or with a wrong-length, repeated or unknown-valued one, MUST be treated as carrying no valid provenance,
+exactly like a malformed `5`/`6`.
 
 A decoder MUST reject a token missing either required field (`0` or `2`), carrying a wrong-length value for
 any fixed-length field above **except the provenance fields `5`, `6` and `8` and the hub group `7`**, or
@@ -2670,8 +2685,8 @@ A decoder meeting a wrong-length or repeated hub group (type `7`) MUST drop it a
 intact, never fail the decode. An ENCODER, by contrast, MUST refuse to produce a wrong-length one. Truncated
 or malformed TLV data MUST also be rejected rather than read out of bounds.
 
-A decoder MUST treat a wrong-length, duplicated or unpaired `5`/`6`, or a malformed `8`, as **no valid
-provenance** and decode the rest normally, exactly as §Mint Provenance requires.
+A decoder MUST treat a wrong-length, duplicated or unpaired `5`/`6`, or a missing or malformed `8`, as **no
+valid provenance** and decode the rest normally, exactly as §Mint Provenance requires.
 
 What a decoder does with each fault, by the rules above:
 
@@ -2682,10 +2697,12 @@ What a decoder does with each fault, by the rules above:
 | a repeated field the table allows at most once, other than those | rejects the token |
 | truncated or malformed TLV data | rejects the token |
 | `5`/`6` wrong-length, duplicated or unpaired | no valid provenance; decodes the rest |
-| `8` wrong-length, repeated or unknown-valued | no valid provenance; decodes the rest |
-| `8` absent | a legacy token |
+| `8` absent, wrong-length, repeated or unknown-valued | no valid provenance; decodes the rest |
 | `7` wrong-length or repeated | drops it; the token stays intact |
 | an unrecognized type | ignores the entry |
+
+A client SHOULD render every bech32 credential this document, NIP-CO and NIP-CW define in uppercase in a QR
+code, which then fits the code's alphanumeric mode. A decoder lowercases the string first.
 
 ### Relay Hints Are Mandatory
 
@@ -2781,9 +2798,8 @@ do so before committing any funds. No request parameter opts in or out.
 
   | TLV `8` | payload |
   |---|---|
-  | `1` | `satscash-mint:v2:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>` |
-  | `2` | `satscash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>:<recipient>:<sender>:<target_hash>:<issued_at>:<expires_at>` |
-  | absent | `lokicash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>` (legacy) |
+  | `1` | `cash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>` |
+  | `2` | `cash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>:<recipient>:<sender>:<target_hash>:<issued_at>:<expires_at>` |
 
   `<hrp>` is the token's HRP in lowercase — bech32 is case-insensitive, and a decoder lowercases the whole
   string before decoding — `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
@@ -2791,9 +2807,8 @@ do so before committing any funds. No request parameter opts in or out.
 
   - Every integer in a payload is unsigned decimal ASCII with no leading zeros (`0` for zero); every hex value
     is lowercase.
-  - The scheme labels `satscash-mint:v2`, `satscash-zap:v1` and the legacy `lokicash-mint:v1` are fixed ASCII
-    constants, the same for every HRP: the token's own HRP appears only as `<hrp>`, and a signer or verifier
-    MUST NOT substitute it into the label.
+  - The scheme labels `cash-mint:v1` and `cash-zap:v1` are fixed ASCII constants, the same for every HRP: the
+    token's own HRP appears only as `<hrp>`, and a signer or verifier MUST NOT substitute it into the label.
 
   Each wallet — freshly minted, split-off, or consolidated — carries its own signature over its own pubkey
   and its own fixed amount, independent of whether the wallet it split from or was merged out of had one.
@@ -2807,7 +2822,7 @@ do so before committing any funds. No request parameter opts in or out.
 
   An encoder MUST sign over exactly the TLV `1` entries it encodes. A verifier hashes every TLV `1` entry
   exactly as encoded, including one a client would skip when dialing. A client choosing among copies of one
-  bill SHOULD use only a copy whose provenance verifies; a legacy token's hints are not signed.
+  bill SHOULD use only a copy whose provenance verifies.
 
   A Hub that issues a bill's token again with different relay hints signs it afresh; a token issued earlier
   keeps verifying.
@@ -2832,13 +2847,10 @@ do so before committing any funds. No request parameter opts in or out.
     zap bill SHOULD keep the Cash Zap's fields with the token for as long as it holds the bill; a split or
     consolidate reissues the value as a scheme-`1` bill that needs them no longer.
 
-  Legacy tokens carry no type `8` and are signed over the legacy payload above, without a relay hash. A
-  verifier checks them against it; an encoder MUST NOT produce one.
-
   Example, scheme `1`: a `satscash` bill of 21000 millis with relay hints `wss://relay.example.com` and
   `wss://backup.example.net`, and the connection secret `000102…1f` (the 32 bytes `0x00`–`0x1f`), has
   `relay_hash` `487f70e79899e5f04dabdeaa62db4654d0d005db40496df0930c5e12e8d2775c`, and signs
-  `satscash-mint:v2:satscash:<wallet_pubkey_hex>:21000:487f70e79899e5f04dabdeaa62db4654d0d005db40496df0930c5e12e8d2775c`.
+  `cash-mint:v1:satscash:<wallet_pubkey_hex>:21000:487f70e79899e5f04dabdeaa62db4654d0d005db40496df0930c5e12e8d2775c`.
 - **What is actually hashed.** The signature does not cover the payload bytes directly. A minting node
   signs through its Lightning implementation's own signed-message convention, which wraps the payload
   before hashing:
@@ -2919,7 +2931,7 @@ A complete scheme-`1` token, so an encoder and a decoder can check themselves en
 | minter's private key | 32 bytes of `0x01`, whose compressed pubkey is `031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f` |
 
 The signed payload is the scheme-`1` example above with this wallet pubkey, its signed-message digest is
-`f602d18ce44b4f229a202eb93b3e21978b2b98ffe3354fa56e2740195a38ca25`, and a signer using RFC 6979 nonces and a
+`278d47f6702494ccb7127d9ff80ed049ac324ac6bb30287a20a11c54520cdf23`, and a signer using RFC 6979 nonces and a
 low S produces recid 1, so the TLV `5` header is 32. The TLV stream, in ascending type order, and the token:
 
 ```
@@ -2928,16 +2940,16 @@ low S produces recid 1, so the TLV `5` header is 32. The TLV stream, in ascendin
 01187773733a2f2f6261636b75702e6578616d706c652e6e6574
 0220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
 030101
-0541202c8ab082b53d0e1acd08e47333efd787fe658b2d51e46192f00c88aa57285f15
-    1631be5a5e4355a7dd896685a5a0bbc16026d1990e6e7586f3a3d31493f1644f
+054120f2193bb16f948c87d4bd2d90594ff17eae4064d734f487472f2a8e95ed661fa7
+    41ab3b154d119c1af8cdaba25710c96748ae5cf179dfc7bcb0254423d4d4b4fa
 06080000000000005208
 0704ed79e8ff
 080101
 
 satscash1qqsvvprlj3q76ltdxpz5qm54cp7dshrh3e9cemeu5746czdet3cfaegpzamhxue69uhhyetvv9ujuetcv9khqmr99e3
 k7mgprpmhxue69uhkyctrdd6hqtn90psk6urvv5hxuet5qgsqqqgzqvzq2ps8pqys5zcvp58q7yq3zgf3g9gkzuvpjxsmrsw3u8c
-rqyqs2sfq9j9tpq44858p4nggu3en8m7hsllxtzed28jxryhspjy254egtu23vvd7tf0yx4d8mkykdpd95zauzcpx6xvsumn4sme
-685c5j0ckgncxpqqqqqqqqqq9yzq8qnkhn68lpqqszarx23y
+rqyqs2sfq7gvnhvt0jjxg049a9kg9jnl306hyqexhxn6gw3e0928ftmtxr7n5r2emz4x3r8q6lrx6hgjhzrykwj9wtnchnh78hjc
+z23pr6n2tf7sxpqqqqqqqqqq9yzq8qnkhn68lpqqszp39gk7
 ```
 
 The token is one 348-character string, broken here only to fit the page. A verifier recovers the minter's
@@ -2960,7 +2972,7 @@ A scheme-`2` payload for a zap of an `a` coordinate:
 With these, the signed payload is:
 
 ```
-satscash-zap:v1:satscash:c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5:5000:
+cash-zap:v1:satscash:c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5:5000:
 487f70e79899e5f04dabdeaa62db4654d0d005db40496df0930c5e12e8d2775c:
 pubkey/2f8bde4d1a07209355b4a7250a5c5128e88b84bddc619ab7cba8d569b240efe4:
 pubkey/fff97bd5755eeea420453a14355235d382f6472f8568a18b2f057a1460297556:
@@ -2971,9 +2983,9 @@ again one string with no line breaks.
 
 ## The Cash Hub Connection (`cashhub1...`)
 
-A Cash Hub's own connection — the one its owner calls `mint_cash` over — is encoded as `cashhub1...`: the
-same pairing data as an ordinary `nostr+walletconnect://` string, wrapped in a NIP-19-style bech32
-identifier. Wire format: the same TLV encoding as §The Cash Token's Wire Format (8-bit to 5-bit grouping,
+A Cash Hub's own connection — the one its owner calls `mint_cash` over — is encoded as `cashhub1...`, a
+NIP-19-style bech32 string carrying the Hub's pubkey, relays, connection secret, label and signature. Wire
+format: the same TLV encoding as §The Cash Token's Wire Format (8-bit to 5-bit grouping,
 `<type: 1 byte><length: 1 byte><value: length bytes>` entries, unrecognized types ignored, entries emitted
 in the same order), with these entries:
 
@@ -2983,48 +2995,494 @@ in the same order), with these entries:
 | `1` | relay | a relay URL, ASCII | one or more, order preserved; an encoder MUST NOT emit an empty one |
 | `2` | secret | 32 raw bytes — the NWC connection secret | exactly one, REQUIRED |
 | `3` | label | a human-readable name, UTF-8 | zero or one, OPTIONAL |
+| `4` | Hub identity | 32 raw bytes, the x-only node identity that signs the Hub's announcement and bills | exactly one, REQUIRED |
+| `5` | connection signature | 65 raw bytes, the connection signature §Connection Signatures defines | exactly one, REQUIRED |
+| `6` | chain | the chain's name, as §Connection Signatures defines it, e.g. `bitcoin` | exactly one, REQUIRED |
 
 Types `0`–`2` carry the identical meaning §The Cash Token's own table gives them, including its relay
-cardinality: at least one non-empty hint, and none empty from an encoder. Type
-`3` here is unrelated to a cash token's type `3`. A decoder MUST ignore any TLV entry of an unrecognized
-type rather than rejecting the string, per the same forward-compatibility rule §The Cash Token's Wire Format
-establishes.
+cardinality: at least one non-empty hint, and none empty from an encoder. Types `3`–`6` here are not a cash
+token's types `3`–`6`, though type `5` uses the same signature format. A decoder MUST ignore any TLV entry of
+an unrecognized type rather than rejecting the string, per the same forward-compatibility rule §The Cash
+Token's Wire Format establishes.
 
 `label` (type `3`) is a display name for the human on the other end of a share, e.g. "Alice's Cash Hub".
 
-A decoder MUST reject a `cashhub1...` string missing either required field (`0` or `2`), carrying a
-wrong-length value for a fixed-length field, or repeating a field its table allows at most once — the same
-class of malformed-input rule §The Cash Token's Wire Format applies to `satscash1...`.
+A decoder MUST reject a `cashhub1...` string missing a required field (`0`, `2`, `4`, `5` or `6`), carrying a
+wrong-length or malformed value, or repeating a field its table allows at most once — the same class of
+malformed-input rule §The Cash Token's Wire Format applies to `satscash1...`.
 
-For example, the Hub pubkey `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the one relay
-hint `wss://relay.example.com`, the secret `202122…3f` (the bytes `0x20`–`0x3f`) and the label
-`Alice's Cash Hub`, emitted in ascending type order, encode as one 192-character string, broken here only to
-fit the page:
+For example, take the Hub pubkey `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the one
+relay hint `wss://relay.example.com`, the secret `202122…3f` (the bytes `0x20`–`0x3f`), the label
+`Alice's Cash Hub`, the Hub identity `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798` (the
+x-only pubkey of the private key 1) and the chain `bitcoin`. The node signs:
 
 ```
-cashhub1qqs0jvy2qxf93scsfy6ylp0cn4fzndf3epzcxmuekzrqrugnhnsrd7gpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgzyq
-szzg3rysjjvfeg9y4zktpd9chnqvfjxv6r2d3h8qun5weu85lr7qcsg9kxjcm9yaejqsmpwd5zqjr4vgn9jyez
+cash-hub:v1:bitcoin:f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9:
+79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798:
+16c4c4164c27d448128dabf8052dddd5b30c61904b7b7c1b85e1486c37b7a500:
+b5d2b9a2a7f9519d7367521d3a125f882cc34bbcc6f2844aed18533f5f724294
 ```
 
-This wire format is informative for connection portability and recognition, not a new authorization
-mechanism: everything §Security Considerations and §Scope Surface say about the underlying NWC connection
-apply unchanged to a `cashhub1...`-encoded one. Decoding one and dialing it grants exactly the access the
-connection's own scope already carries — nothing more, nothing less.
+one string with no line breaks, whose signed-message digest is
+`c4976825128c4be05a7c553d29852f9611667832eb6d2c096417cd7a6c8817dd`. Signed with the private key 1, RFC 6979
+nonces and a low S, it gives recid 0, so the TLV `5` header is 31, and the TLV `5` value:
 
-**Recommended presentation.** An implementation SHOULD present a Cash Hub connection to its owner as
-`cashhub1...` by default — including in any QR code offered for scanning — rather than the raw
-`nostr+walletconnect://` string, since the bech32 form is instantly recognizable and copy-paste-safe in a way
-the URI form isn't (the same rationale §The Cash Token already gives for `satscash1...`).
+```
+1f7a091bf7eb8691eed90b0c53803747fdb5606c66ee2d6fcf45620297ae385488
+57d262e8b1e88ffa82f68ef26d335e674f0ee680564300deb48e4842b6b41301
+```
 
-- For a tool that doesn't yet decode this format, the implementation SHOULD offer an explicit way to reveal
-  the equivalent `nostr+walletconnect://` URI instead — e.g. a toggle beneath the primary QR code/string
-  labeled "Show as classic NWC URI," flipping to "Show as `cashhub1...`" once switched — never silently, so
-  whoever copies whichever form is on screen at the time always knows which one they're sharing.
+The entries, in ascending type order, encode as one 368-character string, broken here only to fit the page.
+The examples in this document, NIP-CO and NIP-CW reuse keys only for brevity; each connection has its own
+pubkey.
+
+```
+cashhub1qqs0jvy2qxf93scsfy6ylp0cn4fzndf3epzcxmuekzrqrugnhnsrd7gpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgzyqsz
+zg3rysjjvfeg9y4zktpd9chnqvfjxv6r2d3h8qun5weu85lr7qcsg9kxjcm9yaejqsmpwd5zqjr4vgzzq7d7vel0nh9m4326qc54e6rskpcz
+n07dktww9rv4nu5ptvt0s9ucq4q377sfr0m7hp53amvskrznsqm50ld4vpkxdm3ddl852cszj7hrs4yg2lfx9693az8l4qhk3mex6v67va8s
+ae5q2epsph453eyy9d45zvqsvpmzd96xxmmfdcvlu0w2
+```
+
+This wire format is not a new authorization mechanism: everything §Security Considerations and §Scope
+Surface say about the Cash Hub connection applies to it unchanged. Decoding one and dialing it grants exactly
+the access the connection's own scope already carries — nothing more, nothing less.
+
+**Presentation.** An implementation SHOULD present a Cash Hub connection to its owner only as `cashhub1...`,
+including in any QR code offered for scanning.
+
+### Connection Signatures
+
+A Hub signs every connection string it issues with its node identity, so a client checks the string
+offline, when it is scanned or pasted. This section defines the signature once for `cashhub1...`, NIP-CO's
+`cashorder1...` and NIP-CW's `circlehub1...`, which all carry these entries:
+
+| Type | Name | Value |
+|---|---|---|
+| `4` | Hub identity | 32 raw bytes, the x-only node identity |
+| `5` | connection signature | 65 raw bytes, a compact recoverable signature in the format §Mint Provenance defines for a bill's TLV `5` |
+| `6` | chain | 1 to 32 bytes of lowercase ASCII letters, digits and `-`: the chain's name as `get_info` reports it, e.g. `bitcoin` |
+
+All three are REQUIRED, of an encoder and of a decoder. A decoder MUST reject a string that is missing one of
+them, repeats one, or carries a malformed one: a `4` or `5` of the wrong length, or a `6` that is empty or
+not of the form above.
+
+**What is signed.** An ASCII text, its label fixed by the string's HRP:
+
+| HRP | signed text |
+|---|---|
+| `cashhub` | `cash-hub:v1:<chain>:<connection_pubkey>:<hub_identity>:<relay_hash>:<label_hash>` |
+| `cashorder` | `cash-order:v1:<chain>:<connection_pubkey>:<hub_identity>:<relay_hash>:<label_hash>` |
+| `circlehub` | `circle-hub:v1:<chain>:<connection_pubkey>:<hub_identity>:<relay_hash>:<label_hash>` |
+
+- `<chain>` is TLV `6`, byte for byte.
+- `<connection_pubkey>` is TLV `0` and `<hub_identity>` TLV `4`, each as 64 lowercase hex characters.
+- `<relay_hash>` is computed from TLV `1` and `2` exactly as §Mint Provenance computes a bill's.
+- `<label_hash>` is the lowercase hex `sha256` of TLV `3`'s bytes as encoded. With no TLV `3` it is the empty
+  string, so the text ends with `:`.
+- An encoder MUST NOT emit an empty TLV `3`; a decoder treats an empty one as a label of zero bytes, hashed as
+  `sha256("")`.
+- The labels are fixed ASCII constants. TLV `6` is bound twice: as `<chain>`, and through the prefix below.
+- The text covers exactly these fields. A type above `6` is outside the signature, and a client MUST NOT let
+  one change where it connects or whom it trusts. A future type that must be signed needs a new label version.
+
+**How it is signed.** Exactly as a bill's mint signature: through the node's signed-message convention,
+`digest = SHA256(SHA256(<prefix> ‖ text))`, with the prefix that §Mint Provenance's table gives for the chain
+TLV `6` names, and a header byte of `31 + recid`.
+
+- An encoder MUST sign exactly the TLV `0`–`4` and `6` entries it encodes. A Hub that cannot sign MUST NOT
+  issue the string.
+- No signed text names the network: §Mint Provenance's rule that a Hub MUST NOT reuse its node identity across
+  networks applies to these strings too.
+
+A client verifies the string when it decodes it:
+
+1. rebuild the text for the string's HRP from TLV `6` as `<chain>` and TLV `0`–`4`;
+2. pick the signed-message prefix for the chain in TLV `6`;
+3. hash the prefix and the text twice with SHA-256;
+4. recover the signer from TLV `5`, its header read as for a bill;
+5. compare the recovered key's x-only part with TLV `4`.
+
+| what the client finds | the string is |
+|---|---|
+| every step passes | signed by TLV `4` |
+| a chain with no known prefix | unverified |
+| a signature that does not recover to TLV `4` over the rebuilt text, as when TLV `6` was changed | unverified |
+
+- An unverified string still decodes, and a client SHOULD tell its user that the Hub is not confirmed.
+- For an unverified string, the online check below shows only what the TLV `0` key claims. A client MUST keep
+  showing that the Hub is not confirmed, and MUST NOT show TLV `3` or TLV `4` as verified.
+- An unverified string is never valid in a listing, and earns no badge or recommendation.
+
+**Online check.** Before it mints, orders or joins over one of these connections, signed or not, a client
+MUST call `get_info` on it and check that:
+
+- the Hub identity it returns equals TLV `4`: `pubkey` on a Cash Hub or Order connection,
+  `circle_wallet.identity` on a Circle Wallet Hub connection;
+- its `chain` equals TLV `6`.
+
+| rule | |
+|---|---|
+| the Hub's form | 64 lowercase hex, the x-only key, is RECOMMENDED; a Hub MAY return the 66-hex compressed key |
+| the comparison | lowercase the value; of a 66-hex value starting `02` or `03`, drop those two characters; compare the 64 left with TLV `4` as hex |
+| which answer counts | only a `get_info` reply authored by TLV `0` that references the client's request; any other is no answer |
+| how often | at least once per connection, and again on any `get_info` the client reads; it MAY cache a pass for the session |
+
+A client MUST NOT use a connection that fails either check. The signature proves who issued the string; with
+it, the online check proves that TLV `0`–`2` reach that Hub.
+
+### Network and Chain
+
+Every connection a Cash Hub serves MUST answer `get_info` with `network` and `chain`: its Cash Hub connection,
+each bill's connection, NIP-CO's Order connections, and NIP-CW's Circle Wallet Hub connections and Circle
+Wallets.
+
+| field | value |
+|---|---|
+| `network` | NIP-47's field, mandatory here: `mainnet`, `testnet`, `signet` or `regtest` |
+| `chain` | the chain's name, e.g. `bitcoin`, as NIP-CP and NIP-CZ name it |
+
+A client SHOULD tell its user when `network` is not `mainnet`.
+
+## Listing Offers
+
+A Hub MAY list its Order connections (NIP-CO) and its circles (NIP-CW) on relays, so that wallets can show
+them to people who have no link. A listing advertises; it never decides. The terms always come from
+`get_info` on the listed connection, read when the user picks the offer.
+
+| Kind | Range | Signed by | Purpose |
+|---|---|---|---|
+| `31190` | addressable | the Hub's node identity | Offer listing |
+| `11191` | replaceable | the operator | The operator's offers, a NIP-51 standard list |
+| `31191` | addressable | any user | Recommendation of an offer |
+| `1984` | regular | any user | Report, as NIP-56 defines it |
+
+```mermaid
+sequenceDiagram
+    participant H as Hub (node identity)
+    participant R as Relays
+    participant W as Wallet
+    H->>R: 31190 listing with a signed cashorder1 or circlehub1
+    W->>R: listings, recommendations, reports, operators' 11191
+    Note over W: checks the listing and the string offline
+    W->>H: get_info on the listed connection, at tap
+    H-->>W: terms, identity, chain, network
+    Note over W: online check, then shows the terms
+    W->>H: cash_order or create_circle_wallet (private transport)
+```
+
+### Offer Listing (kind 31190)
+
+A listing for NIP-CO's example Order connection:
+
+```jsonc
+{
+  "kind": 31190,
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1792713600,
+  "content": "Cash for the Lisbon meetup. Lightning or on-chain, paid out within the hour.",
+  "tags": [
+    ["d", "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"],
+    ["t", "cash_order"],
+    ["t", "lightning"],
+    ["t", "onchain"],
+    ["n", "bitcoin"],
+    ["network", "mainnet"],
+    ["connection", "cashorder1..."],   // NIP-CO's signed example
+    ["title", "Alice's cash counter"],
+    ["image", "https://example.com/counter.png"],
+    ["p", "<operator pubkey>", "wss://relay.example.com"],
+    ["status", "open"],
+    ["expiration", "1795305600"],
+    ["hint", "lightning", "1000000", "1000000000", "1000", "1000"],
+    ["L", "ISO-639-1"],
+    ["l", "pt", "ISO-639-1"],
+    ["l", "en", "ISO-639-1"],
+    ["g", "eyc"],
+    ["alt", "Cash offer: Alice's cash counter"]
+  ]
+}
+```
+
+| tag | count | value |
+|---|---|---|
+| `d` | exactly 1 | the connection's TLV `0`, as 64 lowercase hex: one listing per Order connection or per circle |
+| `t`, type | exactly 1 | `cash_order` or `circle_wallet` |
+| `t`, summary | 0 or more | `lightning`, `onchain` for `cash_order`; `allowlist`, `follow_set` for `circle_wallet`; for display and filtering only, never terms |
+| `n` | exactly 1 | the chain, as `get_info` names it |
+| `network` | exactly 1 | as `get_info` names it |
+| `connection` | exactly 1 | the signed `cashorder1...` (`cash_order`) or `circlehub1...` (`circle_wallet`) |
+| `title` | 0 or 1 | a display name, plain text |
+| `image` | 0 or 1 | an `https` URL |
+| `p` | 0 or 1 | the operator's pubkey, with a relay hint |
+| `status` | exactly 1 | `open`, `paused` or `closed` |
+| `expiration` | exactly 1 | NIP-40, an unsigned decimal integer |
+| `hint` | 0 or 1 per payment kind | `cash_order` only: the payment kind, then `min_millis`, `max_millis`, `fee_base` and `fee_ppm` as NIP-CO's terms name them |
+| `a` | 0 or 1 | `follow_set` circles only: the follow set's address, `30000:<provider pubkey>:<d>` |
+| `L`, `l` | 0 or more | NIP-32 language labels, ISO-639-1 |
+| `g` | 0 or more | coarse geohash prefixes, none longer than 5 characters |
+| `alt` | 0 or 1 | NIP-31 |
+
+- `content` is the description, plain text.
+- A listing breaking a count above, or with an `expiration` that is not an integer, is invalid as a whole.
+- A wallet ignores a listing whose type `t` is neither or both values, and ignores other summary values.
+- A wallet ignores a `hint` or `a` tag the listing's type does not take, a `hint` of an unknown payment kind
+  and a `g` longer than 5 characters.
+- `hint` is shown as listed, never as terms.
+- A listing without `p` names no operator, and a wallet shows none.
+
+### The Operator's Offers (kind 11191)
+
+The person who runs an offer, when it is not the node's own account, names each offer they run:
+
+```jsonc
+{
+  "kind": 11191,
+  "pubkey": "<operator pubkey>",
+  "content": "",
+  "tags": [
+    ["a", "31190:79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798:f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9", "wss://relay.example.com"],
+    ["p", "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", "wss://relay.example.com"],
+    ["alt", "Cash offers run by this account"]
+  ]
+}
+```
+
+| tag | value |
+|---|---|
+| `a` | one per offer the operator runs, `31190:<node identity>:<d>`, with a relay hint |
+| `p` | OPTIONAL: a node the operator runs, with a relay hint; never verifies an offer |
+| `alt` | NIP-31 |
+
+- It is a NIP-51 standard list: only the newest version counts. Its `content` is empty, and a wallet ignores
+  private items.
+- An offer's operator is **verified** only when the listing's `p` names this author and the author's newest
+  11191 carries an `a` equal to the listing's address. Either side alone proves nothing.
+- A wallet SHOULD fetch an operator's 11191 from several relays, the operator's NIP-65 write relays among
+  them, and keeps only the newest.
+- A node can host several operators' Hubs, so naming a node verifies none of its offers.
+- A rotated Order connection is a new address, which the operator names again.
+- An operator's client SHOULD merge the newest 11191 before republishing it.
+- It SHOULD warn before the first publish that the list links the operator's account to the node.
+
+### Recommendations (kind 31191)
+
+A recommendation vouches for one or more offers of one node:
+
+```jsonc
+{
+  "kind": 31191,
+  "content": "fast payouts, used it for months",
+  "tags": [
+    ["d", "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"],
+    ["k", "31190"],
+    ["p", "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", "wss://relay.example.com"],
+    ["a", "31190:79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798:f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9", "wss://relay.example.com"],
+    ["alt", "Recommendation of a cash offer"]
+  ]
+}
+```
+
+| tag | value |
+|---|---|
+| `d` | the node identity: one recommendation per user per node |
+| `k` | `31190` |
+| `p` | the node identity, with a relay hint |
+| `a` | one or more offers vouched for, each with a relay hint |
+| `alt` | NIP-31 |
+
+- `content` is OPTIONAL, short plain text.
+- A wallet ignores a recommendation whose `p` differs from `d`, and any `a` whose node identity differs from
+  `d`.
+- A wallet credits a recommendation to the offers its `a` tags name, and to any other offer of that node
+  whose verified operator equals a named offer's verified operator. It credits no other offer of the node.
+- A user edits a recommendation by replacing it, and withdraws it with a NIP-09 deletion of its address.
+
+### Reports (kind 1984)
+
+A report is a NIP-56 event about the node identity:
+
+```jsonc
+{
+  "kind": 1984,
+  "content": "took my payment, never minted",
+  "tags": [
+    ["p", "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", "other"],
+    ["a", "31190:79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798:f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9"],
+    ["e", "<listing event id>", "other"],
+    ["L", "cash.report"],
+    ["l", "no_payout", "cash.report"]
+  ]
+}
+```
+
+| reason | NIP-56 type, on `p` and `e` | NIP-32 label, in `cash.report` |
+|---|---|---|
+| took a payment and minted nothing | `other` | `no_payout` |
+| pretends to be someone else | `impersonation` | — |
+| spam or a fake listing | `spam` | — |
+| terms differ from the listing | `other` | `terms_mismatch` |
+
+- `p` is REQUIRED; `a`, `e` and the label are OPTIONAL.
+- A report applies to every listing its node identity signs, so rotating a connection does not shed it.
+- When its `a` names another offer than the one shown, a wallet says so with the report.
+
+### Curators
+
+A user's **curators** are the accounts whose signals the user trusts beyond their follows: a NIP-51 follow
+set (kind `30000`) with `d` `cash-discover`, kept by the user's wallet.
+
+- A wallet MAY ship default curators. It MUST show the user where its ranking comes from, and MUST let the
+  user change or remove them.
+- A wallet SHOULD keep curators as private items, and SHOULD give the set no `title`.
+
+### Hub Rules
+
+A Hub that lists an offer:
+
+- MUST list only an Order connection or a circle's `circlehub1...`, never a `cashhub1...` string, a bill or
+  any other string.
+- MUST build `connection` from its own records, never from pasted text.
+- MUST revoke at once any `cashhub1...` connection whose string was ever published.
+- MUST list only a string that carries TLV `4`, a valid TLV `5` and TLV `6`.
+- MUST sign the listing with that TLV `4`, and set `d` to TLV `0`, `n` to TLV `6` and `network` to what its
+  `get_info` reports.
+- MUST NOT post-date a listing: `created_at` is never in the future.
+- MAY list a `circlehub1...` other than the one it shared with members: the same TLV `0`, its own secret.
+- SHOULD set `expiration` at most 30 days ahead.
+- SHOULD republish the listing every 7 days while it serves the offer, and never after.
+- SHOULD set `status` to `paused` while it is briefly taking no orders or joins.
+- SHOULD require proof of work on its inbox, as §Proof of Work allows, high enough that filling its
+  open-order ceiling within one payment window costs more than the window is worth.
+- SHOULD keep its listed payment windows short and bound its open on-chain orders, as NIP-CO §Limits allows.
+- SHOULD NOT rate-limit `get_info` on a listed connection per client key, which every tapper shares, and MAY
+  answer it from a cached result.
+- SHOULD publish a NIP-65 kind `10002` for its node identity, and publish its listings to those write relays
+  and, when the listing has a `p`, to the operator's write relays. It MAY also publish them to the TLV `1`
+  relays.
+
+For a `follow_set` circle, the Hub:
+
+- SHOULD warn the host that the set is public, and suggest NIP-CW's `hidden_p` entries.
+- SHOULD NOT default the listing's `title` to the set's `title`.
+- SHOULD warn the host before adding the `a` tag.
+
+To retire a listed Order connection or close a listed circle, a Hub, in this order:
+
+1. answers `get_info` with its closed signal at once: `"cash_order": {}` for an Order connection (NIP-CO), or
+   `circle_wallet.accepting` false for a circle (NIP-CW);
+2. publishes the listing with `status` `closed`, and keeps it published until at least the effective expiry
+   of the last `open` version;
+3. MAY then publish a NIP-09 deletion with `["a", "31190:<node identity>:<d>"]` and `["k", "31190"]`.
+
+### Wallet Rules
+
+**Before showing a listing**, a wallet checks, in order:
+
+1. the event's signature, and every count in §Offer Listing;
+2. that its type `t` is known and `connection` has that type's HRP. A wallet decodes or dials no other string
+   from a listing;
+3. that §Connection Signatures finds the string signed by TLV `4`, and that TLV `4` equals the listing's
+   `pubkey`, TLV `0` equals `d`, and TLV `6` equals `n`;
+4. that `n` is a chain the wallet holds, and `network` is `mainnet` unless the user enabled test networks;
+5. that `status` is `open` or `paused`, and the listing has not expired (below).
+
+**Versions and expiry.** A listing's address is its `pubkey` and `d`.
+
+- A wallet SHOULD query several relays, and keeps only the newest `created_at` per address, the lowest `id` on
+  a tie.
+- It remembers the newest `created_at` it has seen per address, even after that version expires, and never
+  takes an older version again.
+- It ignores a version whose `created_at` is more than 15 minutes ahead of its clock.
+- A listing expires at `min(expiration, created_at + 30 days)`: a wallet MUST apply that cap, whatever the
+  listing says, and drops expired versions itself.
+- A NIP-09 deletion of the address by the node identity hides every version up to the deletion's
+  `created_at`.
+- A `paused` listing is shown as paused; a tap still reads `get_info`, whose terms decide.
+
+**Signals.**
+
+- A wallet MUST take recommendations, reports and who follows an operator only from the user's follows and
+  curators, never from global counts.
+- It shows an offer's operator, and who follows them, only when §The Operator's Offers finds the operator
+  verified.
+- It credits recommendations as §Recommendations says, and shows each with its date, never as current terms.
+- It shows a report on every listing of the reported node, naming the reporter, never as an anonymous count.
+- It SHOULD rank a listing older than 10 days lower, and a listing with no signal below every listing with
+  one.
+- A wallet MUST NOT merge listings of different `pubkey`. When several pubkeys list one `d`, it shows only a
+  listing whose signer passed the check at tap, or none.
+
+**Untrusted text and images.** `title`, `content`, `image` and the string's TLV `3` are the lister's claims.
+
+- A wallet MUST draw its own marks, such as verified or warning, outside the lister's text.
+- It SHOULD strip check-mark look-alikes, bidirectional controls (U+202A–U+202E, U+2066–U+2069) and
+  zero-width characters from `title`, `content` and TLV `3`.
+- It SHOULD cap `title` and TLV `3` at 40 user-perceived characters (grapheme clusters) on one line, and
+  `content` at 280.
+- It MUST NOT render or open links in `title`, `content` or TLV `3`.
+- It SHOULD load `image` only through a privacy proxy, or directly only after a tap or with the user's opt-in.
+  Otherwise it shows an identicon of the node identity.
+- On the terms screen it SHOULD show TLV `3`, the label, beside the listing's `title`.
+
+**At tap.** When the user picks an offer, the wallet:
+
+1. calls `get_info` on the listed connection;
+2. runs §Connection Signatures' online check, and checks that the identity also equals the listing's
+   `pubkey`;
+3. checks that `network` equals the listing's `network`;
+4. reads the terms: a `cash_order` object with no payment kind, or `circle_wallet.accepting` false, means
+   closed;
+5. shows the terms from `get_info`, never the `hint`, and SHOULD say when a `hint` differs from them.
+
+It caches the outcome per `pubkey`, `d` and `created_at`:
+
+| outcome | wallet |
+|---|---|
+| a mismatch in a reply the listed connection signed: step 2 or 3 fails | hides that version for good; MAY offer to report it |
+| the Hub's own closed signal: step 4, a `closed` status or a NIP-09 deletion | hides it until a newer version |
+| anything else: no answer, a silent relay, `available_millis` 0, or any error, `RESTRICTED`, `RATE_LIMITED`, `QUOTA_EXCEEDED`, `INSUFFICIENT_CAPACITY`, `NOT_READY` and `INTERNAL` included | keeps it, shown as unavailable for now, and MAY try again |
+
+A wallet MUST NOT hide a listing for anything else: the connection's secret is public, so anyone can flood
+it or fill its Hub's ceilings, and a relay can drop a request.
+
+**Recommending and reporting.**
+
+- A wallet offers to recommend only an offer the user has used.
+- It never offers it in the same session as an order or a join, nor within 1 day of the user's last order or
+  join there.
+- It SHOULD publish after a random delay, and MUST NOT pre-fill the text.
+- Before publishing either, it MUST tell the user who will see it, and for a circle that a recommendation
+  shows they are a member.
+- To publish either, it MUST NOT create a Nostr key for the user without asking.
+
+### Fetching Listings
+
+This part is informative. A wallet reads from the user's read relays, the write relays of follows and
+curators, and a list of discovery relays the user can edit. It first fetches by the authors the user trusts,
+so a flood of listings cannot push signalled offers out:
+
+```jsonc
+// trusted: follows, curators, and what they name
+{"kinds": [31191], "authors": ["<follows and curators>"], "#k": ["31190"]}
+{"kinds": [1984],  "authors": ["<follows and curators>"], "#p": ["<node identities>"]}
+{"kinds": [31190], "authors": ["<node identities named by those, and by verified operators' 11191>"]}
+{"kinds": [5],     "authors": ["<node identities>"], "#k": ["31190"]}
+// operators, once listings name them
+{"kinds": [0, 11191], "authors": ["<operators>"]}
+{"kinds": [3], "authors": ["<follows>"], "#p": ["<operators>"]}
+// unreviewed: global browsing, shown apart
+{"kinds": [31190], "#t": ["cash_order", "circle_wallet"], "#n": ["bitcoin"], "limit": 500}
+```
+
+- It shows what the global request adds apart from the trusted results, labelled as unreviewed.
+- It filters by language with `#l` and by place with `#g`, and MAY use NIP-50 `search` where a relay
+  supports it.
+- It chunks `authors`, caches every event, and refreshes with `since`.
 
 ## The Pairing Connection
 
-A Cash Wallet's pairing secret MUST be deterministically derived from its own connection identifier. That
-lets an implementation expose an endpoint that re-derives and re-displays the connection string on
+A Cash Wallet's connection secret (TLV `2`) MUST be deterministically derived from its own connection
+identifier. That lets an implementation expose an endpoint that re-derives and re-displays the cash token on
 demand, without ever persisting it.
 
 ## Scope Surface
@@ -3043,7 +3501,8 @@ A Cash Wallet connection MUST be granted only:
 A client SHOULD NOT call `get_balance` on a bill: it travels on kind 23194, tagged with the bill's own
 pubkey, and `cash_status` over the private transport gives the same answer.
 
-**`get_info` MUST NOT advertise the bill methods, nor `cash_lookup`**. `create_circle_wallet` is servable on either transport and so MAY still be advertised.
+**`get_info` MUST NOT advertise the bill methods, nor `cash_lookup`**, and a Circle Wallet Hub connection MUST
+NOT advertise `create_circle_wallet` in `methods` (NIP-CW).
 
 **They MUST instead appear in `private_methods`**, a sibling field naming the granted methods this
 connection does not itself serve:
@@ -3051,7 +3510,9 @@ connection does not itself serve:
 ```jsonc
 {
   "methods": ["get_balance", "get_info"],
-  "private_methods": ["cash_consolidate", "cash_lookup", "cash_redeem", "cash_status", "cash_transfer"]
+  "private_methods": ["cash_consolidate", "cash_lookup", "cash_redeem", "cash_status", "cash_transfer"],
+  "network": "mainnet",
+  "chain": "bitcoin"
 }
 ```
 
@@ -3266,6 +3727,24 @@ covers cash mode.
   - An implementation MUST NOT accept, in any form, a caller-provided override of the fee amount, the
     applicable rate, or the same-node determination that decides whether a fee applies at all.
   - A `cash_withdraw` caller only accepts or declines a quote the Hub computed; it supplies no fee.
+- **Signed connection strings.** TLV `5` binds a string's chain, relays, secret, label and Hub identity to the
+  node that signed it. It cannot show that TLV `0`–`2` reach that node: a string whose entries belong to
+  another Hub, re-signed by an attacker's node, passes the offline check and fails only the online one.
+- **A listing advertises, it never decides.** Only `get_info` at tap gives terms. A wallet hides a listing
+  only on a mismatch the listed connection signed or on the Hub's own closed signal, so a flood, a filled
+  ceiling or a dropped request cannot hide an honest one.
+- **A `cashhub1...` string can mint.** A Hub never lists one, and a wallet dials only `cashorder1...` and
+  `circlehub1...` strings from a listing.
+- **Stale listings.** Newest-wins, the 30-day cap a wallet applies and the 15-minute skew bound what a
+  replayed `open` version can do; a retired Order connection's `"cash_order": {}` ends it at tap.
+- **Operators.** An operator is shown only when the listing and the operator's 11191 name each other, per
+  offer, so one tenant of a node cannot claim another's offers. Whoever holds the operator's key can claim
+  the node's offers for that operator.
+- **Signing oracle.** A Hub MUST NOT pass externally supplied text to its node's signed-message convention
+  when it begins with `cash-mint:`, `cash-zap:`, `cash-hub:`, `cash-order:` or `circle-hub:`: a text a
+  service asks the node to sign could otherwise be a valid bill or connection string.
+- **Spam.** A listed offer draws orders and joins to one inbox, and every bill of the node shares it. Proof
+  of work on the inbox, short payment windows and bounded on-chain orders limit what spam costs.
 
 ## Privacy Considerations
 
@@ -3313,3 +3792,14 @@ covers cash mode.
   its denomination (TLV `6`). The signature is REQUIRED, so this cannot be opted out of.
 - **Splits.** A spun-off wallet is isolated from the source wallet's co-recipients, but not from the Hub
   operator, which sees its amount and timing.
+- **Browsing listings** is a relay query and contacts no Hub; an image loaded from the lister's URL tells its
+  host who looked.
+- **A tap is anonymous, not private.** Its `get_info` travels under the listed connection's public secret,
+  but the TLV `1` relay, which the lister chose, sees the client's address and the time, and anyone holding
+  the listed string can read when taps happen.
+- **Listings make nodes enumerable.** An operator's 11191 links their account to a Lightning node, whose
+  gossip shows its channels and often its addresses.
+- **A listed circle's string is public**, and with it the circle's `circle_policy` and `available_millis`,
+  which anyone can poll.
+- **Recommendations and curators.** A recommendation tells the user's followers that they use a Hub, and for
+  a circle that they are a member; a public curator set tells everyone that they browse cash offers.
