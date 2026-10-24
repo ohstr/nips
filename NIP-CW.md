@@ -53,7 +53,7 @@ This document uses MUST, MUST NOT, SHOULD, and MAY as defined in RFC 2119.
 
 | Method | Caller | Scope | Purpose |
 |---|---|---|---|
-| `create_circle_wallet` | a member, over the Circle Wallet Hub connection | `circle_wallet` | Self-service request for the caller's own Circle Wallet |
+| `create_circle_wallet` | a member, over the Circle Wallet Hub connection, on NIP-CASH's private transport only | `circle_wallet` | Self-service request for the caller's own Circle Wallet |
 | `delete_circle_wallet` | a member, over their own Circle Wallet connection | none: every Circle Wallet connection | Delete the caller's own Circle Wallet once it holds at most dust |
 
 The NIP-47 methods a Circle Wallet connection is granted, and which of them each state allows, are in
@@ -138,15 +138,17 @@ sequenceDiagram
     M->>H: get_info
     H-->>M: circle_wallet terms and identity
     Note over M: generates the connection keypair, signs a kind-23199 proof
-    M->>H: create_circle_wallet
+    M->>H: create_circle_wallet on the private transport
     Note over H: Processing Algorithm, steps 1-11
     H-->>M: encrypted_details
-    Note over M: builds its own connection string
+    Note over M: holds its connection: wallet_pubkey, relays, its own secret
     opt the reply is lost
         M->>H: cash_lookup on the private transport
         H-->>M: the same encrypted_details, once the join is recorded
     end
 ```
+
+`create_circle_wallet` travels only on NIP-CASH's private transport, as §Private Join defines.
 
 ### Request
 
@@ -206,10 +208,8 @@ The plaintext inside `encrypted_details` is a JSON object carrying every term of
 }
 ```
 
-It carries no secret and no connection string. The member builds its own connection string from
-`wallet_pubkey`, `relays` and the secret it kept —
-`nostr+walletconnect://<wallet_pubkey>?relay=<each relay>&secret=<its own secret>` — and a Hub MUST NOT
-return a secret, a `pairing_uri`, or anything else derived from one. `relays` MUST carry at least one
+It carries no secret. The member's connection is given by `wallet_pubkey`, `relays` and the secret it
+kept; a Hub MUST NOT return the secret or anything derived from it. `relays` MUST carry at least one
 non-empty relay URL, in failover order.
 
 `connection_pubkey` repeats the request's. A client MUST reject details whose `connection_pubkey` is
@@ -229,9 +229,8 @@ its node can represent, MUST NOT raise it, and reports what it actually applied.
 the requester's own pubkey, and every term describing the issued wallet MUST be inside it. A Hub MUST NOT
 place any of them beside the ciphertext.
 
-**It is encrypted from the Hub's connection key**, on either transport: the NIP-44 conversation key is the
-one between the requester's `pubkey` and the Hub's own pubkey (the wallet pubkey of its connection string,
-`circlehub1...` type `0`). A client MUST decrypt it with exactly that conversation key and MUST reject a
+**It is encrypted from the Hub's connection key**: the NIP-44 conversation key is the
+one between the requester's `pubkey` and the Hub's own pubkey (its `circlehub1...` string's type `0`). A client MUST decrypt it with exactly that conversation key and MUST reject a
 response whose `encrypted_details` does not decrypt under it.
 
 ### Processing Algorithm
@@ -249,7 +248,7 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
    consumed, since step 3 is never reached.
 2. Verify the kind-23199 identity proof per §Identity Proof, checks 1–7: the kind is 23199, the event's
    own `id` matches its content, the signature verifies and the signer equals the requested `pubkey`,
-   `created_at` is fresh, the `d` tag equals the Hub's pairing-URI pubkey, the `connection` tag equals the
+   `created_at` is fresh, the `d` tag equals the Hub's pubkey from its `circlehub1...` string, the `connection` tag equals the
    requested `connection_pubkey`, and the `terms` tag equals the requested `max_amount`, `max_receive`,
    `expiry` and `budget_renewal`.
 3. Check the proof's event ID against the single-use replay guard (check 8). A Hub MUST
@@ -300,7 +299,7 @@ On receiving `create_circle_wallet`, the Hub MUST, in order:
 
 ### Errors
 
-A Hub MUST use these error codes for these refusals, on either transport, each in NIP-47's error object,
+A Hub MUST use these error codes for these refusals, each in NIP-47's error object,
 `{"code": "<code>", "message": "<text>"}`:
 
 | code | meaning | retry? |
@@ -309,11 +308,12 @@ A Hub MUST use these error codes for these refusals, on either transport, each i
 | `UNAUTHORIZED` | the identity proof does not verify (step 2) | yes, with a new proof |
 | `REQUEST_REUSED` | the identity proof was already used (step 3); a copy of this join may have been made | no; look the join up |
 | `NOT_READY` | the Hub cannot decide membership yet (step 4) | yes, later |
-| `RESTRICTED` | the requester is not a member of this circle (step 4), or its `connection_pubkey` is in use or pending in a rotation on this node (step 9) | no; for a key in use, yes with a new proof and a new `connection_pubkey` |
+| `RESTRICTED` | the Hub is not accepting joins (§The Circle Wallet Hub Connection), the requester is not a member of this circle (step 4), or its `connection_pubkey` is in use or pending in a rotation on this node (step 9) | no; for a key in use, yes with a new proof and a new `connection_pubkey` |
 | `WALLET_EXISTS` | the requester already holds an Active or Suspended Circle Wallet under this Hub (step 5) | no, until it is neither |
 | `LIMIT_EXCEEDED` | `max_amount`, `max_receive`, `budget_renewal` or `expiry` is over the Hub's limits; the message names the field (step 6) | yes, with other values |
 | `RATE_LIMITED` | the requester has asked too often, or another request held the Hub (steps 7–8) | yes, later |
 | `INSUFFICIENT_CAPACITY` | the circle's holdings have reached its holdings ceiling (step 9) | yes, later |
+| `NOT_IMPLEMENTED` | the join arrived on the standard transport | no; join over the private transport |
 
 A wallet's own refusals, and a member request's, use these:
 
@@ -374,7 +374,7 @@ transport, with params
 
 Every Circle Wallet Hub MUST serve this lookup, and so NIP-CASH's private transport for it, and lists `cash_lookup` in the Circle Wallet Hub connection's `get_info` `private_methods`.
 It MUST keep each join's record, with its `encrypted_details`, while the
-wallet exists and for at least the window above. This works whichever transport carried the join.
+wallet exists and for at least the window above.
 
 ## Identity Proof (kind 23199)
 
@@ -399,7 +399,7 @@ Kind 23199 is defined by this document. It is neither NIP-CASH's kind 23198 nor 
 |---|---|
 | `pubkey` | the requester pubkey — MUST equal `pubkey` in the request |
 | `created_at` | freshness window: up to 5 minutes in the past, up to 1 minute in the future |
-| `d` | binds proof to THIS Hub; no invoice to bind it to. See below: this is the pubkey from the Hub's PAIRING URI, not any key derived from its secret |
+| `d` | binds proof to THIS Hub; no invoice to bind it to. See below: this is the pubkey from the Hub's `circlehub1...` string, not any key derived from its secret |
 | `connection` | binds proof to the key the wallet is issued to |
 | `terms` | binds proof to the requested terms |
 
@@ -416,7 +416,7 @@ section that verifies a kind-23199 proof refers to this list.
 4. **`created_at` is inside the freshness window** given above: from 5 minutes before now to 1 minute
    after, on the Hub's clock, both bounds inclusive.
 5. **The `d` tag equals the Hub's own pubkey** — specifically the pubkey a member reads from the Circle
-   Wallet Hub's **pairing URI**. An implementation that maintains a second, internal keypair derived from
+   Wallet Hub's **`circlehub1...` string**, its type `0`. An implementation that maintains a second, internal keypair derived from
    the connection's secret MUST NOT bind against that one.
 6. **The `connection` tag equals the request's `connection_pubkey`.** Exactly one such tag.
 7. **The `terms` tag equals the request's terms.** Exactly one such tag, whose value is
@@ -510,7 +510,7 @@ A Hub reading it is configured with the address `30000:<provider pubkey>:circle-
 
 A host SHOULD give the set a `title`. When it does, a Hub SHOULD use that `title` as the default
 `label` of its `circlehub1...` string, so the invite and the set
-carry the same name.
+carry the same name. A listing's `title` need not follow it (NIP-CASH §Hub Rules).
 
 ### Hidden Members
 
@@ -524,7 +524,7 @@ value only the provider and the Hub can read:
 - **Encryption.** The payload is NIP-44 version 2, encrypting the member's pubkey as 64-character
   lowercase hex, under the conversation key between the provider and the Hub's **inbox** pubkey, the one
   in its kind-11190 announcement. It MUST NOT be encrypted to the
-  Hub's connection pubkey. A Hub with hidden members SHOULD offer §Private Join.
+  Hub's connection pubkey.
 - **Reading.** For each `hidden_p` tag, a Hub MUST attempt NIP-44 v2 decryption with its inbox key and
   the provider pubkey. An entry that fails to decrypt MUST be skipped without error. An entry that
   decrypts to anything but a well-formed 64-character lowercase-hex pubkey MUST be skipped too.
@@ -869,14 +869,22 @@ wallet still receives, and a pending rotation stays pending.
 
 ## The Circle Wallet Hub Connection (`circlehub1...`)
 
-A Circle Wallet Hub's own connection — the one members send `create_circle_wallet` to — is otherwise an
-ordinary NWC pairing.
+A Circle Wallet Hub's own connection is the one members send `create_circle_wallet` to.
+
+A Hub MAY list a circle on relays, as NIP-CASH §Listing Offers defines, and SHOULD then require proof of work
+on its inbox, high enough to bound the joins a non-member can make it refuse. A Hub MAY issue several
+connections for one circle, the same Hub pubkey each with its own secret, and list one of them; a join's bill
+proof verifies against any live one of them, and a revoked one verifies none.
 
 A Circle Wallet Hub MUST answer `get_info` with a `circle_wallet` block, and a connection that is
 not a Hub MUST omit it — its presence is what identifies a Hub at all:
 
 ```json
 {
+  "methods": ["get_info"],
+  "private_methods": ["cash_lookup", "create_circle_wallet"],
+  "network": "mainnet",
+  "chain": "bitcoin",
   "circle_wallet": {
     "available_millis": 1000000,
     "max_exp_secs": 2592000,
@@ -888,24 +896,26 @@ not a Hub MUST omit it — its presence is what identifies a Hub at all:
     "rotation_delay_secs": 432000,
     "per_wallet_max_millis": 500000,
     "per_wallet_max_receive_millis": 500000,
-    "min_budget_renewal": "monthly"
+    "min_budget_renewal": "monthly",
+    "accepting": true
   }
 }
 ```
 
 | field | present | meaning |
 |---|---|---|
-| `available_millis` | always | what the circle can still take in: holdings ceiling minus holdings, at least 0 |
+| `available_millis` | always | what the circle can still take in: holdings ceiling minus holdings, at least 0; a Hub MAY report it capped at `per_wallet_max_millis` |
 | `max_exp_secs` | always | the Hub's expiry ceiling; 0 means "never" |
 | `fees_ppm` | always | the skim a member's outgoing payments will carry (§Fees) |
 | `fee_reserve` | always | the most routing fee a payment pays (§Own Funds and Caps) |
 | `dust_threshold_millis` | always | a balance at or below it is dust (§Lifecycle and Deletion) |
 | `circle_policy` | always | "allowlist" \| "follow_set" (§Membership) |
-| `identity` | always | the Hub's node identity, which signs its announcement |
+| `identity` | always | the Hub's node identity, which signs its announcement; equal to the connection's TLV `4` |
 | `rotation_delay_secs` | OPTIONAL | present iff the Hub serves §Recovering a Lost Connection |
 | `per_wallet_max_millis` | OPTIONAL | the Hub's per-wallet ceiling on max_amount (§Data Model) |
 | `per_wallet_max_receive_millis` | OPTIONAL | the Hub's per-wallet ceiling on max_receive |
 | `min_budget_renewal` | OPTIONAL | the Hub's renewal floor (§Budget Renewal Floor) |
+| `accepting` | always | `true` while the Hub takes joins; `false` once the host closes the circle to new members |
 
 The first five are the Hub's **terms**. A Hub MUST report `available_millis` as 0, never as a negative
 number, while its holdings are at or above its holdings ceiling. `fee_reserve`
@@ -920,14 +930,24 @@ change after `get_info`, so a client MUST still handle a refusal.
 
 `circle_policy` discloses the Hub's **admission mechanism**, not its terms.
 
+A Hub whose `accepting` is `false` refuses every join with `RESTRICTED`, and still serves its join lookups
+and its members' wallets. A closed circle signals itself this way, as a retired Order connection does with
+an empty `cash_order` (NIP-CO).
+
+`network` and `chain` are REQUIRED, as NIP-CASH §Network and Chain defines them, on the Hub connection and on
+every Circle Wallet connection.
+
 `identity` is the pubkey that signs the Hub's kind-11190 announcement:
 its node identity, the same key a cash bill's mint signature recovers to, so every Hub on one node shares
 one announcement. Every Hub MUST report it, since every Hub serves the private transport for §Lost Join
-Reply. A prospective member learns it only from this field, in a response signed by the Hub's own key.
+Reply. A prospective member learns it from this field, in a response signed by the Hub's own key, and MUST
+check before joining that it equals the connection string's TLV `4`. A Hub SHOULD report it as 64 lowercase
+hex and MAY report the 66-hex compressed key; a client compares it in x-only form, as NIP-CASH §Connection
+Signatures says.
 
-`circlehub1...` packages the same pairing data as an ordinary `nostr+walletconnect://` string, wrapped in
-a NIP-19-style bech32 identifier. Wire format: a human-readable prefix (`circlehub`), the digit `1`, then
-TLV-encoded pairing data converted from 8-bit to 5-bit groups exactly as NIP-19 does for
+`circlehub1...` is a NIP-19-style bech32 string carrying the Hub's pubkey, relays, connection secret, label
+and signature. Wire format: a human-readable prefix (`circlehub`), the digit `1`, then
+TLV-encoded entries converted from 8-bit to 5-bit groups exactly as NIP-19 does for
 `nprofile`/`nevent`/`naddr`. Each entry is `<type: 1 byte><length: 1 byte><value: length bytes>`:
 
 | Type | Name | Value | Cardinality |
@@ -936,61 +956,79 @@ TLV-encoded pairing data converted from 8-bit to 5-bit groups exactly as NIP-19 
 | `1` | relay | a relay URL, ASCII | one or more, order preserved; each MUST be non-empty. Several mean failover — NIP-CASH §Multiple Relay Hints |
 | `2` | secret | 32 raw bytes — the NWC connection secret | exactly one, REQUIRED |
 | `3` | label | a human-readable name, UTF-8 | zero or one, OPTIONAL |
+| `4` | Hub identity | 32 raw bytes, the x-only node identity, `circle_wallet.identity` | exactly one, REQUIRED |
+| `5` | connection signature | 65 raw bytes, the connection signature NIP-CASH §Connection Signatures defines | exactly one, REQUIRED |
+| `6` | chain | the chain's name, as NIP-CASH §Connection Signatures defines it, e.g. `bitcoin` | exactly one, REQUIRED |
 
 A decoder MUST ignore any TLV entry of an unrecognized type rather than rejecting the string, so a future
-field can be added without breaking older decoders. A decoder MUST reject a string missing either required
-field (`0` or `2`), carrying a wrong-length value for a typed field, or repeating one.
+field can be added without breaking older decoders. A decoder MUST reject a string missing a required
+field (`0`, `2`, `4`, `5` or `6`), carrying a wrong-length or malformed value for a typed field, or
+repeating one. A signature that does not verify leaves the string decoded but unverified.
 
-For example, the Hub pubkey `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the one
-relay hint `wss://relay.example.com`, the secret `202122…3f` (the bytes `0x20`–`0x3f`) and the label
-`Ada's Family Circle`, emitted in ascending type order, encode as one 199-character string, broken here
-only to fit the page:
+Types `5` and `6` are NIP-CASH's §Connection Signatures, with the text
+`circle-hub:v1:<chain>:<connection_pubkey>:<hub_identity>:<relay_hash>:<label_hash>`.
+
+For example, take the Hub pubkey `f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9`, the one
+relay hint `wss://relay.example.com`, the secret `202122…3f` (the bytes `0x20`–`0x3f`), the label
+`Ada's Family Circle`, the Hub identity `79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`
+(the x-only pubkey of the private key 1) and the chain `bitcoin`. The node signs:
 
 ```
-circlehub1qqs0jvy2qxf93scsfy6ylp0cn4fzndf3epzcxmuekzrqrugnhnsrd7gpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgz
-yqszzg3rysjjvfeg9y4zktpd9chnqvfjxv6r2d3h8qun5weu85lr7qcng9jxzfmnyprxzmtfd3ujqsmfwf3kcegypvllm
+circle-hub:v1:bitcoin:f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9:
+79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798:
+16c4c4164c27d448128dabf8052dddd5b30c61904b7b7c1b85e1486c37b7a500:
+c7c2b59bc693ccb3290c0a51e5c3114e49d382ba14d374ad9b1a17ffdb1750c1
+```
+
+one string with no line breaks, whose signed-message digest is
+`7c945cb9b96fd8a62c973c42661e572ed186026a012cd7d4882c2eccc1cf1356`. Signed with the private key 1, RFC 6979
+nonces and a low S, it gives recid 0, so the TLV `5` header is 31, and the TLV `5` value:
+
+```
+1f0473ead7683c1db76f61784c503b9fe018d4dbc9db2de5fe604b9ff7017e5ae5
+4ccfaccff692fce2590195e62659f092730798f5a613d6d703903287b05ea05b
+```
+
+The entries, in ascending type order, encode as one 375-character string, broken here only to fit the page:
+
+```
+circlehub1qqs0jvy2qxf93scsfy6ylp0cn4fzndf3epzcxmuekzrqrugnhnsrd7gpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgzyq
+szzg3rysjjvfeg9y4zktpd9chnqvfjxv6r2d3h8qun5weu85lr7qcng9jxzfmnyprxzmtfd3ujqsmfwf3kcegyypumuen7l8wthtz45p3ftn
+58pvrs9xlumvkuu2xet8egzkcklqtesp2pruz886khdq7pmdm0v9uyc5pmnlsp34xme8djme07vp9elacp0edw2nx04n8ldyhuufvsr90xye
+vlpynnq7v0tfsn6mts8ypjs7c9agzmqcrky6t5vdhkjms0uy6sx
 ```
 
 This wire format is not a new authorization mechanism: decoding a `circlehub1...` string and dialing it
 grants exactly the access `create_circle_wallet`'s own scope already carries — nothing more. A Circle
-Wallet itself has no bech32 form; it is an ordinary wallet connection.
+Wallet itself has no bech32 form: the member's client holds its `wallet_pubkey`, `relays` and own secret, and
+speaks NIP-47 to it directly.
 
-**Recommended presentation.** An implementation SHOULD present a Circle Wallet Hub connection to its host
-as `circlehub1...` by default — including in any QR code offered for scanning — rather than the raw
-`nostr+walletconnect://` string. For a tool that doesn't yet decode this format, the implementation SHOULD
-offer an explicit way to reveal the equivalent `nostr+walletconnect://` URI instead, never silently, so
-whoever copies whichever form is on screen at the time always knows which one they're sharing.
+**Presentation.** An implementation SHOULD present a Circle Wallet Hub connection to its host only as
+`circlehub1...`, including in any QR code offered for scanning.
 
 ## Private Join
 
-`create_circle_wallet` travels, by default, as an ordinary NIP-47 request to the Hub's own
-pubkey, which shows a relay observer who joined and when.
-
-A Hub MAY therefore accept `create_circle_wallet` over NIP-CASH's **private transport**, which is defined once there and reused here unchanged: same
-kinds, same envelope, same item proofs, same announcement. Every Hub serves that transport for
-§Lost Join Reply; one that also accepts joins there lists `create_circle_wallet` in its `get_info`
-`private_methods`. This section states only what is specific to
-joining.
-
-A Hub that offers it MUST continue accepting the standard transport.
+`create_circle_wallet` travels only over NIP-CASH's **private transport**, which is defined once there and
+reused here unchanged: same kinds, same envelope, same item proofs, same announcement. Every Hub MUST accept
+joins there while its `accepting` is `true`, and lists `create_circle_wallet` in its `get_info`
+`private_methods`, never in `methods`. A join on the standard
+transport is refused with `NOT_IMPLEMENTED`. This section states only what is specific to joining.
 
 ### Finding the Private Transport
 
 A prospective member already calls `get_info` to read the Hub's terms. Its `circle_wallet.identity` is what reaches the private transport, for a join or for a
 lookup:
 
-1. If `private_methods` does not list `create_circle_wallet`, the Hub does not offer Private Join; the
-   client joins over the standard transport, and needs the steps below only for a lookup.
+1. If `circle_wallet.accepting` is `false`, the Hub is not taking joins now; the client needs the steps
+   below only for a lookup.
 2. Otherwise the client fetches the Hub's kind-11190 announcement and verifies it against `identity`,
    under NIP-CASH's rules unchanged: reject one signed by anyone else, adopt only the newest, never move
-   backwards. A client MUST NOT take the identity from anywhere else
-   — not a URI parameter, a QR caption or a profile — since whoever supplies it chooses the inbox the
-   join is encrypted to.
-3. A client SHOULD then join over the private transport, without asking the member to choose.
-4. If no announcement can be found or verified, a client MAY fall back to the standard transport only
-   after telling the member the join will not be private: a member who expected Private Join may not
-   want their pubkey on the shared connection. A client that cannot tell the member at that moment MUST
-   NOT fall back unless the member consented to it beforehand.
+   backwards. The client takes the identity only from `get_info`, after checking that it equals the
+   string's TLV `4` as NIP-CASH §Connection Signatures requires, and never from a QR caption or a profile:
+   whoever supplies it chooses the inbox the join is encrypted to.
+3. The client then joins over the private transport.
+4. If no announcement can be found or verified, the client does not join, and MAY try again later. It
+   MUST NOT send the join over the standard transport.
 
 ### What differs from a bill operation
 
@@ -1008,7 +1046,7 @@ lookup:
 - **The bill proof is signed with the Hub connection's secret.** NIP-CASH requires a kind-23193
   bill proof on every item, and a join is no exception. With no bill
   to hold, it is signed with the `secret` of the Hub connection the member was given
-  (`circlehub1...`, or the equivalent pairing URI), and its `d` tag carries the Hub's pubkey like
+  (`circlehub1...`), and its `d` tag carries the Hub's pubkey like
   the item proof's. It authorizes nothing by itself; it lets the Hub answer a refused join with
   an error rather than an omission.
 - **A batch of joins is legitimate.** One envelope MAY carry several joins, and each is
@@ -1022,7 +1060,7 @@ lookup:
 
 The response is a kind-23191 envelope like any other, and the join's own result — a single
 `encrypted_details` ciphertext — travels inside its `result`. That ciphertext stays
-encrypted to the requester's own pubkey exactly as on the standard transport, and likewise carries
+encrypted to the requester's own pubkey, as §Response defines, and carries
 no secret; `connection_pubkey` travels in the item's params, where the item proof binds it.
 
 The reply is published where NIP-CASH publishes any private-transport reply: on the relay the
@@ -1030,7 +1068,7 @@ join request arrived on, and optionally on the Hub's other inbox relays. A prosp
 
 **An item without a verified bill proof is omitted, and a refused join is an error.** A join refused
 because the requester is not a member, is rate-limited, or already holds a wallet MUST be answered
-with the corresponding error. The codes are the same as on the standard transport.
+with the corresponding error, from §Errors.
 Omission is reserved, as in NIP-CASH, for an item whose target the Hub does not hold or whose bill proof
 is missing or did not verify; a join whose item proof did not verify is refused with `UNAUTHORIZED`.
 
@@ -1123,12 +1161,11 @@ what it can first.
 - **Single-use replay guard.** A Circle Wallet identity proof has no invoice to bind it to; without the
   guard (check 8) a captured proof could be resubmitted within its freshness window.
 - **Every param is bound.** The `connection` and `terms` tags (checks 6–7) bind the
-  connection key, `max_amount`, `max_receive`, `expiry` and `budget_renewal`. A co-member who reads a
-  request on the standard transport before the Hub does can resubmit it first, but only unchanged: the
-  wallet still goes to the requester's key, and the requester's own copy is refused with
-  `REQUEST_REUSED`.
+  connection key, `max_amount`, `max_receive`, `expiry` and `budget_renewal`. Whoever replays a join can
+  resubmit it only unchanged: the wallet still goes to the requester's key, and the requester's own copy is
+  refused with `REQUEST_REUSED`.
 - **Private-transport inbox.** A client trusts the announcement only because `identity` came from a
-  `get_info` response signed by the Hub's connection key. An inbox
+  `get_info` response signed by the Hub's connection key, and equals the string's TLV `4`. An inbox
   taken from anywhere else learns who joined; it cannot plant a wallet, since `encrypted_details`
   decrypts only under the Hub's own connection key.
 - **No connection secret on the Hub**. A compromise of the Hub's storage, logs or
@@ -1144,6 +1181,10 @@ what it can first.
     completed rotation installs.
 - **One wallet per (Hub, identity).** The step-5 pre-check alone is a race; the uniqueness constraint at
   step 9 is the authoritative guard.
+- **Listed circles.** A listed circle's string is public, so anyone can send it joins, and each refusal
+  costs the Hub signature checks, a decryption and a published reply. Joins travel only on the private
+  transport: a Hub SHOULD require its proof of work while any circle is listed, and MAY raise it while
+  refusals dominate.
 - **Publish-after-commit ordering.** A new member's relay subscription MUST be published only after its
   creating transaction commits; publishing earlier can leave the wallet permanently unreachable over NWC.
 
@@ -1151,19 +1192,15 @@ what it can first.
 
 - **The host sees everything.** Every Circle Wallet's payments settle through the host node, so the host
   can observe every payment any member makes or receives. A circle is opaque only to outsiders.
-- **The standard transport publishes who joined, and when.** Every `create_circle_wallet` request is
-  `p`-tagged with the Hub's one shared pubkey and carries the requester's own pubkey, so a relay observer
-  learns the circle's join rate and, under a `follow_set` policy, often the joiners themselves.
-  §Private Join removes that; a host who considers membership sensitive SHOULD offer it. Relay-level
-  metadata, that some client reached this Hub at this moment, remains.
+- **Joins are private.** A join is encrypted to the Hub's inbox, so neither a relay observer nor a
+  co-member learns who joined or their `connection_pubkey`. Relay-level metadata, that some client reached
+  this Hub at this moment, remains.
 - **A `follow_set` is public.** Anyone watching it can learn who is eligible, and its `title` and
   `description` too. Hosts who need membership itself to stay private SHOULD use `hidden_p` entries
   or the `allowlist` mechanism instead; NIP-51's own private items do not help, since
   the Hub cannot count them.
 - **What `hidden_p` hides.** It hides who a hidden member is from everyone except the provider and the
   Hub. It does not hide how many hidden entries a set has, nor when the set was republished.
-  - A hidden member who joins over the standard transport puts their pubkey in a request every co-member
-    can read (above), so a hidden member SHOULD join over §Private Join.
   - A leaked inbox key exposes every hidden member that key ever covered, in every past version of the
     set a relay still holds.
   - And a generic NIP-51 client that republishes the set may drop tags it does not know, silently
@@ -1182,13 +1219,11 @@ what it can first.
   connection string.
 - **`circle_policy` reveals the admission mechanism** to anyone holding the shared connection string,
   not who the members are. A host who considers even the mechanism sensitive has no way to hide it while
-  still answering `get_info`, and SHOULD treat the Hub's connection string as the access-controlled
-  secret it effectively is.
+  still answering `get_info`, and SHOULD NOT list the circle.
+- **A listed circle is public.** Its listing and its string make `circle_policy` and `available_millis`
+  readable, and pollable, by anyone; `available_millis` then shows the circle's flows. A cap at
+  `per_wallet_max_millis` hides more of them.
 - **`encrypted_details` hides `wallet_pubkey` and the terms** from co-members; `wallet_pubkey` is the
   address the wallet's traffic is subscribed under.
-- **On the standard transport, `connection_pubkey` is readable by every co-member**, who can then
-  recognize that member's wallet traffic on relays. §Private Join removes this — its request is
-  encrypted to the Hub's inbox, not to the shared connection — and a member who wants their wallet
-  traffic unlinkable from co-members SHOULD join that way.
 - **Request history.** Whatever stores or logs the Hub's request history learns that a given requester
   `pubkey` asked for a wallet, and when; not the wallet's address or terms.
