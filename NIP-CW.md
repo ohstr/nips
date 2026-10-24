@@ -523,7 +523,7 @@ value only the provider and the Hub can read:
 
 - **Encryption.** The payload is NIP-44 version 2, encrypting the member's pubkey as 64-character
   lowercase hex, under the conversation key between the provider and the Hub's **inbox** pubkey, the one
-  in its kind-11190 announcement. It MUST NOT be encrypted to the
+  in its kind-11190 announcement's `inbox` tag. It MUST NOT be encrypted to the
   Hub's connection pubkey.
 - **Reading.** For each `hidden_p` tag, a Hub MUST attempt NIP-44 v2 decryption with its inbox key and
   the provider pubkey. An entry that fails to decrypt MUST be skipped without error. An entry that

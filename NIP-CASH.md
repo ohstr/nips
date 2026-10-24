@@ -1668,7 +1668,7 @@ resend other than success as the outcome of the original.
 Every call carrying a `request_id` has a **deadline**: the envelope's `not_after` on the private transport, or
 the NIP-47 `expiration` that `mint_cash` then requires.
 
-- A Hub announces a horizon `H`, `max_request_age` in seconds, among its announcement's `limits`. `H` is the
+- A Hub announces a horizon `H`, `max_request_age` in seconds, as a `limit` tag of its announcement. `H` is the
   Hub's own setting: a Hub MUST announce an integer of at least 60 (1 minute), SHOULD keep it at most 86400
   (1 day), and is RECOMMENDED to default to 300 (5 minutes).
 - A Hub MUST NOT announce a smaller `H` than it has announced before, so its current `H` is also the largest
@@ -2045,23 +2045,53 @@ returns exactly one event and no `d` tag is needed.
 {
   "kind": 11190,
   "pubkey": "<the Hub's own identity pubkey — what a client already trusts>",
-  "content": "{\"v\":1,\"inbox\":\"<hex x-only>\",\"limits\":{...},\"relays\":[...]}",
-  "tags": [],
+  "content": "",
+  "tags": [
+    ["inbox", "<64 lowercase hex x-only>"],
+    ["limit", "max_bytes", "16384"],          // illustrative values, not defaults
+    ["limit", "max_items", "16"],
+    ["limit", "max_consolidate_sources", "8"],
+    ["limit", "pad_bucket_bytes", "2048"],
+    ["limit", "max_verify_budget", "64"],
+    ["limit", "max_request_age", "300"],
+    ["r", "wss://relay.example.com"],
+    ["addr", "<56 base32 characters>.onion:9735"]
+  ],
   "sig": "<schnorr>"
 }
 ```
 
+| tag | count | value |
+|---|---|---|
+| `inbox` | exactly 1 | an x-only pubkey, 64 lowercase hex |
+| `limit` | 1 per name | a limit name, then its value |
+| `r` | 0 or more | a relay URL, in the Hub's order |
+| `addr` | 0 or more | `host:port`, the host an IPv4 address, a bracketed IPv6 address or an onion address |
+
+- `content` is the empty string. There is no version tag: the kind is the version.
+- Numbers are unsigned decimal with no leading zeros.
+- A client ignores a tag this section does not define, and a `limit` of a name it does not know.
+- A client MUST reject an announcement with no `inbox` or more than one, two `limit` tags of one name, or a
+  malformed `inbox`, `limit` or `r` value.
+- A client ignores a malformed `addr`; it never makes the announcement unusable.
+- A client MUST NOT fall back to an older announcement when the newest one is rejected: the Hub is unusable
+  until a valid newer announcement is seen.
+
 - **`inbox`** — the x-only pubkey clients NIP-44 encrypt envelopes to and `p`-tag. It MUST NOT be assumed
   equal to the announcing identity; a client MUST use whatever it says.
-- **`limits`** — the envelope limits a Hub will actually accept: `max_bytes`, `max_items`,
+- **`limit`** — the envelope limits a Hub will actually accept: `max_bytes`, `max_items`,
   `max_consolidate_sources`, `pad_bucket_bytes`, `max_verify_budget`, and
   `max_request_age`, which every Hub MUST announce. A Hub MUST refuse
   an envelope over `max_bytes`, `max_items` or `max_verify_budget` whole, with an envelope-level
   `QUOTA_EXCEEDED`, and an item over `max_consolidate_sources` with `QUOTA_EXCEEDED`.
-- **`relays`** — OPTIONAL. Where the Hub reads its inbox, overriding a token's relay hints
+- **`r`** — OPTIONAL. Where the Hub reads its inbox, overriding a token's relay hints
   for reaching it. When present a client SHOULD try these first, in their order, then the token's hints in
   encoded order, skipping any already tried; it fetches the announcement itself from the token's hints.
   Absent, the token's hints apply.
+- **`addr`** — OPTIONAL. Where the Hub's Lightning node listens, as display and connect hints only.
+  - A client MUST NOT use an `addr` to verify anything.
+  - A Hub SHOULD prefer an onion address.
+  - A Hub MAY omit the tag.
 
 **Limits are advertised, never assumed.** A client MUST fetch the announcement and MUST size envelopes
 against the announced values. This document specifies **no default for any limit**.
@@ -2112,7 +2142,7 @@ kind-23190 events. The relays it reads its inbox from enforce it:
   1 day ahead, and drops any event whose id it has already accepted, until that event's expiration.
 
 A Hub that requires proof of work MUST read its inbox only on relays that enforce it, and MUST list them in
-its announcement's `relays`. It SHOULD NOT announce a `max_request_age` above 1 day, and a client sending to
+its announcement's `r` tags. It SHOULD NOT announce a `max_request_age` above 1 day, and a client sending to
 it SHOULD set its deadline at most 1 day ahead, whatever `max_request_age` allows.
 
 A client sending to such a Hub reads the relay's minimum before sending, and puts on the request event a
@@ -2132,7 +2162,6 @@ call to one of the methods below, against one target, usually a wallet — and d
 
 ```json
 {
-  "v": 1,
   "not_after": 1720000060,
   "nonce": "<64 lowercase hex>",
   "reply_to": "<64 lowercase hex>",
@@ -2345,7 +2374,6 @@ the sender, never that any slice is theirs.
 
 ```jsonc
 {
-  "v": 1,
   "req_nonce": "<the request envelope's nonce>",
   "seq": 1,
   "total": 1,
@@ -2361,7 +2389,7 @@ Per-item errors use NIP-47's own error shape. An envelope-level error is carried
 means no item ran:
 
 ```jsonc
-{"v": 1, "req_nonce": "…", "seq": 1, "total": 1, "error": {"code": "QUOTA_EXCEEDED", "message": "…"}}
+{"req_nonce": "…", "seq": 1, "total": 1, "error": {"code": "QUOTA_EXCEEDED", "message": "…"}}
 ```
 
 Except as below, a Hub MUST reply to every envelope it decrypts and parses, with `"results": []` when it
@@ -2540,8 +2568,8 @@ decrypting them.
   characters.
 - **E2.** Drop it if `not_after` is an integer that has passed (now > `not_after`).
 - **E3.** Drop it if its `nonce` has already been served.
-- **E4.** Refuse it with an envelope-level `BAD_REQUEST` if `v` is not `1`, `nonce` is not 64 lowercase hex
-  characters, `not_after` is missing, not an integer, or more than `max_request_age` ahead, `items` is not
+- **E4.** Refuse it with an envelope-level `BAD_REQUEST` if `nonce` is not 64 lowercase hex characters,
+  `not_after` is missing, not an integer, or more than `max_request_age` ahead, `items` is not
   a non-empty array, or two items share an `id`. An envelope refused here leaves its nonce unserved. Once an
   envelope passes E4 its nonce counts as served.
 - **E5.** Refuse it with an envelope-level `QUOTA_EXCEEDED` if its padded plaintext exceeds `max_bytes` or
@@ -3198,6 +3226,7 @@ A listing for NIP-CO's example Order connection:
     ["l", "pt", "ISO-639-1"],
     ["l", "en", "ISO-639-1"],
     ["g", "eyc"],
+    ["location", "Lisbon, Baixa"],
     ["alt", "Cash offer: Alice's cash counter"]
   ]
 }
@@ -3220,6 +3249,7 @@ A listing for NIP-CO's example Order connection:
 | `a` | 0 or 1 | `follow_set` circles only: the follow set's address, `30000:<provider pubkey>:<d>` |
 | `L`, `l` | 0 or more | NIP-32 language labels, ISO-639-1 |
 | `g` | 0 or more | coarse geohash prefixes, none longer than 5 characters |
+| `location` | 0 or 1 | a display label for the place, plain text |
 | `alt` | 0 or 1 | NIP-31 |
 
 - `content` is the description, plain text.
@@ -3227,6 +3257,8 @@ A listing for NIP-CO's example Order connection:
 - A wallet ignores a listing whose type `t` is neither or both values, and ignores other summary values.
 - A wallet ignores a `hint` or `a` tag the listing's type does not take, a `hint` of an unknown payment kind
   and a `g` longer than 5 characters.
+- A lister SHOULD give a `g` of 3 or 4 characters. A wallet MUST NOT show a place more precisely than the
+  `g` it reads.
 - `hint` is shown as listed, never as terms.
 - A listing without `p` names no operator, and a wallet shows none.
 
@@ -3412,14 +3444,15 @@ To retire a listed Order connection or close a listed circle, a Hub, in this ord
 - A wallet MUST NOT merge listings of different `pubkey`. When several pubkeys list one `d`, it shows only a
   listing whose signer passed the check at tap, or none.
 
-**Untrusted text and images.** `title`, `content`, `image` and the string's TLV `3` are the lister's claims.
+**Untrusted text and images.** `title`, `location`, `content`, `image` and the string's TLV `3` are the lister's
+claims.
 
 - A wallet MUST draw its own marks, such as verified or warning, outside the lister's text.
 - It SHOULD strip check-mark look-alikes, bidirectional controls (U+202A–U+202E, U+2066–U+2069) and
-  zero-width characters from `title`, `content` and TLV `3`.
-- It SHOULD cap `title` and TLV `3` at 40 user-perceived characters (grapheme clusters) on one line, and
-  `content` at 280.
-- It MUST NOT render or open links in `title`, `content` or TLV `3`.
+  zero-width characters from `title`, `location`, `content` and TLV `3`.
+- It SHOULD cap `title`, `location` and TLV `3` at 40 user-perceived characters (grapheme clusters) on one
+  line, and `content` at 280.
+- It MUST NOT render or open links in `title`, `location`, `content` or TLV `3`.
 - It SHOULD load `image` only through a privacy proxy, or directly only after a tap or with the user's opt-in.
   Otherwise it shows an identicon of the node identity.
 - On the terms screen it SHOULD show TLV `3`, the label, beside the listing's `title`.

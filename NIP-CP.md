@@ -37,7 +37,7 @@ A Cash Pocket stores the cash tokens a wallet holds, and the bill-creating calls
   "content": "",
   "tags": [
     ["w", "<token-wallet-pubkey>"],
-    ["v", "1"],
+    ["rev", "1"],
     ["cash", "satscash1..."],
     ["amount", "21000"],
     ["chain", "bitcoin"],
@@ -55,7 +55,7 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
 
 | tag | a held token | a `pending` entry | an entry written from a tombstone |
 |---|---|---|---|
-| `w`, `v`, `state`, `wrap_key` | yes | yes | yes |
+| `w`, `rev`, `state`, `wrap_key` | yes | yes | yes |
 | `amount`, `chain` | yes | yes | yes |
 | `cash` | yes | no | no |
 | `identity` | yes | no | yes |
@@ -69,7 +69,7 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
 
 **Required tags**:
 - `w`: token wallet pubkey (TLV `0`), or the `request_id` for a `pending` entry and the `done` entry that closes it.
-- `v`: version, +1 on every change.
+- `rev`: revision, +1 on every change.
 - `cash`: the token.
   - An entry written from a tombstone (a lookup `done` whose `result` carries a tombstone in place of a bill's token) has no token: it leaves out `cash`, and leaves out `expires_at` when no answer gives it; it is always in a final state.
 - `amount`: milli-units (`msats` for `bitcoin`).
@@ -81,7 +81,7 @@ Which tags each kind of entry carries, at a glance, but each tag's own rule belo
   - It is required for a bill that expires, taken from the Hub's reply, `cash_status`, or a `9522` whose zap signature verifies (NIP-CZ rule 7), never from any other `9522`, whose `expires_at` the sender chose.
   - A bill that never expires has no `expires_at` tag; a `0` in a reply means never and is not stored.
 
-A `pending` entry carries `w`, `v`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device`, the call's `chain`, as `amount` the amount the call sends, a `secret` for each cash-mode bill the call makes, and for a `cash_order` to a `pubkey` or `connection_key` recipient an `order_key`, and for every `cash_order` its `notify`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
+A `pending` entry carries `w`, `rev`, `state`, `wrap_key`, `request_id`, `deadline`, `target` and `device`, the call's `chain`, as `amount` the amount the call sends, a `secret` for each cash-mode bill the call makes, and for a `cash_order` to a `pubkey` or `connection_key` recipient an `order_key`, and for every `cash_order` its `notify`. It leaves out `cash`, `identity` and `expires_at`. Its `w` equals its `request_id`.
 
 A `cash_withdraw` pending entry also carries its `notify`, `address` and `quote`, its `receipt` once received, and for a cash-mode slice the secret behind its `remint_commitment` as `secret`.
 
@@ -120,7 +120,7 @@ For example, a `pending` entry for a split that sends 5000 to a cash-mode identi
   "content": "",
   "tags": [
     ["w", "00112233445566778899aabbccddeeff"],
-    ["v", "1"],
+    ["rev", "1"],
     ["state", "pending", "1760000000"],
     ["request_id", "00112233445566778899aabbccddeeff"],
     ["deadline", "1760000300"],
@@ -140,7 +140,7 @@ For example, a `pending` entry for a split that sends 5000 to a cash-mode identi
 
 | what | as | fields |
 |---|---|---|
-| every integer | unsigned decimal ASCII with no leading zeros (`0` for zero) | `v`, `amount`, `deadline`, `expires_at` and the `state` check time |
+| every integer | unsigned decimal ASCII with no leading zeros (`0` for zero) | `rev`, `amount`, `deadline`, `expires_at` and the `state` check time |
 | every hex value | lowercase | `w`, `request_id`, `target`, `device`, `wrap_key`, `secret`, `mint`, `source` and the keys in `identity` |
 
 `mint` is a Minter as NIP-CZ defines it: a 33-byte compressed pubkey, 66 hex characters.
@@ -171,7 +171,7 @@ A wallet SHOULD write each wrap to at least 2 relays, read it back before treati
   | one made for the user's own identity, such as a remainder | added |
   | a cash-mode bill whose secret it holds and does not hand on | added, carrying its `secret` from the pending entry |
   | a bill made for someone else | none |
-  | a bill transferred in place to the user | the wallet rewrites its entry at the next `v`, with its new `identity` and its new `secret` if any, since that bill keeps its `w` |
+  | a bill transferred in place to the user | the wallet rewrites its entry at the next `rev`, with its new `identity` and its new `secret` if any, since that bill keeps its `w` |
 
   Any other reply:
 
@@ -239,9 +239,9 @@ stateDiagram-v2
   - At `cancelled` it adds an entry for the re-minted bill, carrying the `secret`, then marks the pending entry `done`.
   - Once the payout is final it SHOULD rewrite the `done` entry without `address`, `quote` and `receipt`.
 - **Unusable Hubs**: NIP-CASH requires every Hub to serve `cash_lookup` and announce `max_request_age`. A wallet MUST NOT send a bill-creating call to a Hub that announces no `max_request_age`, or one NIP-CASH does not allow.
-- **Close** a pending entry by publishing it at the next `v` in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
-- **Versions**: every write for a `w` uses the highest `v` seen for that `w` plus 1.
-- **Change** an entry by publishing a new wrap with the next `v`, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
+- **Close** a pending entry by publishing it at the next `rev` in state `done`, then deleting the old wrap as for any change; never by deletion alone. A wallet MUST NOT remove the entries of a call's source bill(s), with any `secret`, until the pending entry is `done`.
+- **Versions**: every write for a `w` uses the highest `rev` seen for that `w` plus 1.
+- **Change** an entry by publishing a new wrap with the next `rev`, then deleting the previous wrap with a NIP-09 kind `5` signed by that wrap's `wrap_key`. The deletion's `created_at` is randomized like the wraps'. A wallet MAY batch deletions at a random later time.
 - **Remove** an entry by deleting its wrap. A wallet MAY first keep it for up to 30 days in a final state (`spent`, `expired`, `reclaimed`, `done`).
 - **Expiration**: a wallet MAY set a NIP-40 `expiration` on the gift wrap: `expires_at` plus a grace period (e.g. 30 days), rounded up to the week plus a random number of days. It still deletes the wrap itself, since relays may ignore NIP-40.
 
@@ -250,8 +250,8 @@ stateDiagram-v2
 - **Full sync**: `{"kinds": [1059], "#p": ["<user-pubkey>"]}`, then unwrap and keep rumors of kind `9525` whose seal `pubkey` and rumor `pubkey` are both the user. Other wraps (DMs) are ignored. A wallet MUST discard any other `9525`.
 - **Incremental sync**: the same filter with `since` set to the last sync minus 2 days, since gift wraps carry randomized timestamps. Wraps already seen are skipped.
 - **Resolving**: per `w`, in this order:
-  1. a final state (`spent`, `expired`, `reclaimed`, `done`) wins only over entries whose `v` is less than or equal to its own; an entry with a higher `v`, written after a definitive `cash_status` result, supersedes it (a bill returned by an in-place transfer keeps its `w`);
-  2. otherwise the highest `v` wins;
+  1. a final state (`spent`, `expired`, `reclaimed`, `done`) wins only over entries whose `rev` is less than or equal to its own; an entry with a higher `rev`, written after a definitive `cash_status` result, supersedes it (a bill returned by an in-place transfer keeps its `w`);
+  2. otherwise the highest `rev` wins;
   3. on a tie, the latest rumor `created_at`;
   4. then the lowest rumor `id` as lowercase hex, which a rewrapped copy of the same rumor cannot change.
 
