@@ -167,8 +167,8 @@ Then:
   back to an older announcement when the newest one fails a check.
 - It does not show a `closed` announcement and offers nothing new through a `paused` one.
 - It MUST NOT show `title`, `content` or `website` as verified facts: they are the LSP's claims. It SHOULD strip
-  control and zero-width characters from them, cap `title` at 40 characters on one line, and never render
-  links in them.
+  control and zero-width characters from them, cap `title` at 40 characters on one line and `content` at
+  280, and never render links in them.
 - It SHOULD load `image` only after the user asks to.
 
 **Trust.** The user, not the announcement, decides which LSPs to use, and a client keeps that choice per node
@@ -181,7 +181,7 @@ reaches only the node that holds the key.
 **Live check.** When the user trusts an LSP, and before each purchase, a client:
 
 1. Connects to the node through one of its `addr` values.
-2. Asks LSPS0 `list_protocols`; every announced `protocol` must be listed.
+2. Asks LSPS0 `list_protocols`. When an announced `protocol` is not listed, the client does not use the LSP.
 3. Asks LSPS1 or LSPS2 `get_info` for the service it is about to use.
 
 The live answers decide. When they are worse for the user than the announced ones, the client SHOULD show
