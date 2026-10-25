@@ -2730,7 +2730,8 @@ What a decoder does with each fault, by the rules above:
 | an unrecognized type | ignores the entry |
 
 A client SHOULD render every bech32 credential this document, NIP-CO and NIP-CW define in uppercase in a QR
-code, which then fits the code's alphanumeric mode. A decoder lowercases the string first.
+code, which then fits the code's alphanumeric mode. A decoder accepts such a string all in lowercase or all in
+uppercase, lowercases it, and MUST refuse one that mixes the two, as BIP-173 requires.
 
 ### Relay Hints Are Mandatory
 
@@ -2829,9 +2830,8 @@ do so before committing any funds. No request parameter opts in or out.
   | `1` | `cash-mint:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>` |
   | `2` | `cash-zap:v1:<hrp>:<wallet_pubkey_hex>:<amount_millis>:<relay_hash>:<recipient>:<sender>:<target_hash>:<issued_at>:<expires_at>` |
 
-  `<hrp>` is the token's HRP in lowercase — bech32 is case-insensitive, and a decoder lowercases the whole
-  string before decoding — `<wallet_pubkey_hex>` its TLV `0` in lowercase hex, and `<amount_millis>` its
-  committed amount (TLV `6`) in decimal.
+  `<hrp>` is the token's HRP in lowercase, also for a token read in uppercase; `<wallet_pubkey_hex>` its TLV `0`
+  in lowercase hex; and `<amount_millis>` its committed amount (TLV `6`) in decimal.
 
   - Every integer in a payload is unsigned decimal ASCII with no leading zeros (`0` for zero); every hex value
     is lowercase.
