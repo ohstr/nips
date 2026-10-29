@@ -45,7 +45,7 @@ Any other platform works through an IA, which defines that platform's user-id fo
 
 A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, `_` and `-`, so it never contains `:`. An IA MUST NOT issue a `35522` whose `platform` is outside this format, and a client MUST NOT build or accept a ConnectionKey for one.
 
-A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. The steps a client applies:
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Every UTS #46 and NFC step below uses the Unicode 15.0.0 data, so that all clients accept and refuse the same domains. The steps a client applies:
 
 - **Trimmed** means leading and trailing ASCII whitespace removed.
 - **Lowercasing** is ASCII-only: only `A`–`Z` change.
