@@ -153,10 +153,11 @@ LSPS gives only during a purchase, such as an LSPS1 order's fee or LSPS2 `buy`'s
 A client checks an announcement in this order and ignores it at the first failure:
 
 1. The signature verifies against `pubkey`, and the kind is 10735.
-2. Every tag with a count of exactly 1 is present once, `addr` and `protocol` are present, and an
-   announcement with `protocol` `2` has an `lsps2_fee` tag.
+2. Every tag appears as often as its count allows, `addr` and `protocol` are present, and an announcement
+   with `protocol` `2` has an `lsps2_fee` tag.
 3. Every value has the form its table gives, and no `lsps1` option or `lsps5` field appears twice.
-4. `expiration` has not passed and is at most 30 days after `created_at`.
+4. `created_at` is at most 15 minutes ahead of the client's clock, and `expiration` has not passed and is at
+   most 30 days after `created_at`.
 5. `n` and `network` are a chain and network the client uses.
 
 Then:
@@ -164,7 +165,8 @@ Then:
 - A client ignores a tag this NIP does not define, an `lsps1` option or `lsps5` field it does not know, and an
   `lsps1`, `lsps2_fee` or `lsps5` tag whose `protocol` is missing.
 - It keeps only the newest announcement of each node and remembers the newest it has seen. It MUST NOT fall
-  back to an older announcement when the newest one fails a check.
+  back to an older announcement when the newest one fails a check. An announcement dated more than 15 minutes
+  ahead does not count as seen, so it cannot hide the node's later announcements.
 - It does not show a `closed` announcement and offers nothing new through a `paused` one.
 - It MUST NOT show `title`, `content` or `website` as verified facts: they are the LSP's claims. It SHOULD strip
   control and zero-width characters from them, cap `title` at 40 characters on one line and `content` at
