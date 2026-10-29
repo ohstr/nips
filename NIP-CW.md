@@ -781,8 +781,9 @@ the host's word alone:
 
 A Hub MUST check a member request in this order, and refuse it at the first step it fails:
 
-1. **Rotation served.** A Hub that does not serve rotation refuses every member request with
-   `NOT_IMPLEMENTED`.
+1. **Rotation served.** A Hub that serves rotation to none of its wallets refuses every member request with
+   `NOT_IMPLEMENTED`. A wallet created with a rotation delay keeps it for life, even after the Hub stops
+   offering rotation to new wallets.
 2. **The request itself.**
    - It passes §Identity Proof's checks 2 and 5 unchanged;
    - its `kind` is 23199;
