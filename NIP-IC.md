@@ -45,7 +45,7 @@ Any other platform works through an IA, which defines that platform's user-id fo
 
 A `<platform>` name is one or more of the characters `a`–`z`, `0`–`9`, `.`, `_` and `-`, so it never contains `:`. An IA MUST NOT issue a `35522` whose `platform` is outside this format, and a client MUST NOT build or accept a ConnectionKey for one.
 
-A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. The steps a client applies:
+A domain, the `dns` value or the part of an `email` after its last `@`, is written as IDNA A-labels (punycode, e.g. `xn--bcher-kva.example`), never as Unicode. Every UTS #46 and NFC step below uses the Unicode 15.0.0 data, so that all clients accept and refuse the same domains. The steps a client applies:
 
 - **Trimmed** means leading and trailing ASCII whitespace removed.
 - **Lowercasing** is ASCII-only: only `A`–`Z` change.
@@ -243,9 +243,11 @@ A client MUST NOT show a connection as **Verified** unless every check in step 3
    - it is a validly signed kind `35522` whose `pubkey` is an IA the client trusts;
    - its `d` and `platform` tags equal the `35521`'s `d` and `platform` tags;
    - its `p` tag equals the `35521`'s `pubkey`;
-   - it is unexpired (NIP-40) and not deleted (NIP-09);
+   - it is unexpired (NIP-40) and not deleted (NIP-09) on the IA's relays;
    - its `created_at` is no more than 15 minutes ahead of the verifier's clock;
-   - it is the IA's current attestation: querying the IA's relay for `{"kinds": [35522], "authors": ["<ia-pubkey>"], "#d": ["<ConnectionKey>"]}` returns this same event ID.
+   - it is the IA's current attestation: querying the IA's relays for `{"kinds": [35522], "authors": ["<ia-pubkey>"], "#d": ["<ConnectionKey>"]}` returns this same event ID.
+
+   The IA's relays are the write relays of the IA's NIP-65 relay list. The relay hint is chosen by the claimant, so a verifier MUST NOT make these last two checks against the hint alone; when it cannot reach any of the IA's relays, the attestation does not count.
 4. A `35521` with at least one attestation that counts is **Verified**. A `35521` without one is **Spoofed**: someone published a claim that does not check out, which is distinct from *Unverified*.
 5. If trusted IAs' current attestations name different pubkeys for the same ConnectionKey, the attestation with the latest `created_at` wins; claims from every other pubkey are **Spoofed**. Only attestations that pass step 3 take part, so a verifier MUST ignore one dated more than 900 seconds ahead of its clock here too: a future-dated attestation cannot outrank every later re-verification.
 

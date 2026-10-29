@@ -419,6 +419,9 @@ other item.
 | `expired` | the window ended and nothing was seen |
 | `closed` | an on-chain order whose window ended after a payment was seen; later payments still mint |
 
+A Hub MUST NOT report `open` once `pay_by` has passed: until it has ended the window, it refuses a lookup of
+the order with `INTERNAL`, which the client retries.
+
 A Lightning order is `minted` or `expired` for good once it reaches either. An on-chain order in `closed` may
 gain bills later.
 
