@@ -15,6 +15,7 @@ Nostr Improvement Proposals (NIPs) published by ohstr. Each NIP lists in its hea
 | [NIP-IC](./NIP-IC.md) | Identity Connection: Web Identity Linking | `35521`, `35522` | `draft` |
 | [NIP-LS](./NIP-LS.md) | Local Signer: NIP-46 over a Unix Socket | — | `draft` |
 | [NIP-LSP](./NIP-LSP.md) | Lightning Service Provider Announcement | `10735` | `draft` |
+| [NIP-PF](./NIP-PF.md) | Poll Forms | `1019`, `1069`, `1070` | `draft` |
 
 ## How they fit together
 
@@ -33,6 +34,7 @@ flowchart LR
     CASH -.-> IC
     LS[NIP-LS<br/>Local Signer]
     LSP[NIP-LSP<br/>LSP Announcement]
+    PF[NIP-PF<br/>Poll Forms]
 ```
 
 A solid arrow means "depends on". A dotted arrow points to NIP-IC, which defines the Web Identities these
