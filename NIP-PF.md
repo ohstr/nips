@@ -7,7 +7,7 @@ Poll Forms
 `draft` `optional`
 
 **Depends on**: [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) (Gift Wrap), [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) (Expiration Timestamp)
-**Related**: [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) (Polls), [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) (Relay-based Groups), [NIP-31](https://github.com/nostr-protocol/nips/blob/master/31.md) (Unknown Events), [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) (Event Deletion Request), [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) (Relay List Metadata)
+**Related**: [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) (Polls), [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) (Private Direct Messages), [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) (Relay-based Groups), [NIP-31](https://github.com/nostr-protocol/nips/blob/master/31.md) (Unknown Events), [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md) (Event Deletion Request), [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) (Relay List Metadata)
 
 ## Abstract
 
@@ -256,7 +256,7 @@ its id. A response is wrapped to the author, and to every `p` pubkey if `results
 small groups; large ones use a NIP-29 group. The result is wrapped to every `p` pubkey of the form. `e`
 tags hold rumor ids.
 
-A wrap goes to the receiver's `kind:10050` relays, and the sender SHOULD wrap a copy to itself. A wrapped
+A wrap goes to the receiver's `kind:10050` relays (NIP-17), and the sender SHOULD wrap a copy to itself. A wrapped
 event counts only if the rumor's `pubkey` equals the seal's signer.
 
 ## Relays
