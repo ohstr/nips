@@ -23,14 +23,16 @@ Tags are read at fixed positions, in any order.
 
 ## Shared rules
 
-### Recommendations and required notes
+### Recommendations, required notes and details
 
 | tag | meaning |
 |---|---|
 | `["rec", <option id>]` | the author recommends this option; repeatable |
 | `["noteRequired", <option id>]` | choosing this option requires a note; repeatable |
+| `["detail", <option id>, <text>]` | what choosing this option does |
 
-A `rec` or `noteRequired` tag naming no option of the event is ignored.
+A `rec`, `noteRequired` or `detail` tag naming no option of the event is ignored. A client shows an
+option's `detail` with it where the choice is made; tallies and results show labels only.
 
 ### Notes
 
@@ -45,8 +47,9 @@ A note that is empty after trimming whitespace is no note.
 
 ### Text
 
-Titles, questions, labels, context, notes and answers are plain text. A client shows them without markup
-and loads no media from them. A client SHOULD keep each note and answer under 1000 characters.
+Titles, questions, labels, details, context, notes and answers are plain text. A client shows them without
+markup and loads no media from them. A client SHOULD keep each detail, note and answer under 1000
+characters.
 
 ### Expiration
 
@@ -61,13 +64,14 @@ Private forms SHOULD carry an `expiration`.
 ## Polls (`kind:1068`)
 
 Use a poll when NIP-88 clients should count it, a form otherwise. A poll MAY carry `rec`, `noteRequired`,
-`expiration` and one `why` tag:
+`detail`, `expiration` and one `why` tag:
 
 ```
 ["why", <one sentence>]
 ```
 
-`why` is the reason for the `rec` options. A `singlechoice` poll SHOULD have at most one `rec` option.
+`why` is the reason for the `rec` options. A `singlechoice` poll SHOULD have at most one `rec` option. An
+option with more than one `detail` shows none.
 
 A client MUST select and count votes as NIP-88 does; these tags and notes never invalidate a vote NIP-88
 accepts. Notes are read only from the `response` tags NIP-88 counts and are not counted.
@@ -88,7 +92,7 @@ the title.
 | `["optional", <index>]` | question `<index>` may be left unanswered |
 | `["min", <index>, <value>]`, `["max", <index>, <value>]` | bounds of a `number`, `date` or `time` question |
 | `["default", <index>, <value>]` | applied if no outcome is reached; repeatable for `multiplechoice` |
-| `["rec", <id>]`, `["noteRequired", <id>]` | see Shared rules |
+| `["rec", <id>]`, `["noteRequired", <id>]`, `["detail", <id>, <text>]` | see Shared rules |
 | `["context", <text>]` | background for the responder |
 | `["e", <event id>]`, `["a", <coordinate>]` | the form's subject; repeatable |
 | `["p", <pubkey>, <relay>, <role>]` | an addressed pubkey; `<role>` is `responder` (default) or `observer`; repeatable |
@@ -137,7 +141,7 @@ A form is valid when:
 
 - it has at least one `question`, with unique indexes without gaps;
 - every option names an existing choice question; each choice question has an option and no other
-  question has one; option ids are unique;
+  question has one; option ids are unique; an option has at most one `detail`;
 - every index named by `optional`, `min`, `max` or `default` exists;
 - `min`, `max` and `default` match their question's type, and `min` ≤ `max`;
 - a question other than `multiplechoice` has at most one `default`;
@@ -301,6 +305,8 @@ see wrapped votes. Clients without this NIP show a form's `alt`.
     ["option", "restart", "Restart now", "0"],
     ["option", "wait", "Wait", "0"],
     ["option", "other", "Something else", "0"],
+    ["detail", "restart", "Drops in-flight requests; the service is back in about 40 seconds."],
+    ["detail", "wait", "Changes nothing now; this form's default if no outcome is reached."],
     ["rec", "restart"],
     ["noteRequired", "other"],
     ["default", "0", "wait"],
