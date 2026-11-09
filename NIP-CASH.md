@@ -140,6 +140,7 @@ Every refusal below uses a code from §Errors.
 | `23191` | ephemeral | a fresh key used once, for the Hub; authenticated by the reply key | Private response |
 | `23192` | ephemeral | the slice's registered identity (none for a bearer item) | Item proof, one per item |
 | `23193` | ephemeral | the bill's connection secret | Bill proof, one per item |
+| `23200` | ephemeral | the bill's connection secret | Pre-Authorisation grant; a named delegate presents it in place of a bill proof |
 | `23187` | ephemeral | the Hub's node identity | Withdraw quote; never published |
 | `23188` | ephemeral | the Hub's node identity | Withdraw receipt; never published |
 | `31190` | addressable | the Hub's node identity | Offer listing |
@@ -2369,6 +2370,69 @@ Without possession the Hub MUST omit.
 
 A bill proof is not a spending credential and not an entitlement: it proves only that the bill was given to
 the sender, never that any slice is theirs.
+
+### Pre-Authorisation (kind 23200)
+
+A holder MAY delegate limited authority over a bill to another key, so a delegate can act on the bill
+**without** being given the bill's connection secret. The delegation is a **grant**: a kind-23200 event
+signed with the bill's **connection secret** — the same key that signs a kind-23193 bill proof — so a Hub
+recovers the same connection pubkey it already checks against the bill.
+
+```jsonc
+{
+  "kind": 23200,
+  "pubkey": "<the bill's connection pubkey>",
+  "created_at": 1700000000,
+  "content": "",
+  "tags": [
+    ["delegate", "<x-only pubkey the grant authorises>"],
+    ["d", "<the bill's wallet pubkey — the item's target>"],
+    ["h", "<the Hub's x-only identity>"],
+    ["m", "cash_status"],
+    ["expiration", "<unix seconds the grant is valid until>"],
+    ["max", "<optional: amount cap, in the bill's base unit>"],
+    ["su", "1"]
+  ],
+  "sig": "<signature by the connection secret>"
+}
+```
+
+`d`, `h` and `m` bind the grant to one bill, one Hub and one method, with the same encodings as a kind-23192
+proof's same-named tags. `delegate` names the one key the grant authorises. `expiration` is the grant's own
+deadline. `max` and `su` are optional. `content` MUST be empty.
+
+Unlike a proof, a grant binds **no envelope nonce and no params hash**, so it is reusable across the
+delegate's own envelopes within its lifetime: one grant lets an accountant poll a bill, or a payer pull up
+to a cap, over many requests. Its authority is bounded by `expiration` alone.
+
+**A Hub accepts a grant IN PLACE OF a bill proof, and only then.** An item carries either a bill proof or a
+grant, never both. When an item carries a grant, the Hub:
+
+1. verifies the grant's signature, that its `d`/`h`/`m` match the item's target, this Hub and the item's
+   method, and that `expiration` is in the future — every structural check before the signature, as for a
+   proof;
+2. verifies the grant's signer is a live connection of the target bill, exactly as it checks a bill proof's
+   signer;
+3. **requires the item's own kind-23192 slice proof to be signed by the key named in `delegate`.** This is
+   the load-bearing rule: without it a leaked grant would be a second bearer secret, usable by anyone who
+   obtained it. A grant with no slice proof to bind it authorises nothing.
+
+The delegate NEED NOT hold a slice of the bill — the grant is its authority, not slice ownership.
+
+**`max` and the method.** A grant with `max` absent or `0` authorises **read methods only** (`cash_status`,
+`cash_withdraw_quote`): it conveys no authority to move value. A grant with `max` greater than zero MAY
+authorise a value method, and a Hub that honours one MUST NOT let the delegate move more than `max`. A Hub
+MAY decline to honour a grant for any method (answering with silence, below); which value methods a Hub
+serves under a grant is Hub policy.
+
+**`su` (single use).** A grant tagged `["su","1"]` MAY be redeemed only once. A Hub that honours single-use
+grants MUST record each by its event id and refuse a second use. A grant without `su` is reusable within its
+lifetime.
+
+**A grant that fails is answered with silence, never an error.** A malformed or expired grant, a signer that
+does not hold the bill, or a slice proof not signed by the delegate are each a failure of possession, so
+§Bill Proofs' rule applies: without possession the Hub MUST omit. An error would tell a grant thief why
+their grant was refused.
 
 ### Responses (kind 23191)
 
